@@ -32,6 +32,7 @@ import (
 	cliproxysession "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/session"
 
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
+	"github.com/tidwall/gjson"
 )
 
 func (s *relayServer) requireAPIKey(c *gin.Context) (*apiKeySpec, bool) {
@@ -875,7 +876,34 @@ func (s *relayServer) handleNonStream(c *gin.Context, body []byte, model string,
 	if len(providers) == 0 {
 		providers = executionProviders()
 	}
-	resp, err := s.runtime.Execute(relayContext(c), providers, req, opts)
+	var resp cliproxyexecutor.Response
+	var err error
+	for {
+		resp, err = s.runtime.Execute(relayContext(c), providers, req, opts)
+		if (err != nil && s.isAutoRetryWhenOverload() && isOverloadError(err)) ||
+			(err == nil && s.isAutoRetryWhenOverload() && isPayloadOverload(resp.Payload)) {
+			s.clearOverloadCooldowns()
+			errDesc := ""
+			if err != nil {
+				errDesc = err.Error()
+			} else {
+				errDesc = string(resp.Payload)
+			}
+			s.emitExecutorDiagnostic(c, "executor_overload_retry", model, "execute", startedAt, errDesc)
+			retryTimer := time.NewTimer(1500 * time.Millisecond)
+			select {
+			case <-relayContext(c).Done():
+				retryTimer.Stop()
+				stopWaitLogger()
+				s.emitExecutorDiagnostic(c, "executor_failed", model, "execute", startedAt, relayContext(c).Err().Error())
+				s.writeExecutorError(c, relayContext(c).Err())
+				return
+			case <-retryTimer.C:
+				continue
+			}
+		}
+		break
+	}
 	stopWaitLogger()
 	if err != nil {
 		s.emitExecutorDiagnostic(c, "executor_failed", model, "execute", startedAt, err.Error())
@@ -895,6 +923,57 @@ func (s *relayServer) handleNonStream(c *gin.Context, body []byte, model string,
 	c.Data(http.StatusOK, contentType, resp.Payload)
 }
 
+func hasMeaningfulStreamOutput(payload []byte) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	trimmed := bytes.TrimSpace(payload)
+	if bytes.HasPrefix(trimmed, []byte(":")) {
+		return false
+	}
+	raw := trimmed
+	if bytes.HasPrefix(raw, []byte("data:")) {
+		raw = bytes.TrimSpace(raw[5:])
+	}
+	if bytes.Equal(raw, []byte("[DONE]")) {
+		return false
+	}
+	if !bytes.HasPrefix(raw, []byte("{")) {
+		return len(raw) > 0
+	}
+	if isPayloadOverload(raw) {
+		return false
+	}
+	eventType := gjson.GetBytes(raw, "type").String()
+	if eventType == "response.created" || eventType == "response.in_progress" {
+		return false
+	}
+	if eventType != "" {
+		if strings.HasPrefix(eventType, "response.output") ||
+			strings.HasPrefix(eventType, "response.content") ||
+			strings.HasPrefix(eventType, "response.reasoning") ||
+			strings.HasPrefix(eventType, "response.function_call") ||
+			eventType == "response.completed" || eventType == "response.done" {
+			return true
+		}
+	}
+	if gjson.GetBytes(raw, "choices.0.delta.content").String() != "" ||
+		gjson.GetBytes(raw, "choices.0.delta.reasoning_content").String() != "" ||
+		gjson.GetBytes(raw, "choices.0.delta.tool_calls").Exists() {
+		return true
+	}
+	if eventType == "content_block_start" || eventType == "content_block_delta" {
+		return true
+	}
+	if gjson.GetBytes(raw, "delta.text").String() != "" || gjson.GetBytes(raw, "delta.thinking").String() != "" {
+		return true
+	}
+	if gjson.GetBytes(raw, "choices.0.delta.role").Exists() && !gjson.GetBytes(raw, "choices.0.delta.content").Exists() {
+		return false
+	}
+	return true
+}
+
 func (s *relayServer) handleStream(c *gin.Context, body []byte, model string, sourceFormat sdktranslator.Format, alt string, providers []string) {
 	req, opts := buildExecutorRequest(c, body, model, sourceFormat, alt, true)
 	if len(providers) == 0 {
@@ -903,30 +982,72 @@ func (s *relayServer) handleStream(c *gin.Context, body []byte, model string, so
 	startedAt := time.Now()
 	timeouts := s.streamTimeoutsForRequest(c.Request, body, model)
 	immediateSSE := s.manifest != nil && s.manifest.ImmediateSSEResponse
-	var immediateFlusher http.Flusher
-	if immediateSSE {
-		flusher, ok := c.Writer.(http.Flusher)
-		if !ok {
-			writeAPIError(c, http.StatusInternalServerError, "streaming not supported", "streaming_not_supported")
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		writeAPIError(c, http.StatusInternalServerError, "streaming not supported", "streaming_not_supported")
+		return
+	}
+
+	headersSent := false
+	ensureSSEHeaders := func(upstreamHeaders http.Header) {
+		if headersSent {
 			return
 		}
 		setEventStreamHeaders(c.Writer.Header())
+		if upstreamHeaders != nil {
+			writeUpstreamHeaders(c.Writer.Header(), upstreamHeaders)
+		}
 		c.Status(http.StatusOK)
+		headersSent = true
+	}
+
+	if immediateSSE {
+		ensureSSEHeaders(nil)
 		_, _ = c.Writer.Write([]byte(": accepted\n\n"))
 		flusher.Flush()
-		immediateFlusher = flusher
 	}
+
 	s.emitExecutorDiagnostic(c, "executor_started", model, "execute_stream", startedAt, "")
 	stopWaitLogger := s.startExecutorWaitLogger(c, model, "execute_stream", startedAt)
 	streamCtx, cancelStream := context.WithCancel(relayContext(c))
 	defer cancelStream()
-	result, err := s.executeStreamWithOpenTimeout(c, streamCtx, providers, req, opts, model, startedAt, timeouts.open)
+
+	// Initial stream acquisition with overload retry loop
+	var result *cliproxyexecutor.StreamResult
+	var err error
+	for {
+		result, err = s.executeStreamWithOpenTimeout(c, streamCtx, providers, req, opts, model, startedAt, timeouts.open)
+		if (err != nil && s.isAutoRetryWhenOverload() && isOverloadError(err)) ||
+			(err == nil && (result == nil || result.Chunks == nil) && s.isAutoRetryWhenOverload()) {
+			s.clearOverloadCooldowns()
+			errDesc := "stream unavailable"
+			if err != nil {
+				errDesc = err.Error()
+			}
+			s.emitExecutorDiagnostic(c, "stream_overload_retry", model, "execute_stream", startedAt, errDesc)
+			ensureSSEHeaders(nil)
+			_, _ = c.Writer.Write([]byte(": keep-alive\n\n"))
+			flusher.Flush()
+			retryTimer := time.NewTimer(1500 * time.Millisecond)
+			select {
+			case <-c.Request.Context().Done():
+				retryTimer.Stop()
+				stopWaitLogger()
+				s.emitExecutorDiagnostic(c, "stream_client_gone", model, "execute_stream", startedAt, c.Request.Context().Err().Error())
+				return
+			case <-retryTimer.C:
+				continue
+			}
+		}
+		break
+	}
 	stopWaitLogger()
+
 	if err != nil {
 		s.emitExecutorDiagnostic(c, "executor_failed", model, "execute_stream", startedAt, err.Error())
-		if immediateSSE {
+		if headersSent {
 			writeStreamTerminalErrorForFormat(c, err, sourceFormat)
-			immediateFlusher.Flush()
+			flusher.Flush()
 			return
 		}
 		s.writeExecutorError(c, err)
@@ -934,26 +1055,16 @@ func (s *relayServer) handleStream(c *gin.Context, body []byte, model string, so
 	}
 	if result == nil || result.Chunks == nil {
 		s.emitExecutorDiagnostic(c, "executor_failed", model, "execute_stream", startedAt, "upstream stream is unavailable")
-		if immediateSSE {
+		if headersSent {
 			writeStreamTerminalErrorForFormat(c, relayStatusError{status: http.StatusBadGateway, message: "upstream stream is unavailable"}, sourceFormat)
-			immediateFlusher.Flush()
+			flusher.Flush()
 		} else {
 			writeAPIError(c, http.StatusBadGateway, "upstream stream is unavailable", "bad_gateway")
 		}
 		return
 	}
-	s.emitExecutorDiagnostic(c, "stream_opened", model, "execute_stream", startedAt, "")
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		writeAPIError(c, http.StatusInternalServerError, "streaming not supported", "streaming_not_supported")
-		return
-	}
 
-	if !immediateSSE {
-		setEventStreamHeaders(c.Writer.Header())
-		writeUpstreamHeaders(c.Writer.Header(), result.Headers)
-		c.Status(http.StatusOK)
-	}
+	s.emitExecutorDiagnostic(c, "stream_opened", model, "execute_stream", startedAt, "")
 
 	framer := newRelayStreamFramer(sourceFormat, requestPath(c.Request))
 	keepAlive := streamKeepAliveInterval(s.cfg)
@@ -965,6 +1076,8 @@ func (s *relayServer) handleStream(c *gin.Context, body []byte, model string, so
 		defer ticker.Stop()
 	}
 
+	streamCommitted := false
+	var pendingHandshakeChunks [][]byte
 	received := 0
 	endReason := "done"
 	firstChunkLogged := false
@@ -973,6 +1086,49 @@ func (s *relayServer) handleStream(c *gin.Context, body []byte, model string, so
 	defer func() {
 		s.emitStreamCompleted(c, model, received, endReason)
 	}()
+
+	acquireNewStreamOnOverload := func(errDesc string) (*cliproxyexecutor.StreamResult, bool) {
+		s.clearOverloadCooldowns()
+		s.emitExecutorDiagnostic(c, "stream_overload_retry", model, "stream_loop", startedAt, errDesc)
+		ensureSSEHeaders(nil)
+		_, _ = c.Writer.Write([]byte(": keep-alive\n\n"))
+		flusher.Flush()
+		pendingHandshakeChunks = nil
+
+		for {
+			retryTimer := time.NewTimer(1500 * time.Millisecond)
+			select {
+			case <-c.Request.Context().Done():
+				retryTimer.Stop()
+				endReason = "client_gone"
+				return nil, false
+			case <-retryTimer.C:
+			}
+
+			s.clearOverloadCooldowns()
+			newResult, retryErr := s.executeStreamWithOpenTimeout(c, streamCtx, providers, req, opts, model, startedAt, timeouts.open)
+			if retryErr != nil {
+				if isOverloadError(retryErr) {
+					s.clearOverloadCooldowns()
+					s.emitExecutorDiagnostic(c, "stream_overload_retry", model, "stream_loop", startedAt, retryErr.Error())
+					_, _ = c.Writer.Write([]byte(": keep-alive\n\n"))
+					flusher.Flush()
+					continue
+				}
+				endReason = "stream_error"
+				s.emitExecutorDiagnostic(c, "stream_error", model, "stream_loop", startedAt, retryErr.Error())
+				writeStreamTerminalErrorForFormat(c, retryErr, sourceFormat)
+				flusher.Flush()
+				return nil, false
+			}
+			if newResult != nil && newResult.Chunks != nil {
+				return newResult, true
+			}
+			s.clearOverloadCooldowns()
+			_, _ = c.Writer.Write([]byte(": keep-alive\n\n"))
+			flusher.Flush()
+		}
+	}
 
 	for {
 		select {
@@ -990,6 +1146,7 @@ func (s *relayServer) handleStream(c *gin.Context, body []byte, model string, so
 			s.emitExecutorDiagnostic(c, "stream_client_gone", model, "stream_loop", startedAt, c.Request.Context().Err().Error())
 			return
 		case <-tickerC:
+			ensureSSEHeaders(nil)
 			if _, err := c.Writer.Write([]byte(": keep-alive\n\n")); err != nil {
 				endReason = "write_failed"
 				s.emitExecutorDiagnostic(c, "stream_write_failed", model, "stream_loop", startedAt, err.Error())
@@ -1008,6 +1165,14 @@ func (s *relayServer) handleStream(c *gin.Context, body []byte, model string, so
 			}
 			idleTimer.Reset(timeouts.idle)
 			if !ok {
+				if !streamCommitted && len(pendingHandshakeChunks) > 0 {
+					ensureSSEHeaders(result.Headers)
+					for _, b := range pendingHandshakeChunks {
+						_ = framer.Write(c.Writer, b)
+						received++
+					}
+					pendingHandshakeChunks = nil
+				}
 				if err := framer.Close(c.Writer); err != nil {
 					endReason = "write_failed"
 					s.emitExecutorDiagnostic(c, "stream_write_failed", model, "stream_loop", startedAt, err.Error())
@@ -1017,6 +1182,15 @@ func (s *relayServer) handleStream(c *gin.Context, body []byte, model string, so
 				return
 			}
 			if chunk.Err != nil {
+				if !streamCommitted && s.isAutoRetryWhenOverload() && isOverloadError(chunk.Err) {
+					newResult, acquired := acquireNewStreamOnOverload(chunk.Err.Error())
+					if !acquired {
+						return
+					}
+					result = newResult
+					idleTimer.Reset(timeouts.idle)
+					continue
+				}
 				endReason = "stream_error"
 				s.emitExecutorDiagnostic(c, "stream_error", model, "stream_loop", startedAt, chunk.Err.Error())
 				writeStreamTerminalErrorForFormat(c, chunk.Err, sourceFormat)
@@ -1026,6 +1200,41 @@ func (s *relayServer) handleStream(c *gin.Context, body []byte, model string, so
 			if len(chunk.Payload) == 0 {
 				continue
 			}
+			if !streamCommitted && s.isAutoRetryWhenOverload() && isPayloadOverload(chunk.Payload) {
+				newResult, acquired := acquireNewStreamOnOverload(string(chunk.Payload))
+				if !acquired {
+					return
+				}
+				result = newResult
+				idleTimer.Reset(timeouts.idle)
+				continue
+			}
+
+			// If the stream hasn't emitted meaningful output yet, check if this chunk is meaningful output
+			if !streamCommitted {
+				if hasMeaningfulStreamOutput(chunk.Payload) {
+					// First meaningful output chunk!
+					ensureSSEHeaders(result.Headers)
+					for _, handshakePayload := range pendingHandshakeChunks {
+						if err := framer.Write(c.Writer, handshakePayload); err != nil {
+							endReason = "write_failed"
+							s.emitExecutorDiagnostic(c, "stream_write_failed", model, "stream_loop", startedAt, err.Error())
+							return
+						}
+						received++
+					}
+					pendingHandshakeChunks = nil
+					streamCommitted = true
+				} else {
+					// Buffer handshake metadata event (e.g. response.created, response.in_progress)
+					pendingHandshakeChunks = append(pendingHandshakeChunks, chunk.Payload)
+					ensureSSEHeaders(result.Headers)
+					_, _ = c.Writer.Write([]byte(": keep-alive\n\n"))
+					flusher.Flush()
+					continue
+				}
+			}
+
 			if !firstChunkLogged {
 				firstChunkLogged = true
 				s.emitExecutorDiagnostic(c, "stream_first_chunk", model, "stream_loop", startedAt, fmt.Sprintf("bytes=%d", len(chunk.Payload)))

@@ -39,3 +39,47 @@ func TestCapacityFailurePreservesUpstreamHTTPAndStreamErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestMeaningfulStreamOutputAndOverloadDetection(t *testing.T) {
+	// Handshake events must NOT be treated as meaningful output
+	handshakeEvents := [][]byte{
+		[]byte(`{"type":"response.created","sequence_number":0,"response":{"id":"resp_1"}}`),
+		[]byte(`data: {"type":"response.created","sequence_number":0}`),
+		[]byte(`{"type":"response.in_progress","sequence_number":1}`),
+		[]byte(`data: {"type":"response.in_progress","sequence_number":1}`),
+		[]byte(`: keep-alive`),
+		[]byte(`data: [DONE]`),
+		[]byte(`{"choices":[{"index":0,"delta":{"role":"assistant"}}]}`),
+	}
+	for _, event := range handshakeEvents {
+		if hasMeaningfulStreamOutput(event) {
+			t.Fatalf("expected event %s to not be meaningful output", string(event))
+		}
+	}
+
+	// Output events MUST be treated as meaningful output
+	outputEvents := [][]byte{
+		[]byte(`{"type":"response.output_item.added","sequence_number":2}`),
+		[]byte(`{"type":"response.output_text.delta","delta":"Hello"}`),
+		[]byte(`{"type":"response.reasoning_summary_text.delta","delta":"Thinking..."}`),
+		[]byte(`{"choices":[{"index":0,"delta":{"content":"Hi"}}]}`),
+		[]byte(`{"choices":[{"index":0,"delta":{"reasoning_content":"Thought"}}]}`),
+		[]byte(`data: {"choices":[{"index":0,"delta":{"content":"World"}}]}`),
+		[]byte(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}`),
+	}
+	for _, event := range outputEvents {
+		if !hasMeaningfulStreamOutput(event) {
+			t.Fatalf("expected event %s to be meaningful output", string(event))
+		}
+	}
+
+	// Overload rejections
+	overloadPayload := []byte(`{"error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later.","param":null,"type":"service_unavailable_error"},"sequence_number":2}`)
+	if !isPayloadOverload(overloadPayload) {
+		t.Fatalf("expected overloadPayload to be recognized as overload")
+	}
+	if hasMeaningfulStreamOutput(overloadPayload) {
+		t.Fatalf("overloadPayload must not be treated as meaningful output")
+	}
+}
+
