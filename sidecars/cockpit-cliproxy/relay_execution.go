@@ -467,6 +467,15 @@ func isOverloadError(err error) bool {
 			return true
 		}
 	}
+	type httpStatusCoder interface {
+		HTTPStatus() int
+	}
+	if sc, ok := err.(httpStatusCoder); ok {
+		code := sc.HTTPStatus()
+		if code == http.StatusBadGateway || code == http.StatusServiceUnavailable || code == http.StatusTooManyRequests {
+			return true
+		}
+	}
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "server_is_overloaded") ||
 		strings.Contains(msg, "servers are currently overloaded") ||
@@ -495,5 +504,7 @@ func isPayloadOverload(payload []byte) bool {
 		bytes.Contains(lower, []byte("servers are currently overloaded")) ||
 		bytes.Contains(lower, []byte("service_unavailable_error")) ||
 		bytes.Contains(lower, []byte("model_at_capacity")) ||
-		bytes.Contains(lower, []byte("model is at capacity"))
+		bytes.Contains(lower, []byte("model is at capacity")) ||
+		bytes.Contains(lower, []byte("slow_down")) ||
+		bytes.Contains(lower, []byte("capacity_exceeded"))
 }

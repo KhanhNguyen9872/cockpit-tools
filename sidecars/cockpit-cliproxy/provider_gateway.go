@@ -927,28 +927,137 @@ func hasMeaningfulStreamOutput(payload []byte) bool {
 	if len(payload) == 0 {
 		return false
 	}
+	if isPayloadOverload(payload) {
+		return false
+	}
+
 	trimmed := bytes.TrimSpace(payload)
+	// If entire trimmed payload is an SSE comment or keepalive (e.g. ": keep-alive", ": accepted")
 	if bytes.HasPrefix(trimmed, []byte(":")) {
 		return false
 	}
-	raw := trimmed
-	if bytes.HasPrefix(raw, []byte("data:")) {
-		raw = bytes.TrimSpace(raw[5:])
+
+	// Split by newline to inspect each line in case this chunk contains multiple SSE lines
+	lines := bytes.Split(trimmed, []byte("\n"))
+	var dataBytes []byte
+	var eventName string
+	isSSE := false
+
+	for _, line := range lines {
+		l := bytes.TrimSpace(line)
+		if len(l) == 0 || bytes.HasPrefix(l, []byte(":")) {
+			continue
+		}
+		if bytes.HasPrefix(l, []byte("event:")) {
+			isSSE = true
+			eventName = strings.TrimSpace(string(l[6:]))
+			continue
+		}
+		if bytes.HasPrefix(l, []byte("data:")) {
+			isSSE = true
+			d := bytes.TrimSpace(l[5:])
+			if bytes.Equal(d, []byte("[DONE]")) {
+				continue
+			}
+			if len(d) > 0 {
+				dataBytes = d
+			}
+			continue
+		}
+		if bytes.HasPrefix(l, []byte("id:")) || bytes.HasPrefix(l, []byte("retry:")) {
+			isSSE = true
+			continue
+		}
 	}
-	if bytes.Equal(raw, []byte("[DONE]")) {
-		return false
+
+	// If this chunk had SSE lines:
+	if isSSE {
+		// If there is an event header indicating handshake, and no data yet:
+		if len(dataBytes) == 0 {
+			return false
+		}
+
+		if isPayloadOverload(dataBytes) {
+			return false
+		}
+
+		if gjson.GetBytes(dataBytes, "error").Exists() {
+			return false
+		}
+
+		if bytes.HasPrefix(dataBytes, []byte("{")) {
+			eventType := gjson.GetBytes(dataBytes, "type").String()
+			if eventType == "" && eventName != "" {
+				eventType = eventName
+			}
+
+			// Handshake events carrying no generated output
+			if eventType == "response.created" ||
+				eventType == "response.in_progress" ||
+				eventType == "codex.rate_limits" ||
+				eventType == "codex.response.metadata" ||
+				eventType == "message_start" ||
+				eventType == "ping" {
+				return false
+			}
+
+			// Output item added / output events
+			if strings.HasPrefix(eventType, "response.output") ||
+				strings.HasPrefix(eventType, "response.content") ||
+				strings.HasPrefix(eventType, "response.reasoning") ||
+				strings.HasPrefix(eventType, "response.function_call") ||
+				eventType == "response.completed" || eventType == "response.done" {
+				return true
+			}
+
+			// OpenAI Chat Completions delta
+			if gjson.GetBytes(dataBytes, "choices.0.delta.content").String() != "" ||
+				gjson.GetBytes(dataBytes, "choices.0.delta.reasoning_content").String() != "" ||
+				gjson.GetBytes(dataBytes, "choices.0.delta.tool_calls").Exists() {
+				return true
+			}
+
+			// OpenAI Chat Completions initial role event without content
+			if gjson.GetBytes(dataBytes, "choices.0.delta.role").Exists() &&
+				!gjson.GetBytes(dataBytes, "choices.0.delta.content").Exists() {
+				return false
+			}
+
+			// Anthropic content blocks
+			if eventType == "content_block_start" || eventType == "content_block_delta" {
+				return true
+			}
+			if gjson.GetBytes(dataBytes, "delta.text").String() != "" ||
+				gjson.GetBytes(dataBytes, "delta.thinking").String() != "" {
+				return true
+			}
+
+			// Any other recognized terminal / completion
+			if gjson.GetBytes(dataBytes, "choices.0.finish_reason").Exists() {
+				return true
+			}
+
+			return false
+		}
+
+		// Non-JSON data in SSE (e.g. plain text data)
+		return len(dataBytes) > 0
 	}
-	if !bytes.HasPrefix(raw, []byte("{")) {
-		return len(raw) > 0
-	}
-	if isPayloadOverload(raw) {
-		return false
-	}
-	eventType := gjson.GetBytes(raw, "type").String()
-	if eventType == "response.created" || eventType == "response.in_progress" {
-		return false
-	}
-	if eventType != "" {
+
+	// Not SSE format: check JSON or plain text
+	if bytes.HasPrefix(trimmed, []byte("{")) {
+		if isPayloadOverload(trimmed) || gjson.GetBytes(trimmed, "error").Exists() {
+			return false
+		}
+		eventType := gjson.GetBytes(trimmed, "type").String()
+		if eventType == "response.created" ||
+			eventType == "response.in_progress" ||
+			eventType == "codex.rate_limits" ||
+			eventType == "codex.response.metadata" ||
+			eventType == "message_start" ||
+			eventType == "ping" {
+			return false
+		}
 		if strings.HasPrefix(eventType, "response.output") ||
 			strings.HasPrefix(eventType, "response.content") ||
 			strings.HasPrefix(eventType, "response.reasoning") ||
@@ -956,22 +1065,27 @@ func hasMeaningfulStreamOutput(payload []byte) bool {
 			eventType == "response.completed" || eventType == "response.done" {
 			return true
 		}
-	}
-	if gjson.GetBytes(raw, "choices.0.delta.content").String() != "" ||
-		gjson.GetBytes(raw, "choices.0.delta.reasoning_content").String() != "" ||
-		gjson.GetBytes(raw, "choices.0.delta.tool_calls").Exists() {
-		return true
-	}
-	if eventType == "content_block_start" || eventType == "content_block_delta" {
-		return true
-	}
-	if gjson.GetBytes(raw, "delta.text").String() != "" || gjson.GetBytes(raw, "delta.thinking").String() != "" {
-		return true
-	}
-	if gjson.GetBytes(raw, "choices.0.delta.role").Exists() && !gjson.GetBytes(raw, "choices.0.delta.content").Exists() {
+		if gjson.GetBytes(trimmed, "choices.0.delta.content").String() != "" ||
+			gjson.GetBytes(trimmed, "choices.0.delta.reasoning_content").String() != "" ||
+			gjson.GetBytes(trimmed, "choices.0.delta.tool_calls").Exists() {
+			return true
+		}
+		if gjson.GetBytes(trimmed, "choices.0.delta.role").Exists() &&
+			!gjson.GetBytes(trimmed, "choices.0.delta.content").Exists() {
+			return false
+		}
+		if eventType == "content_block_start" || eventType == "content_block_delta" {
+			return true
+		}
+		if gjson.GetBytes(trimmed, "delta.text").String() != "" ||
+			gjson.GetBytes(trimmed, "delta.thinking").String() != "" {
+			return true
+		}
 		return false
 	}
-	return true
+
+	// Raw plain text streaming
+	return len(trimmed) > 0
 }
 
 func (s *relayServer) handleStream(c *gin.Context, body []byte, model string, sourceFormat sdktranslator.Format, alt string, providers []string) {
@@ -1210,8 +1324,8 @@ func (s *relayServer) handleStream(c *gin.Context, body []byte, model string, so
 				continue
 			}
 
-			// If the stream hasn't emitted meaningful output yet, check if this chunk is meaningful output
-			if !streamCommitted {
+			// If auto-retry on overload is enabled and the stream hasn't emitted meaningful output yet, buffer handshake metadata
+			if !streamCommitted && s.isAutoRetryWhenOverload() {
 				if hasMeaningfulStreamOutput(chunk.Payload) {
 					// First meaningful output chunk!
 					ensureSSEHeaders(result.Headers)
@@ -1229,10 +1343,11 @@ func (s *relayServer) handleStream(c *gin.Context, body []byte, model string, so
 					// Buffer handshake metadata event (e.g. response.created, response.in_progress)
 					pendingHandshakeChunks = append(pendingHandshakeChunks, chunk.Payload)
 					ensureSSEHeaders(result.Headers)
-					_, _ = c.Writer.Write([]byte(": keep-alive\n\n"))
-					flusher.Flush()
 					continue
 				}
+			} else if !streamCommitted {
+				ensureSSEHeaders(result.Headers)
+				streamCommitted = true
 			}
 
 			if !firstChunkLogged {
