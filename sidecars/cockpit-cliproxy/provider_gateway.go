@@ -1202,12 +1202,14 @@ func (s *relayServer) handleStream(c *gin.Context, body []byte, model string, so
 	}()
 
 	acquireNewStreamOnOverload := func(errDesc string) (*cliproxyexecutor.StreamResult, bool) {
+		streamCommitted = false
+		pendingHandshakeChunks = nil
+		firstChunkLogged = false
 		s.clearOverloadCooldowns()
 		s.emitExecutorDiagnostic(c, "stream_overload_retry", model, "stream_loop", startedAt, errDesc)
 		ensureSSEHeaders(nil)
 		_, _ = c.Writer.Write([]byte(": keep-alive\n\n"))
 		flusher.Flush()
-		pendingHandshakeChunks = nil
 
 		for {
 			retryTimer := time.NewTimer(1500 * time.Millisecond)
@@ -1296,7 +1298,7 @@ func (s *relayServer) handleStream(c *gin.Context, body []byte, model string, so
 				return
 			}
 			if chunk.Err != nil {
-				if !streamCommitted && s.isAutoRetryWhenOverload() && isOverloadError(chunk.Err) {
+				if s.isAutoRetryWhenOverload() && isOverloadError(chunk.Err) {
 					newResult, acquired := acquireNewStreamOnOverload(chunk.Err.Error())
 					if !acquired {
 						return
@@ -1314,7 +1316,7 @@ func (s *relayServer) handleStream(c *gin.Context, body []byte, model string, so
 			if len(chunk.Payload) == 0 {
 				continue
 			}
-			if !streamCommitted && s.isAutoRetryWhenOverload() && isPayloadOverload(chunk.Payload) {
+			if s.isAutoRetryWhenOverload() && isPayloadOverload(chunk.Payload) {
 				newResult, acquired := acquireNewStreamOnOverload(string(chunk.Payload))
 				if !acquired {
 					return

@@ -489,7 +489,11 @@ func isOverloadError(err error) bool {
 		strings.Contains(msg, "502") ||
 		strings.Contains(msg, "503") ||
 		strings.Contains(msg, "bad gateway") ||
-		strings.Contains(msg, "service unavailable") {
+		strings.Contains(msg, "service unavailable") ||
+		strings.Contains(msg, "auth_unavailable") ||
+		strings.Contains(msg, "cooling down") ||
+		strings.Contains(msg, "no account is currently schedulable") ||
+		strings.Contains(msg, "no auth available") {
 		return true
 	}
 	return false
