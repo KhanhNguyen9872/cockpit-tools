@@ -463,35 +463,13 @@ Every bit of support helps sustain open-source development. Thank you!
 
 ## Acknowledgments
 
-- Codex account-pool rotation, concurrent token-refresh persistence, failure handling before the first output, first-response timing and attempt traces, optional request snapshots, model reasoning defaults, and configuration import protection draw on [Codex-Manager](https://github.com/qxcnm/Codex-Manager) as design and implementation references.
-
-- Some account-import validation, gateway credential loading, and reliability improvements reference the retained source snapshot of [super-ai-tools](https://github.com/lihah111222333-cloud/super-ai-tools); see the [source and license notice](docs/third-party/super-ai-tools.md).
-
-- Codex proxy workspace navigation, subscription cards, current-node display, group/node menus, latency badges and sorting, native latency API calls, quick switching and subscription naming reference the interface and implementation in [Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev). This is design and implementation inspiration, not a runtime dependency or official partnership.
-- The short first-time proxy binding flow and current-node display for Codex accounts reference [Hiddify](https://github.com/hiddify/hiddify-app). This is interaction inspiration; its code and services are not integrated.
-- Codex proxy node filtering, sorting, latency tests and narrow-window layouts reference [FlClash](https://github.com/chen08209/FlClash). This is interaction inspiration; its code and services are not integrated.
-- Codex account proxies use [Mihomo](https://github.com/MetaCubeX/mihomo) as a separate process for supported Clash nodes and groups. Node options, nested groups and built-in blocking semantics, local connection-log APIs, health checks and failover design reference its official source and documentation. Users explicitly download or import the engine; the host installer does not bundle it. This does not imply an official partnership.
-
-- Proxy management navigation and account filtering draw on [Carbon Design System](https://carbondesignsystem.com/components/UI-shell-left-panel/usage/) and the [Tailscale admin console documentation](https://tailscale.com/docs/features/access-control/device-management/how-to/filter). These are design references, not component or service integrations.
-- [Linear](https://linear.app/now/behind-the-latest-design-refresh) and [Vercel Geist](https://vercel.com/geist/empty-state): references for visual hierarchy, consistent control sizing and empty-state guidance on Codex tool pages; no runtime integration.
-- The earlier Codex per-account proxy implementation and legacy configuration compatibility reference the official [sing-box](https://github.com/SagerNet/sing-box) configuration and process documentation. Future design for automatic URL testing and existing-connection handling also references its source; Mihomo remains the runtime engine. This does not imply an official partnership.
 - Antigravity account switching logic references: [Antigravity-Manager](https://github.com/lbjlaq/Antigravity-Manager)
-- The Codex API service integrates CLIProxyAPI; its Codex Live WebRTC/sideband support, Responses WebSocket state safety, canonical token accounting v2, Multi-Agent V2 compatibility, Grok `apply_patch` protocol handling, open-source account and OAuth handling, and account-pool error classification and recovery boundaries also informed Cockpit and the Grok CLI implementation: [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (MIT)
-- Grok icon shape references: [LobeHub/lobe-icons](https://github.com/lobehub/lobe-icons) (MIT)
-- Grok CLI task-usage querying and compatibility parsing direction references: [junhoyeo/tokscale](https://github.com/junhoyeo/tokscale) (MIT)
-- Grok CLI third-party BYOK and custom-model configuration formats follow the upstream implementation and documentation: [xai-org/grok-build](https://github.com/xai-org/grok-build)
-- Codex API service protocol compatibility direction references: [codex-proxy](https://github.com/icebear0828/codex-proxy)
-- Codex Agent Identity import, dynamic signing, task recovery, account backup-format compatibility, official-account window usage display (req / tokens / A$), proxy cancellation and response failure handling, and account-pool diagnostics and manual recovery design reference: [sub2api](https://github.com/Wei-Shaw/sub2api). API Service client compatibility, fingerprint, capacity-error, and request retry behavior follows CLIProxyAPI without separate Sub2API-style official-client restrictions or third-party-client exceptions. API-key authentication and account scoping remain unchanged; Agent Identity compatibility remains a local extension for now.
-- Codex local authentication storage formats, login credential recovery, Agent Identity runtime registration, the Ed25519 key format, the Responses client freeform tool-call (`custom_tool_call`) event semantics, Responses Lite request markers and parallel-tool constraints, and the response-lifecycle and generated-artifact handling direction for Pelican tests reference the official implementation: [openai/codex](https://github.com/openai/codex) (Apache-2.0). Pelican tests use direct chat requests, not the official client's complete coding-agent workflow.
-- Codex, Claude CLI, and Claude Desktop Gateway third-party provider presets, model mapping, and session JSONL usage aggregation direction reference: [CC Switch](https://github.com/farion1231/cc-switch)
-- Codex model catalog, frontend model display, loopback CDP diagnostics, official live-auth preservation strategy, and historical session provider, SQLite local catalog, and workspace-state repair direction reference: [CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus)
-- Codex usage dashboard, trend chart, and Studio-inspired interface design direction reference: [Antigravity Studio](https://github.com/yuzhiqiang1993/antigravity-studio)
-- Optional external-bridge compatibility verification follows the local integration records and configuration conventions of [Codex Web GPT](https://github.com/miuuyy/codex-chatgpt-web). It only preserves a valid bridge already installed by the user, without a runtime dependency or official partnership.
-- Codex managed-catalog experimental model display direction references: [gptsolwm](https://github.com/yynxxxxx/gptsolwm)
-- Claude optional sign-in helper runtime is based on: [Electron](https://github.com/electron/electron)
+- The Codex API service integrates CLIProxyAPI. Codex Live WebRTC/sideband support, Responses WebSocket state safety, canonical token accounting v2, Multi-Agent V2 compatibility, Grok CLI accounts and OAuth, Grok `apply_patch` protocol compatibility, and account-pool error classification and recovery boundaries reference its open-source implementation: [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (MIT)
+- Third-party provider presets and model mapping for Codex, Claude CLI, and Claude Desktop Gateway, along with the approach to aggregating actual usage from session JSONL files, reference: [CC Switch](https://github.com/farion1231/cc-switch)
+- The optional Claude sign-in helper runtime is based on: [Electron](https://github.com/electron/electron)
+- Codex account proxies use [Mihomo](https://github.com/MetaCubeX/mihomo) as a separate process for supported Clash nodes and groups. Configuration semantics for node options, nested groups, and built-in blocking policies, local connection-log APIs, health checks, and failover design reference its official source and documentation. Users explicitly download or import the engine; the host installer does not bundle it. This does not imply an official partnership.
 
-Thanks to the project author for their open-source contributions! If these projects have helped you, please give them a ⭐ Star to show your support!
-
+Thanks to the authors of these projects for their open-source contributions! If these projects have helped you, please give them a ⭐ Star to show your support!
 ---
 
 ## License

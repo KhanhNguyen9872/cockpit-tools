@@ -2,9 +2,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub const DEFAULT_CODEX_IMAGE_GENERATION_MODEL: &str = "gpt-image-2.5";
+pub const DEFAULT_MAX_ACCOUNT_CONCURRENCY: u16 = 2;
 
 fn default_image_generation_model() -> String {
     DEFAULT_CODEX_IMAGE_GENERATION_MODEL.to_string()
+}
+
+pub fn default_image_generation_models() -> Vec<String> {
+    vec!["gpt-image-2.5".to_string(), "gpt-image-2".to_string()]
 }
 
 fn is_false(value: &bool) -> bool {
@@ -218,6 +223,10 @@ fn default_max_retry_interval_ms() -> u64 {
 
 fn default_max_concurrent_image_requests() -> u16 {
     1
+}
+
+fn default_max_account_concurrency() -> u16 {
+    DEFAULT_MAX_ACCOUNT_CONCURRENCY
 }
 
 fn default_account_concurrency_wait_ms() -> u64 {
@@ -529,14 +538,23 @@ pub struct CodexLocalAccessCollection {
     pub image_generation_mode: CodexLocalAccessImageGenerationMode,
     #[serde(default = "default_image_generation_model")]
     pub image_generation_model: String,
+    #[serde(default = "default_image_generation_models")]
+    pub image_generation_models: Vec<String>,
+    #[serde(default)]
+    pub image_generation_deleted_models: Vec<String>,
+    #[serde(default)]
+    pub image_generation_model_catalog_revision: u64,
     /// None preserves the legacy image relay model without expanding account catalogs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_generation_main_model: Option<String>,
     #[serde(default)]
     pub image_generation_account_policies: HashMap<String, CodexLocalAccessImageGenerationPolicy>,
-    /// 生图转发账号池：生图请求只允许落到这些 OAuth 账号；为空表示不转发。
+    /// 生图转发账号池：生图请求只允许落到所选 OAuth / API Key 来源。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub image_generation_account_ids: Vec<String>,
+    /// 生图来源账号 ID → 用户明确选择的完整上游图片模型 ID。
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub image_generation_account_models: HashMap<String, String>,
     #[serde(default)]
     pub gateway_mode: CodexLocalAccessGatewayMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -593,8 +611,11 @@ pub struct CodexLocalAccessCollection {
     #[serde(default = "default_max_concurrent_image_requests")]
     pub max_concurrent_image_requests: u16,
     /// 账号并发数：同一账号同时允许的会话数；0 表示不限制。
-    #[serde(default)]
+    #[serde(default = "default_max_account_concurrency")]
     pub max_account_concurrency: u16,
+    /// Compatibility marker; existing saved concurrency limits are preserved.
+    #[serde(default)]
+    pub account_concurrency_default_migrated: bool,
     /// 账号并发达到上限后的等待时长（毫秒）；0 表示不等待，直接拒绝。
     #[serde(default = "default_account_concurrency_wait_ms")]
     pub account_concurrency_wait_ms: u64,
@@ -777,6 +798,12 @@ pub struct CodexLocalAccessUsageEvent {
     pub request_kind: CodexLocalAccessRequestKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
+    /// Final outbound field value (auto when omitted), independent from upstream feedback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_service_tier: Option<String>,
+    /// Verbatim upstream response value; OAuth feedback does not confirm scheduling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_service_tier: Option<String>,
     /// Request reasoning effort (e.g. low/medium/high/xhigh/max), when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
@@ -794,6 +821,10 @@ pub struct CodexLocalAccessUsageEvent {
     /// Historical records remain None; this is not a generated-token metric.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_response_ms: Option<u64>,
+    /// Successful streaming attempt: first upstream fragment to executor completion.
+    /// Approximate output timing; absent on historical and unsupported paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_generation_ms: Option<u64>,
     #[serde(default)]
     pub input_tokens: u64,
     #[serde(default)]
@@ -1064,6 +1095,9 @@ pub struct CodexLocalAccessProfileAttachment {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexLocalAccessState {
+    pub recovering: bool,
+    pub recovery_attempt: usize,
+    pub recovery_total: usize,
     pub collection: Option<CodexLocalAccessCollection>,
     pub running: bool,
     pub preparing: bool,

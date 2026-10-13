@@ -62,3 +62,13 @@ func ObserveUpstreamChunk(ctx context.Context) {
 		observer.UpstreamChunk(ctx)
 	}
 }
+
+// ObserveUpstreamCompletion reports a protocol-confirmed terminal event with
+// full token usage. It is optional so existing diagnostic observers keep working.
+func ObserveUpstreamCompletion(ctx context.Context, complete bool) {
+	if observer, ok := DiagnosticsObserver(ctx).(interface {
+		UpstreamCompletion(context.Context, bool)
+	}); ok {
+		observer.UpstreamCompletion(ctx, complete)
+	}
+}

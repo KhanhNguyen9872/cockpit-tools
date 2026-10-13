@@ -96,6 +96,9 @@
     "providerClear": "Hapus pilihan"
   },
   "common": {
+    "apiKeyAccount": "Akun API Key",
+    "status": "Keadaan",
+    "cliQuickLaunch": "Jalankan CLI",
     "requestId": "ID permintaan",
     "failureTime": "Waktu gagal",
     "clearRecord": "Hapus catatan",
@@ -251,7 +254,8 @@
           "statusRunning": "Mengimpor...",
           "statusSkipped": "Dilewati",
           "statusPending": "Menunggu impor"
-        }
+        },
+        "invalidJson": "JSON tidak valid. Periksa file atau konten yang ditempel."
       },
       "externalImport": {
         "bundleInvalidJson": "Paket impor bukan JSON yang valid",
@@ -426,7 +430,24 @@
     "show": "Tampilkan",
     "configSaveTimeout": "Waktu operasi habis. Segarkan untuk memastikan hasil sebelum mencoba lagi.",
     "clearAll": "Batalkan semua",
-    "clear": "Bersihkan"
+    "clear": "Bersihkan",
+    "outputSpeed": {
+      "label": "Kecepatan",
+      "pageAverage": "Kecepatan berbobot halaman",
+      "pageSamples": "{{count}} sampel valid",
+      "hint": "Perkiraan token keluaran per detik dari fragmen respons pertama hingga eksekusi selesai, tanpa waktu tunggu awal. Minimal 100 token keluaran dan 100 ms. Token penalaran mengikuti penggunaan keluaran penyedia tanpa penjumlahan ganda; masukan cache tidak disertakan.",
+      "unavailableHint": "Tidak ada pengukuran valid: penggunaan atau waktu hilang, transportasi tidak didukung, catatan lama, jawaban atau interval pendek, gagal atau dibatalkan. Sesi klien biasa tanpa waktu gateway tidak diukur.",
+      "pageHint": "Hanya halaman ini: jumlah token keluaran valid dibagi jumlah waktu teramati. Permintaan serentak diukur terpisah; bukan rata-rata seluruh riwayat.",
+      "value": "≈ {{value}} tok/s",
+      "unavailableReasons": {
+        "canceled": "Permintaan dibatalkan; kecepatan tidak diukur.",
+        "failed": "Permintaan gagal atau belum selesai; kecepatan tidak diukur.",
+        "missingUsage": "Tidak ada penggunaan keluaran yang valid tercatat.",
+        "shortOutput": "Kurang dari 100 token keluaran; kecepatan tidak diukur.",
+        "missingTiming": "Tidak ada waktu keluaran yang valid tercatat.",
+        "shortWindow": "Jendela keluaran yang diamati kurang dari 100 ms."
+      }
+    }
   },
   "floatingCard": {
     "selectPlatform": "Ganti platform",
@@ -620,7 +641,7 @@
       "startAll": "Jalankan semua instansi yang berhenti?",
       "restartAll": "Mulai ulang semua instansi yang sedang berjalan?",
       "stopAll": "Tutup semua instansi?",
-      "syncThreads": "Pindai semua instansi Codex dan isi thread yang hilang secara otomatis. Thread yang sudah ada tidak akan ditulis ulang, dan berkas instansi target akan dicadangkan sebelum penulisan dilakukan. Lanjutkan?"
+      "syncThreads": "Menambahkan sesi yang belum ada di semua instans dan menambahkan konten baru hanya jika instans tujuan berhenti dan riwayatnya cocok. Byte yang sudah ada dipertahankan. Pembaruan riwayat yang bercabang atau tujuan yang sedang berjalan ditolak. Berkas tujuan dicadangkan sebelum ditulis. Lanjutkan?"
     },
     "status": {
       "running": "Berjalan",
@@ -895,6 +916,8 @@
       "data": "Manajemen Data"
     },
     "general": {
+      "errorReporting": "Diagnostik",
+      "errorReportingDesc": "Saat aktif, mengirim diagnostik awal aplikasi dan antarmuka setelah penyamaran data. Menonaktifkannya menghentikan pengiriman.",
       "appearance": "Tampilan",
       "language": "Bahasa",
       "languageDesc": "Pilih bahasa antarmuka",
@@ -1284,7 +1307,7 @@
       "backup": {
         "title": "Manajer cadangan",
         "desc": "Kelola cadangan terjadwal, folder cadangan, dan daftar file dari satu tempat.",
-        "modalDesc": "Atur cadangan otomatis, telusuri file yang tersimpan di folder cadangan proyek, lalu pulihkan atau bersihkan di sini.",
+        "modalDesc": "Kelola aturan pencadangan otomatis dan folder cadangan yang dipilih, termasuk pemindahan ke drive lain. Lihat, pulihkan, unduh, atau bersihkan cadangan lokal dalam folder tersebut.",
         "statusEnabled": "Cadangan otomatis aktif",
         "statusDisabled": "Cadangan otomatis nonaktif",
         "lastRunLabel": "Cadangan terakhir: {{time}}",
@@ -1302,8 +1325,10 @@
         "retentionDesc": "Cadangan yang lebih lama dari ini akan dihapus saat pemeriksaan berikutnya.",
         "retentionUnit": "hari",
         "directoryTitle": "Folder cadangan",
-        "directoryDesc": "Cadangan selalu disimpan di folder backups milik proyek.",
+        "directoryDesc": "Cadangan terjadwal dan rekaman perilaku Cockpit disimpan di folder yang dipilih. Berkas ini dapat dipindahkan ke drive lain.",
         "changeDirectory": "Ganti folder",
+        "sourceUnavailable": "Cadangan lama tidak dapat dibaca atau dihitung, sehingga tidak dapat dipindahkan. Anda dapat mengganti folder cadangan saja; file lama, akun, dan folder data aplikasi tetap sama. Penyebab: {{error}}",
+        "loadTimeout": "Waktu pemuatan cadangan habis. Coba lagi atau pilih folder lain.",
         "migrating": "Memindahkan...",
         "migrationConfirm": "Pindahkan cadangan yang ada dari {{oldPath}} ke {{newPath}}?\n\nMembatalkan tetap mengganti folder tanpa memindahkan berkas lama.",
         "usageTitle": "Penggunaan ruang cadangan",
@@ -1431,6 +1456,8 @@
         "accountsOnlyFile": "Cadangan ini hanya berisi data akun. Pilih \"Data akun\" untuk mengimpornya",
         "selectedSectionsMissing": "Jenis data yang dipilih tidak ada di cadangan ini",
         "unsupportedLegacyFile": "Format cadangan akun lama ini tidak dikenali",
+        "codexTopLayoutInvalid": "Cadangan berisi tata letak tab yang tidak valid. Konfigurasi tidak diimpor.",
+        "codexTopLayoutImportFailed": "Pengaturan lain telah diimpor, tetapi tata letak tab tidak dapat disimpan. Coba impor lagi.",
         "unsupportedVersion": "Versi aplikasi ini tidak mendukung versi bundel tersebut"
       }
     },
@@ -2154,6 +2181,10 @@
       "accountsHint": "Pilih beberapa akun untuk diuji.",
       "start": "Mulai tes",
       "testing": "Menguji..."
+    },
+    "confirmation": {
+      "description": "Konfirmasi pengaktifan “{{name}}” untuk {{count}} akun. Permintaan tidak dikirim jika dibatalkan, ditutup, atau kedaluwarsa.",
+      "expired": "Konfirmasi ini sudah berakhir atau kedaluwarsa. Tutup dialog."
     }
   },
   "update_notification": {
@@ -2208,6 +2239,16 @@
     "other_group": "Model Lainnya"
   },
   "codex": {
+    "instance": {
+      "errors": {
+        "threadSyncWorkerFailed": "Tugas sinkronisasi sesi gagal: {{error}}",
+        "threadSyncBusy": "Sinkronisasi sesi Codex sedang berlangsung. Coba lagi sebentar.",
+        "threadSyncTargetRunning": "Instans Codex tujuan sedang berjalan. Tutup sebelum memperbarui sesi yang sudah ada.",
+        "threadSyncTargetChanged": "Sesi tujuan berubah setelah pratinjau. Sinkronkan lagi; konten baru telah dipertahankan.",
+        "threadSyncTargetReplaced": "Berkas sesi tujuan telah diganti. Buka kembali pratinjau sinkronisasi.",
+        "threadSyncFileBusy": "Sinkronisasi lain sedang menggunakan sesi tujuan. Coba lagi sebentar."
+      }
+    },
     "thresholds": {
       "shortCycle": "Kuota jangka pendek",
       "weekly": "Kuota mingguan",
@@ -2342,9 +2383,9 @@
         "autoDisabled": "Sinkronisasi otomatis semua catatan instans dimatikan",
         "autoEnabled": "Sinkronisasi otomatis semua catatan instans diaktifkan",
         "autoTooltip": "Sinkronkan otomatis semua catatan instans",
-        "autoDesc": "Saat dimatikan, catatan multi-instans tetap terpisah. Saat diaktifkan, memulai atau menutup instans akan menggabungkan catatan lokal secara otomatis hanya setelah semua instans Codex berhenti.",
+        "autoDesc": "Saat nonaktif, riwayat instans tetap terpisah. Saat aktif, memulai atau menghentikan instans menyinkronkan sesi yang belum ada dan tambahan riwayat yang cocok hanya ketika semua instans Codex berhenti. Byte yang sudah ada dipertahankan.",
         "closeFirst": "Tutup semua instans Codex sebelum menyinkronkan catatan agar instans yang berjalan tidak menulis kembali catatan lama.",
-        "confirmMessage": "Catatan sesi lokal akan disinkronkan penuh di semua instans Codex. Sesi dengan ID yang sama akan digabung pada tingkat peristiwa, dan file penting tujuan serta file sesi lama akan dicadangkan sebelum ditulis. Lanjutkan?",
+        "confirmMessage": "Menambahkan sesi yang belum ada di semua instans dan menambahkan konten baru hanya jika instans tujuan berhenti dan riwayatnya cocok. Byte yang sudah ada dipertahankan. Pembaruan riwayat yang bercabang atau tujuan yang sedang berjalan ditolak. Berkas tujuan dicadangkan sebelum ditulis. Lanjutkan?",
         "needTwo": "Diperlukan minimal dua instans untuk menyinkronkan catatan",
         "settingsSection": "Pengaturan sinkronisasi",
         "settingsSubtitle": "Kelola cara sinkronisasi catatan multi-instans Codex",
@@ -2388,12 +2429,12 @@
       "accessModeDirectCons": "1: Tidak bisa ganti model di Codex, tanpa tautan OAuth dan penerusan gambar",
       "accessModeCdpPros": "1: Kecepatan sama dengan langsung\n2: Flash / Pro bisa diganti di daftar model resmi Codex",
       "accessModeCdpCons": "1: Perlu menyuntikkan klien resmi, tanpa tautan OAuth dan penerusan gambar",
-      "imageGenPickerDesc": "Saat ada permintaan gambar, permintaan diteruskan: model dasar memproses lebih dulu, lalu model gambar membuat gambar, dan memakai sebagian kuota akun yang dipilih.",
+      "imageGenPickerDesc": "OAuth memakai model dasar dan alat gambar; API Key memakai API gambar. Biaya atau kuota dihitung oleh penyedia yang dipilih.",
       "imageGenSwitchTitle": "Hanya didukung di mode gateway",
       "imageGenSwitchDescription": "Mengaktifkan pembuatan gambar GPT memerlukan mode gateway. Beralih dan aktifkan?",
       "imageGenSwitchYes": "Ya",
       "imageGenSwitchNo": "Tidak",
-      "imageGenTitle": "Aktifkan pembuatan gambar GPT",
+      "imageGenTitle": "Aktifkan gambar",
       "oauthBindingHint": "Setelah ditautkan, peluncuran sama persis seperti akun biasa dan semua kemampuan OAuth (kompresi jarak jauh, kontrol browser, berbagai plugin, dll.) tersedia; percakapan tetap diproses oleh penyedia API Key saat ini.",
       "oauthBindingChange": "Ganti",
       "title": "Pratinjau Peluncuran Codex",
@@ -2428,6 +2469,7 @@
     "switched": "Beralih ke {{email}}",
     "switchFailed": "Penggantian gagal: {{error}}",
     "authError": {
+      "refreshFailed": "Penyegaran Token gagal: {{error}}",
       "badge": "Masalah Otorisasi",
       "refreshTokenReused": "Otorisasi Codex tidak valid: refresh_token sudah digunakan oleh klien atau instans lain. Masuk lagi, dan hindari menyegarkan akun yang sama secara bersamaan dari Codex resmi, instans lain, atau alat eksternal.",
       "refreshTokenExpired": "Otorisasi login Codex sudah kedaluwarsa dan tidak dapat disegarkan otomatis. Masuk lagi ke akun Codex.",
@@ -2616,7 +2658,8 @@
         "audioTooLarge": "Permintaan audio tidak boleh melebihi 26 MiB.",
         "audioNotSupported": "Akun OAuth ini hanya mendukung transkripsi. Gunakan penyedia dengan API Key untuk operasi audio lainnya.",
         "audioUnavailable": "Penerusan audio tidak tersedia.",
-        "audioUpstreamFailed": "Permintaan audio ke penyedia gagal."
+        "audioUpstreamFailed": "Permintaan audio ke penyedia gagal.",
+        "modelNotAvailable": "Model {{model}} tidak tersedia untuk API Key ini."
       },
       "testRateLimited": "Layanan dapat dijangkau, tetapi upstream dibatasi atau kuota habis: {{detail}}.",
       "testHttpFailed": "Layanan dapat dijangkau, tetapi permintaan mengembalikan HTTP {{status}}: {{detail}}.",
@@ -2688,10 +2731,10 @@
       "killPortSuccess": "Port dibersihkan ({{count}} proses dihentikan)",
       "killPortSuccessNone": "Port diperiksa. Tidak ada proses eksternal yang memakainya.",
       "killPortSuccessUnknown": "Port layanan API dibersihkan",
-      "restartAction": "Mulai Ulang Sidecar",
-      "restartTitle": "Mulai Ulang Layanan API",
-      "restartConfirmMessage": "Hanya Sidecar layanan API yang dimulai ulang. Akun, token, API key, dan pengaturan kumpulan akun tidak akan diubah. Permintaan yang sedang berjalan dapat terputus. Lanjutkan?",
-      "restartSuccess": "Sidecar layanan API dimulai ulang",
+      "restartAction": "Mulai ulang API saja",
+      "restartTitle": "Mulai ulang API saja",
+      "restartConfirmMessage": "Mulai ulang layanan API saja, dengan mempertahankan jendela Codex dan pengaturan kumpulan akun/API Key. Permintaan API yang berlangsung dapat terputus. Lanjutkan?",
+      "restartSuccess": "Layanan API dimulai ulang",
       "refreshStats": "Segarkan Statistik",
       "refreshStatsSuccess": "Statistik layanan API telah disegarkan",
       "routingStrategy": {
@@ -2738,7 +2781,20 @@
       "apiPortUrl": "URL Port API",
       "modelId": "ID Model",
       "modelIdPlaceholder": "Pilih ID model",
+      "imageAccounts": {
+        "upstreamModel": "Model penyedia",
+        "chooseModel": "Pilih model",
+        "modelRequired": "Pilih model yang didukung.",
+        "sourceUnavailable": "Sumber terpilih tidak mendukung model gambar saat ini atau tidak memiliki kredensial API maupun alamat permintaan yang valid.",
+        "loadFailed": "Pengaturan gambar tidak dapat dimuat. Coba lagi.",
+        "missingModels": "Pilih model untuk {{count}} sumber yang dipilih.",
+        "locateModel": "Cari sumber"
+      },
       "imageGenerationModel": {
+        "manage": "Kelola model",
+        "deleteSelected": "Model sedang dipakai. Ganti dan simpan dahulu.",
+        "invalid": "ID model tidak boleh berisi spasi atau karakter kontrol dan maksimal 200 karakter.",
+        "syncFailed": "Penemuan model gambar gagal. Coba lagi.",
         "label": "Model gambar",
         "custom": "Kustom",
         "save": "Simpan model",
@@ -2824,8 +2880,8 @@
       "requestLogSuccess": "Berhasil",
       "requestLogFailed": "Gagal",
       "requestLogTokens": "{{value}} token",
-      "imageForwardLabel": "Aktifkan pembuatan gambar GPT",
-      "imageForwardHint": "Setelah diaktifkan, pilih akun GPT: permintaan pembuatan dan penyuntingan gambar dijalankan oleh akun terpilih dan memakai kuotanya, sedangkan permintaan chat tetap memakai kumpulan akun.",
+      "imageForwardLabel": "Aktifkan gambar",
+      "imageForwardHint": "API Key memerlukan Images API dan model sebenarnya yang dipilih pada baris akun; OAuth hanya mendukung model GPT bawaan.",
       "imageGenerationMode": {
         "enabled": "Aktif",
         "imagesOnly": "Gambar saja",
@@ -2930,7 +2986,8 @@
       "removeAction": "Hapus dari API",
       "imageGenerationMainModel": {
         "label": "Model utama gambar",
-        "hint": "Kosongkan untuk memakai gpt-5.5. Model ini memanggil alat gambar; akun OAuth yang dipilih harus mendukung image_generation pada model ini.",
+        "notice": "Jangan ubah model utama gambar saat penggunaan biasa.",
+        "hint": "Hanya digunakan untuk meneruskan permintaan ke layanan gambar resmi, bukan memilih model pembuat gambar. Ubah manual hanya jika model utama resmi berubah. Kosongkan untuk memakai gpt-5.5.",
         "invalid": "Masukkan ID model tanpa spasi, maksimal 200 karakter."
       },
       "requestDetail": {
@@ -3437,7 +3494,7 @@
       "confirm": {
         "title": "Pindahkan ke Sampah",
         "message": "Sesi yang dipilih akan dipindahkan ke Sampah dari instansinya sehingga dapat dipulihkan nanti. Instansi yang berjalan mungkin perlu dimulai ulang sebelum perubahan muncul. Lanjutkan?",
-        "syncMessage": "Thread yang hilang dan data sesinya akan disinkronkan ke semua instansi. Konten yang ada tidak akan ditulis lagi, dan berkas instansi target akan dicadangkan sebelum penulisan terjadi. Lanjutkan?",
+        "syncMessage": "Menambahkan sesi yang belum ada di semua instans dan menambahkan konten baru hanya jika instans tujuan berhenti dan riwayatnya cocok. Byte yang sudah ada dipertahankan. Pembaruan riwayat yang bercabang atau tujuan yang sedang berjalan ditolak. Berkas tujuan dicadangkan sebelum ditulis. Lanjutkan?",
         "repairVisibilityMessage": "Memperbarui catatan state DB resmi Codex yang mengontrol daftar sesi di bilah samping. File state DB dicadangkan sebelum ditulis."
       },
       "empty": {
@@ -3518,7 +3575,7 @@
           "pruneBackups": "Membersihkan cadangan lama...",
           "done": "Perbaikan selesai",
           "writeSqliteProvider": "Menulis visibilitas SQLite untuk {{instance}}...",
-          "writeRolloutFiles": "Menulis file sesi lama...",
+          "writeRolloutFiles": "Memperbaiki waktu file sesi untuk {{instance}}...",
           "writeSqliteTimestamps": "Memperbaiki waktu SQLite untuk {{instance}}...",
           "writeSessionIndex": "Menulis session_index..."
         },
@@ -3529,9 +3586,9 @@
         "providerLoadFailed": "Gagal memuat kandidat provider: {{error}}",
         "modeTitle": "Mode perbaikan",
         "modeQuick": "Perbaikan cepat",
-        "modeQuickDesc": "Memperbaiki state DB resmi dan baris metadata sesi pertama. Cocok setelah pergantian akun rutin.",
+        "modeQuickDesc": "Menormalkan penyedia di basis data resmi dan indeks sesi. File rollout dipertahankan. Untuk pergantian akun biasa.",
         "modeDeep": "Perbaikan lengkap",
-        "modeDeepDesc": "Migrasikan seluruh data historis penyedia dan perbaiki katalog, ruang kerja, serta indeks subagen. Tutup instans target terlebih dahulu.",
+        "modeDeepDesc": "Memperbaiki penyedia historis, katalog, ruang kerja, dan indeks subagen. File rollout dipertahankan. Tutup instans tujuan terlebih dahulu.",
         "scopeTitle": "Cakupan sesi",
         "scopeAll": "Semua sesi",
         "scopeAllDesc": "Perbaiki {{count}} sesi di daftar saat ini.",
@@ -3563,7 +3620,7 @@
         "previewFailedWithError": "Pratinjau perbaikan sesi gagal: {{error}}",
         "confirmRepair": "Konfirmasi perbaikan",
         "title": "Perbaiki riwayat",
-        "description": "Migrasikan sesi historis ke penyedia aktif instans target dan perbaiki file sesi, indeks SQLite, katalog sesi lokal, serta status ruang kerja. Cadangan lokal dibuat terlebih dahulu.",
+        "description": "Menormalkan penyedia dalam indeks SQLite, katalog sesi, dan ruang kerja. Semua byte asli file rollout dipertahankan; hanya waktu file yang diperbaiki. Cadangan lokal dibuat terlebih dahulu.",
         "stopInstanceHint": "Tutup sepenuhnya instans Codex App/ChatGPT yang dipilih sebelum perbaikan lengkap. Anda tetap dapat meninjau perubahan lebih dulu.",
         "encryptedContentWarning": "Terdeteksi riwayat yang dienkripsi oleh penyedia atau akun lain. Metadata dapat dimigrasikan, tetapi melanjutkan atau memadatkan sesi tersebut mungkin gagal; kembali ke penyedia/akun asal atau mulai sesi baru."
       },
@@ -3761,14 +3818,14 @@
         "cdpMode": "Injeksi CDP",
         "cdpDesc": "Mengambil alih daftar model resmi Codex lewat injection, kecepatan sama dengan mode langsung. Perlu injection ke klien resmi; penautan OAuth tidak didukung.",
         "context": "Konteks yang didukung",
-        "imageGen": "Pembuatan gambar GPT",
-        "imageGenHint": "Hanya didukung di mode gateway. Percakapan tetap diproses oleh model penyedia ini; pembuatan gambar memakai jalur gpt-image asli, dijalankan oleh akun GPT yang dipilih, dan memakai kuotanya.",
-        "imageGenPick": "Pilih akun GPT",
+        "imageGen": "Pembuatan gambar",
+        "imageGenHint": "API Key memerlukan Images API dan model sebenarnya yang dipilih pada baris akun; OAuth hanya mendukung model GPT bawaan.",
+        "imageGenPick": "Sumber gambar",
         "imageGenSelected": "{{count}} akun dipilih",
         "imageGenEmpty": "Belum ada akun dipilih",
         "imageGenLocked": "Centang untuk memilih akun",
         "pickerTitle": "Pilih akun gambar",
-        "pickerEmpty": "Tidak ada akun OAuth yang bisa membuat gambar (akun Free dan API Key tidak didukung).",
+        "pickerEmpty": "Tidak ada sumber yang sesuai. API Key harus mendukung model pilihan atau keluarga GPT; OAuth hanya mendukung model GPT bawaan untuk akun selain Free.",
         "pickerSelectAll": "Pilih semua",
         "pickerClear": "Bersihkan",
         "protocol": "Protokol",
@@ -4271,9 +4328,13 @@
       "standard": "Standar",
       "standardDesc": "Kecepatan bawaan, pemakaian normal",
       "fast": "Cepat",
-      "fastDesc": "Kecepatan 1,5x, pemakaian lebih tinggi",
+      "fastDesc": "Lebih cepat, pemakaian/biaya naik",
       "saveSuccess": "Kecepatan diperbarui",
-      "saveFailed": "Gagal menyimpan kecepatan: {{error}}"
+      "saveFailed": "Gagal menyimpan kecepatan: {{error}}",
+      "loadFailed": "Gagal memuat kecepatan: {{error}}",
+      "apiHint": "Setelah disimpan, berlaku untuk permintaan API berikutnya tanpa memulai ulang. Permintaan yang sedang berjalan tetap; tingkat yang ditentukan klien secara eksplisit diutamakan. Mode cepat dapat menambah penggunaan atau biaya; percepatan bergantung pada model dan penyedia.",
+      "apiSyncFailed": "Preferensi tersimpan, tetapi layanan API yang berjalan belum mengonfirmasi pembaruan. Coba lagi.",
+      "launchHint": "Disimpan saat berganti akun dan menjalankan melalui Cockpit. Mulai ulang klien yang aktif. Percakapan baru memakai nilai bawaan; atur kecepatan percakapan lama di klien."
     },
     "apiService": {
       "inspection": {
@@ -4457,7 +4518,30 @@
         "reasoningEffortValue": "Nalar {{effort}}",
         "serviceTier": "Tingkat layanan",
         "serviceTierValue": "Tingkat {{tier}}",
-        "upstreamModel": "Model terkirim"
+        "requestedTier": "Permintaan: {{tier}}",
+        "responseTier": "Balasan: {{tier}}",
+        "legacyTier": "Lama: {{tier}}",
+        "serviceTierHint": "Tingkat yang diminta adalah service_tier yang dikirim ke server, bukan konfirmasi tingkat pemrosesan sebenarnya. Untuk Codex OAuth, balasan default tidak membuktikan penurunan dari mode cepat. Otomatis berarti tidak ada tingkat tertentu yang diminta (kolom dihilangkan atau diatur ke auto).",
+        "legacyTierHint": "Catatan lama ini mencampur tingkat permintaan dan balasan. Sumber dan tingkat pemrosesan sebenarnya tidak diketahui.",
+        "upstreamModel": "Model terkirim",
+        "columns": {
+          "time": "Waktu",
+          "model": "Model",
+          "result": "Hasil",
+          "source": "Sumber",
+          "account": "Akun",
+          "tokens": "Token",
+          "cost": "Nilai perkiraan",
+          "performance": "Kinerja",
+          "proxy": "Proksi",
+          "requestId": "ID permintaan",
+          "actions": "Tindakan"
+        },
+        "columnSettings": "Kolom",
+        "tokenInput": "Masuk",
+        "tokenOutput": "Keluar",
+        "tokenCache": "Cache",
+        "tokenTotal": "Total"
       },
       "timeouts": {
         "entryLabel": "Lanjutan",
@@ -4537,6 +4621,11 @@
         "duplicate": "Model permintaan harus unik",
         "saveSuccess": "Pemetaan model akun disimpan",
         "cardCount": "{{count}} dipetakan"
+      },
+      "recovery": {
+        "progress": "Memulihkan konfigurasi akun ({{attempt}}/{{total}})",
+        "partialUnavailable": "Beberapa akun tidak tersedia. Akun lain masih dapat melayani permintaan. Periksa akun yang terhubung ke Key.",
+        "unavailable": "Konfigurasi akun perlu dipulihkan. Periksa akun yang terhubung ke Key, lalu coba lagi."
       }
     },
     "apiKey": {
@@ -4764,6 +4853,12 @@
       "restartFailed": "Gagal memulai ulang gateway: {{error}}"
     },
     "proxy": {
+      "legacyBoundHint": "Proksi akun yang sebelumnya ditautkan tetap aktif. Menyimpan lagi menerapkan mode yang dipilih.",
+      "boundAccountUnavailable": "Akun tertaut tidak tersedia. Pilih proksi lagi.",
+      "boundProxyUnavailable": "Akun tertaut tidak memiliki proksi yang tersedia. Pilih lagi.",
+      "sourceUnavailable": "Sumber proksi atau simpul tidak tersedia. Pilih lagi.",
+      "operationTimeout": "Operasi proksi kehabisan waktu. Coba lagi.",
+      "cardScopeHint": "Klien desktop Codex yang diluncurkan memakai proksi kartu ini. Koneksi gerbang model ke penyedia tetap memakai rutenya masing-masing.",
       "display": {
         "title": "Tampilan proksi",
         "compact": "Ringkas",
@@ -4879,7 +4974,7 @@
         "followYes": "Ya",
         "followNo": "Tidak",
         "empty": "Tidak ada akun yang bisa memakai proksi jalur keluar",
-        "emptyHint": "Tambahkan akun OAuth standar dulu, lalu atur jalur keluarnya di sini.",
+        "emptyHint": "Tambahkan akun OAuth atau API, atau aktifkan kartu layanan API, lalu atur rutenya di sini.",
         "loadFailed": "Gagal memuat data jalur keluar",
         "loadFailedHint": "Gagal membaca sumber daya proksi lokal; coba lagi kapan siap. Tautan khusus akun tetap berjalan."
       },
@@ -5005,7 +5100,7 @@
       "disableAction": "Lepas proksi",
       "setIndependent": "Proksi sendiri",
       "disabledHint": "Lewati proksi akun dan bersama; coba koneksi langsung untuk sambungan baru.",
-      "disabledWarning": "Akses langsung bisa gagal. Perubahan berlaku pada sambungan baru klien dengan penerus lokal; klien lain yang sedang berjalan perlu dimulai ulang. Sambungan yang ada dapat tetap memakai rute sebelumnya.",
+      "disabledWarning": "Koneksi langsung mungkin tidak dapat menjangkau layanan. Mulai ulang Codex desktop agar terhubung langsung tanpa relai lokal Cockpit. Sebelum itu, klien yang memakai relai hanya mencoba akses langsung untuk koneksi baru; koneksi yang sudah ada mungkin tetap memakai rute sebelumnya.",
       "exitIp": "IP keluar",
       "sessionHistory": "Riwayat operasi",
       "sessionHistoryHint": "Memeriksa status setiap 5 detik. Hanya menyimpan status awal dan perubahan selama pratinjau ini, maksimal 20 catatan. Dihapus saat ditutup; bukan riwayat lengkap.",
@@ -5064,16 +5159,16 @@
       "modeDefaultHint": "Akun ini tidak memakai proksi dan tetap memakai keluaran default sebelumnya.",
       "modeStaleHint": "Sumber atau simpul yang terikat sudah tidak tersedia. Pilih lagi.",
       "management": "Kelola proksi",
-      "managementHint": "Jalur keluar terpisah untuk akun OAuth. Proksi sistem tidak diubah.",
+      "managementHint": "Atur proksi untuk kartu akun OAuth, API, dan layanan API tanpa mengubah proksi sistem. Pada kartu API, proksi berlaku untuk klien desktop yang diluncurkan; gerbang model tetap memakai rutenya masing-masing.",
       "emptyTitle": "Koneksi khusus untuk akun Anda",
-      "emptyDescription": "Belum ada akun OAuth yang sesuai. Tambahkan akun dari ringkasan akun, lalu kembali ke sini untuk menghubungkan proxy dan menguji jalur keluar.",
+      "emptyDescription": "Belum ada kartu akun yang didukung. Tambahkan akun OAuth atau API, atau aktifkan kartu layanan API, lalu pilih proksi di sini.",
       "search": "Cari akun",
       "filter": "Status pengaitan",
       "filter_all": "Semua",
       "filter_bound": "Terkait",
       "filter_unbound": "Belum terkait",
       "noMatches": "Tidak ada akun yang cocok",
-      "oauthOnly": "Akun OAuth",
+      "oauthOnly": "Kartu akun",
       "saved": "Tersimpan",
       "hiddenSummary": "Kredensial disembunyikan",
       "inputMode": "Cara input",
@@ -5104,7 +5199,7 @@
       "action": "Proksi",
       "boundHint": "Terikat; koneksi belum diverifikasi",
       "unboundHint": "Proksi akun belum diatur",
-      "unsupportedAccount": "Hanya tersedia untuk akun OAuth biasa",
+      "unsupportedAccount": "Pengaturan ini mendukung kartu akun OAuth biasa, akun API, dan layanan API.",
       "invalidUrl": "Alamat proksi tidak valid",
       "unsupportedProtocol": "Protokol proksi ini belum didukung",
       "saveFailed": "Gagal menyimpan proksi",
@@ -5215,14 +5310,17 @@
         "chooseMember": "Pilih anggota grup",
         "chooseAccount": "Pilih akun",
         "bind": "Tautkan akun",
-        "noAccounts": "Tambahkan akun OAuth biasa untuk menautkan. Anda dapat menguji jalur keluar sekarang.",
+        "noAccounts": "Tambahkan akun OAuth atau API, atau aktifkan kartu layanan API untuk menetapkan proksi. Anda dapat menguji rute sekarang.",
         "autoGroupHint": "Gunakan seluruh grup tanpa menetapkan satu node. Pemilihan berdasarkan latensi; jalur keluar dapat berubah.",
         "policyGroupHint": "Gunakan seluruh grup tanpa menetapkan satu node. Aturan grup memilih jalur keluar, yang dapat berubah.",
         "selectGroupHint": "Pilih anggota grup atau simpul secara langsung agar tetap memakai simpul itu.",
         "chooseResource": "Pilih sumber daya",
         "unsupported": "Tidak didukung",
         "invalidInput": "Masukkan nama dan URL, tautan simpul, atau konfigurasi proxy yang valid.",
-        "downloadFailed": "Gagal mengambil langganan. Periksa alamat dan koneksi; pengalihan lintas asal tidak didukung.",
+        "downloadFailed": "Gagal mengunduh langganan. Periksa jaringan dan pengaturan proxy, lalu coba lagi.",
+        "downloadRedirect": "Unduhan langganan dihentikan karena pengalihan lintas asal atau terlalu banyak pengalihan.",
+        "downloadDenied": "Server langganan menolak akses (HTTP 401/403). Periksa tautan dan masa berlakunya.",
+        "downloadTls": "Negosiasi TLS atau verifikasi sertifikat koneksi langganan gagal. Periksa jaringan dan pengaturan proxy.",
         "timeout": "Waktu operasi habis. Segarkan untuk memastikan hasil sebelum mencoba lagi.",
         "tooLarge": "Konten atau jumlah sumber daya melebihi batas. Kurangi cakupan langganan.",
         "busy": "Tugas sedang berjalan atau disimpan. Segarkan sebentar lagi.",
@@ -5360,7 +5458,7 @@
         "assign": "Tetapkan proksi",
         "specific": "Akun terpilih",
         "shared": "Proksi bersama",
-        "sharedHint": "Akun Codex OAuth tanpa proksi sendiri menggunakan proksi ini, termasuk akun yang memenuhi syarat yang ditambahkan nanti. Pengaturan individual yang ada tetap berlaku. Akun yang secara khusus memilih Tanpa proksi dikecualikan.",
+        "sharedHint": "Kartu yang didukung tanpa proksi sendiri mengikuti proksi ini, termasuk kartu baru. Pengaturan mandiri dan Tanpa proksi diprioritaskan. Kartu API memakainya untuk klien desktop; gerbang model tetap memakai rutenya masing-masing.",
         "apply": "Tetapkan"
       },
       "managerResources": {
@@ -5387,7 +5485,7 @@
         "follow": "Gunakan bersama",
         "followHint": "Gunakan proksi bersama, atau jaringan bawaan klien jika proksi bersama nonaktif.",
         "independentHint": "Hanya mengubah akun ini dan mengesampingkan pengaturan bersama.",
-        "scope": "Tersedia untuk akun Codex OAuth yang memenuhi syarat. Akun kunci API dan penyedia khusus tidak didukung.",
+        "scope": "Akun OAuth, API, dan layanan API",
         "followConfirm": "Hapus proksi individual dari {{count}} akun. Akun tersebut akan menggunakan proksi bersama jika aktif, atau jaringan bawaan klien jika tidak."
       },
       "managerUnified": {
@@ -5433,6 +5531,8 @@
       "noChanges": "Tidak ada perubahan yang belum disimpan",
       "topLayoutTitle": "Tata letak atas",
       "topLayoutDesc": "Seret item atau gunakan panah untuk mengurutkan. Lima item pertama tampil di atas; sisanya berurutan di Lainnya.",
+      "topLayoutSaveFailed": "Tata letak tab belum tersimpan. Urutan Anda aktif untuk sementara. Coba lagi; memulai ulang dapat mengembalikan urutan sebelumnya.",
+      "topLayoutReadFailed": "Tata letak tab tersimpan tidak dapat dibaca. Urutan saat ini tetap tersedia. Coba muat ulang atau ubah tata letak untuk menyimpannya.",
       "locationTop": "Atas",
       "locationMore": "Lainnya",
       "topLayoutHint": "Tombol “Lainnya” selalu tetap di kanan dan tidak dapat dipindah atau disembunyikan.",
@@ -5503,7 +5603,15 @@
       },
       "failurePhase": "Tahap kegagalan",
       "applying": "Menerapkan ke gateway aktif…",
-      "applyFailed": "Pengaturan tersimpan, tetapi gateway aktif gagal menerapkannya. Coba lagi. Alasan: {{error}}"
+      "applyFailed": "Pengaturan tersimpan, tetapi gateway aktif gagal menerapkannya. Coba lagi. Alasan: {{error}}",
+      "timeout": {
+        "open": "Waktu tunggu pembukaan aliran oleh server hulu habis. Atur “Batas waktu dan percobaan → {{setting}}” (1–600 detik, bawaan 60).",
+        "idle": "Aliran sudah terbuka, tetapi waktu tunggu data berikutnya habis. Atur batas waktu idle aliran terkait di “Batas waktu dan percobaan”.",
+        "canceled": "Klien membatalkan permintaan ini; bukan batas waktu pembukaan aliran.",
+        "gateway": "HTTP 504 menandakan batas waktu gateway habis. Catatan ini belum memastikan penyebabnya; periksa kesalahan hulu dan tahap permintaan.",
+        "threshold": "Batas yang berlaku untuk permintaan ini: {{seconds}} detik.",
+        "settings": "Atur batas waktu"
+      }
     },
     "experimentalModels": {
       "defaultReasoning": "Tingkat bawaan",

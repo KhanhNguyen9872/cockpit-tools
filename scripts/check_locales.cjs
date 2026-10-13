@@ -241,6 +241,11 @@ function isAllowedEnglishReuse(key, value) {
     return true;
   }
 
+  // Token speed contains only the approximation symbol, interpolation and a protocol unit.
+  if (key === 'common.outputSpeed.value' && normalized === '≈ {{value}} tok/s') {
+    return true;
+  }
+
   // 套餐/层级代码通常直接沿用英文缩写
   if (/(^|\.)(plan|tier|filter)\.(free|plus|pro|ultra|team|business|enterprise|individual)$/.test(key)) {
     return true;

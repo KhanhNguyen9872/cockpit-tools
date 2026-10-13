@@ -25,31 +25,34 @@ import (
 )
 
 type UsageReporter struct {
-	provider            string
-	executorType        string
-	model               string
-	alias               string
-	authID              string
-	authIndex           string
-	authMu              sync.RWMutex
-	accessTokenHash     string
-	authType            string
-	apiKey              string
-	source              string
-	reasoning           string
-	serviceTier         string
-	generate            bool
-	stream              bool
-	requestedAt         time.Time
-	ttftMu              sync.RWMutex
-	ttft                time.Duration
-	firstPacketDuration time.Duration
-	firstPacketSet      bool
-	ttftStart           time.Time
-	ttftSet             bool
-	once                sync.Once
-	proxyRouteMu        sync.RWMutex
-	proxyRouteGetter    func() *usage.ProxyRoute
+	provider                    string
+	executorType                string
+	model                       string
+	alias                       string
+	authID                      string
+	authIndex                   string
+	authMu                      sync.RWMutex
+	accessTokenHash             string
+	authType                    string
+	apiKey                      string
+	source                      string
+	reasoning                   string
+	serviceTier                 string
+	upstreamServiceTier         string
+	upstreamServiceTierObserved bool
+	generate                    bool
+	stream                      bool
+	requestedAt                 time.Time
+	ttftMu                      sync.RWMutex
+	ttft                        time.Duration
+	firstPacketDuration         time.Duration
+	firstPacketSet              bool
+	ttftStart                   time.Time
+	ttftFirstStart              time.Time
+	ttftSet                     bool
+	once                        sync.Once
+	proxyRouteMu                sync.RWMutex
+	proxyRouteGetter            func() *usage.ProxyRoute
 }
 
 type usageExecutor interface {
@@ -102,6 +105,19 @@ func (r *UsageReporter) SetStream(stream bool) {
 		return
 	}
 	r.stream = stream
+}
+
+// SetUpstreamServiceTier captures the final outbound tier, including its absence.
+// This snapshot must be taken after translation and payload defaults/overrides.
+func (r *UsageReporter) SetUpstreamServiceTier(payload []byte) {
+	if r == nil {
+		return
+	}
+	r.upstreamServiceTierObserved = true
+	r.upstreamServiceTier = ""
+	if tier := gjson.GetBytes(payload, "service_tier"); tier.Type == gjson.String {
+		r.upstreamServiceTier = strings.TrimSpace(tier.String())
+	}
 }
 
 // UpdateAccessTokenFingerprint records the token version actually used upstream.
@@ -216,8 +232,32 @@ func (r *UsageReporter) StartResponseTTFT() {
 	r.ttftMu.Lock()
 	if !r.ttftSet && r.ttftStart.IsZero() {
 		r.ttftStart = time.Now()
+		if r.ttftFirstStart.IsZero() {
+			r.ttftFirstStart = r.ttftStart
+		}
 	}
 	r.ttftMu.Unlock()
+}
+
+// ResumeResponseTTFTAfterRetry excludes a discarded rejection body from the
+// effective TTFT while retaining both the original start and first-packet fallback.
+// Call only when a retry has been selected, never for ordinary error responses.
+func (r *UsageReporter) ResumeResponseTTFTAfterRetry() {
+	if r == nil {
+		return
+	}
+	r.ttftMu.Lock()
+	defer r.ttftMu.Unlock()
+	if !r.ttftSet || r.ttftFirstStart.IsZero() {
+		return
+	}
+	if !r.firstPacketSet {
+		r.firstPacketDuration = r.ttft
+		r.firstPacketSet = true
+	}
+	r.ttft = 0
+	r.ttftSet = false
+	r.ttftStart = r.ttftFirstStart
 }
 
 func (r *UsageReporter) IsTTFTSet() bool {
@@ -393,28 +433,30 @@ func (r *UsageReporter) buildRecordForModel(model string, detail usage.Detail, f
 		return usage.Record{Model: model, Detail: detail, Failed: failed, Fail: fail, Generate: usage.GenerateFlag(true)}
 	}
 	return usage.Record{
-		ProxyRoute:          r.proxyRouteSnapshot(),
-		Provider:            r.provider,
-		ExecutorType:        r.executorType,
-		Model:               model,
-		Alias:               r.alias,
-		Source:              r.source,
-		APIKey:              r.apiKey,
-		AuthID:              r.authID,
-		AuthIndex:           r.authIndex,
-		AccessTokenSHA256:   r.accessTokenFingerprint(),
-		AuthType:            r.authType,
-		ReasoningEffort:     r.reasoning,
-		ServiceTier:         r.serviceTier,
-		ResponseServiceTier: strings.TrimSpace(detail.ResponseServiceTier),
-		Generate:            usage.GenerateFlag(r.generate),
-		Stream:              r.stream,
-		RequestedAt:         r.requestedAt,
-		Latency:             r.latency(),
-		TTFT:                r.ttftDuration(),
-		Failed:              failed,
-		Fail:                fail,
-		Detail:              detail,
+		ProxyRoute:                  r.proxyRouteSnapshot(),
+		Provider:                    r.provider,
+		ExecutorType:                r.executorType,
+		Model:                       model,
+		Alias:                       r.alias,
+		Source:                      r.source,
+		APIKey:                      r.apiKey,
+		AuthID:                      r.authID,
+		AuthIndex:                   r.authIndex,
+		AccessTokenSHA256:           r.accessTokenFingerprint(),
+		AuthType:                    r.authType,
+		ReasoningEffort:             r.reasoning,
+		ServiceTier:                 r.serviceTier,
+		UpstreamServiceTier:         r.upstreamServiceTier,
+		UpstreamServiceTierObserved: r.upstreamServiceTierObserved,
+		ResponseServiceTier:         strings.TrimSpace(detail.ResponseServiceTier),
+		Generate:                    usage.GenerateFlag(r.generate),
+		Stream:                      r.stream,
+		RequestedAt:                 r.requestedAt,
+		Latency:                     r.latency(),
+		TTFT:                        r.ttftDuration(),
+		Failed:                      failed,
+		Fail:                        fail,
+		Detail:                      detail,
 	}
 }
 

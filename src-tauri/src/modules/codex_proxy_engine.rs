@@ -891,7 +891,14 @@ async fn start_inner(
     drop(stdin);
     loop {
         if !tunnel.is_running() {
-            return Err("PROXY_ENGINE_START_FAILED".into());
+            // An exited child may be observed before its final diagnostic is drained.
+            // Wait only for the bounded readers, without holding the child/runtime lock.
+            let _ = tokio::time::timeout(Duration::from_millis(100), async {
+                while tunnel.error_readers.iter().any(|reader| !reader.is_finished()) {
+                    tokio::time::sleep(Duration::from_millis(2)).await;
+                }
+            }).await;
+            return Err(tunnel.failure("PROXY_ENGINE_START_FAILED".into()));
         }
         if let Ok(Ok(mut socket)) = tokio::time::timeout(
             Duration::from_millis(200),
@@ -1332,6 +1339,7 @@ mod tests {
         use base64::Engine as _;
         let binary = test_engine();
         verify_version(&binary).await.unwrap();
+        let directory = RuntimeDirectory::create().await.unwrap();
         let id = "11111111-2222-3333-4444-555555555555";
         let links = [
             format!("vless://{id}@example.com:443?security=tls&type=ws&path=%2Fnode"),
@@ -1347,7 +1355,12 @@ mod tests {
         for link in links {
             let outbound = crate::modules::codex_proxy_node_parser::parse_node_link(&link).unwrap();
             let config = configuration(outbound, 12345, "local-user", "local-password").unwrap();
-            let mut child = command(&binary).args(["-t", "-f", "-"]).spawn().unwrap();
+            let mut child = command(&binary)
+                .args(["-t", "-f", "-"])
+                .arg("-d")
+                .arg(&directory.0)
+                .spawn()
+                .unwrap();
             let mut stdin = child.stdin.take().unwrap();
             stdin
                 .write_all(&serde_json::to_vec(&config).unwrap())
@@ -1373,6 +1386,7 @@ mod tests {
         verify_version(&binary).await.unwrap();
         let source = json!({"proxies":[
             {"name":"xhttp","type":"vless","server":"example.com","port":443,
+             "alterId":0,"cipher":"auto",
              "uuid":"11111111-2222-3333-4444-555555555555","tls":true,"network":"xhttp",
              "xhttp-opts":{"path":"/tunnel","mode":"auto"}},
             {"name":"hy2","type":"hysteria2","server":"example.com","port":443,
@@ -1422,6 +1436,51 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .success());
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a verified Mihomo binary; synthetic config checks only"]
+    async fn real_engine_accepts_native_protocol_matrix() {
+        use super::super::{codex_proxy_catalog_binding as binding, codex_proxy_subscription_parser as parser};
+        let binary = test_engine();
+        verify_version(&binary).await.unwrap();
+        let catalog = parser::parse(include_str!("../../tests/fixtures/native-proxy-compatibility.json")).unwrap();
+        let directory = RuntimeDirectory::create().await.unwrap();
+        let mut checked = 0;
+        for id in catalog.nodes.iter().map(|n| &n.id).chain(catalog.groups.iter().map(|g| &g.id)) {
+            let raw = binding::encode("fixture", "fixture", id, &catalog, &BTreeMap::new()).unwrap();
+            let config = configuration(json!(binding::outbounds(&raw).unwrap()), 12345, "fixture", "fixture").unwrap();
+            let mut child = command(&binary).args(["-t", "-f", "-"]).arg("-d").arg(&directory.0).spawn().unwrap();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                let mut stdin = child.stdin.take().unwrap();
+                stdin.write_all(&serde_json::to_vec(&config).unwrap()).await.unwrap();
+                drop(stdin);
+                assert!(child.wait().await.unwrap().success(), "rejected fixture index {checked}");
+            }).await.expect("native matrix check deadline");
+            checked += 1;
+        }
+        assert_eq!(checked, 16);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a verified Mihomo binary; invalid configs never reach a node"]
+    async fn real_engine_reports_configuration_errors_without_disabling_catalog_nodes() {
+        use super::super::{codex_proxy_catalog_binding as binding, codex_proxy_subscription_parser as parser};
+        let binary = test_engine();
+        for (proxy, expected) in [
+            (json!({"name":"fixture", "type":"fixture-unknown", "server":"localhost", "port":443}), "PROXY_UNSUPPORTED_PROTOCOL"),
+            (json!({"name":"fixture", "type":"vmess", "server":"localhost", "port":443,
+                "uuid":"11111111-2222-3333-4444-555555555555", "cipher":false}), "PROXY_ENGINE_CONFIG_INVALID"),
+            (json!({"name":"fixture", "type":"wireguard", "server":"localhost", "port":51820,
+                "ip":"10.0.0.2", "private-key":"not-base64", "public-key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}), "PROXY_ENGINE_CONFIG_INVALID"),
+        ] {
+            let catalog = parser::parse(&json!({"proxies":[proxy]}).to_string()).unwrap();
+            assert!(catalog.nodes[0].error.is_none(), "configuration semantics belong to the engine");
+            let raw = binding::encode("fixture", "fixture", &catalog.nodes[0].id, &catalog, &BTreeMap::new()).unwrap();
+            let result = start_with_binary(&binary, json!(binding::outbounds(&raw).unwrap())).await;
+            assert_eq!(result.err().as_deref(), Some(expected));
+            assert!(catalog.nodes[0].error.is_none(), "runtime failure must not disable the catalog entry");
         }
     }
 
@@ -1515,6 +1574,7 @@ mod tests {
     async fn real_engine_accepts_private_subscription_configurations() {
         let binary = test_engine();
         verify_version(&binary).await.unwrap();
+        let directory = RuntimeDirectory::create().await.unwrap();
         let path = std::env::var("COCKPIT_TEST_SUBSCRIPTION_FILE")
             .expect("private subscription file required");
         let input = std::fs::read_to_string(path).expect("cannot read private subscription file");
@@ -1527,7 +1587,12 @@ mod tests {
             };
             let config =
                 configuration(outbound.clone(), 12345, "test-user", "test-password").unwrap();
-            let mut child = command(&binary).args(["-t", "-f", "-"]).spawn().unwrap();
+            let mut child = command(&binary)
+                .args(["-t", "-f", "-"])
+                .arg("-d")
+                .arg(&directory.0)
+                .spawn()
+                .unwrap();
             let mut stdin = child.stdin.take().unwrap();
             stdin
                 .write_all(&serde_json::to_vec(&config).unwrap())
@@ -1544,6 +1609,37 @@ mod tests {
         }
         assert!(checked > 0);
         println!("engine accepted {checked} node configurations");
+    }
+
+    fn diagnostic_node_endpoint(outbound: &Value) -> Option<(&str, u16)> {
+        let native = if outbound["type"] == "mihomo" {
+            outbound.get("proxy")?
+        } else {
+            outbound
+        };
+        let host = native["server"].as_str()?;
+        let port = native.get("server_port").or_else(|| native.get("port"))?.as_u64()?;
+        Some((host, u16::try_from(port).ok().filter(|port| *port > 0)?))
+    }
+
+    #[test]
+    fn diagnostic_node_endpoint_supports_native_and_normalized_nodes() {
+        let catalog = super::super::codex_proxy_subscription_parser::parse(&json!({
+            "proxies":[{"name":"fixture", "type":"trojan", "server":"fixture.invalid", "port":443,
+                "password":"synthetic-secret"}]
+        }).to_string()).unwrap();
+        assert_eq!(diagnostic_node_endpoint(catalog.nodes[0].outbound.as_ref().unwrap()),
+            Some(("fixture.invalid", 443)));
+        assert_eq!(diagnostic_node_endpoint(&json!({
+            "type":"trojan", "server":"fixture.invalid", "server_port":8443
+        })), Some(("fixture.invalid", 8443)));
+        for value in [
+            json!({"type":"mihomo"}),
+            json!({"type":"mihomo", "proxy":{"server":"fixture.invalid", "port":0}}),
+            json!({"type":"trojan", "server":"fixture.invalid", "server_port":65536}),
+        ] {
+            assert!(diagnostic_node_endpoint(&value).is_none());
+        }
     }
 
     #[tokio::test]
@@ -1667,8 +1763,7 @@ mod tests {
                 )
                 .unwrap();
             }
-            let host = out["server"].as_str().unwrap();
-            let port = out["server_port"].as_u64().unwrap() as u16;
+            let (host, port) = diagnostic_node_endpoint(&out).expect("supported node endpoint");
             let dns = tokio::time::timeout(
                 Duration::from_secs(3),
                 tokio::net::lookup_host((host, port)),

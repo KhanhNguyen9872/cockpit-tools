@@ -96,6 +96,9 @@
     "providerClear": "清除選取"
   },
   "common": {
+    "apiKeyAccount": "API Key 帳號",
+    "status": "狀態",
+    "cliQuickLaunch": "CLI 啟動",
     "requestId": "請求 ID",
     "failureTime": "失敗時間",
     "clearRecord": "清除紀錄",
@@ -244,7 +247,8 @@
           "statusRunning": "匯入中...",
           "statusSkipped": "已略過",
           "statusPending": "待匯入"
-        }
+        },
+        "invalidJson": "JSON 格式無效，請檢查檔案或貼上的內容。"
       },
       "externalImport": {
         "bundleInvalidJson": "匯入包不是有效 JSON",
@@ -426,7 +430,24 @@
     "show": "顯示",
     "configSaveTimeout": "操作逾時，請重新整理確認結果後再試。",
     "clearAll": "取消全選",
-    "clear": "清除"
+    "clear": "清除",
+    "outputSpeed": {
+      "label": "速度",
+      "pageAverage": "本頁加權速度",
+      "pageSamples": "{{count}} 個有效樣本",
+      "hint": "近似上游輸出速度：輸出 Token ÷ 首個回應片段至執行結束的時間，排除首響等待；至少 100 輸出 Token 且視窗不少於 100 毫秒。推理 Token 依上游輸出用量計入，不重複相加；不計快取輸入。",
+      "unavailableHint": "無有效測量：缺用量或計時、不支援的傳輸、舊紀錄、短回覆、極短視窗、失敗或取消。未經閘道計時的一般用戶端工作階段不測速度。",
+      "pageHint": "僅統計目前頁面：有效樣本的總輸出 Token ÷ 總觀測時間。並行請求分別取樣，不代表全部歷史平均速度。",
+      "value": "≈ {{value}} tok/s",
+      "unavailableReasons": {
+        "canceled": "請求已取消，不測速度。",
+        "failed": "請求失敗或未完整結束，不測速度。",
+        "missingUsage": "未記錄有效輸出用量。",
+        "shortOutput": "輸出不足 100 Token，不測速度。",
+        "missingTiming": "未記錄有效輸出計時。",
+        "shortWindow": "輸出觀測區間不足 100 毫秒。"
+      }
+    }
   },
   "nav": {
     "overview": "Antigravity IDE",
@@ -561,7 +582,7 @@
       "startAll": "是否啟動所有已停止的實例？",
       "restartAll": "是否重啟所有正在運行的實例？",
       "stopAll": "是否關閉所有實例？",
-      "syncThreads": "將掃描所有 Codex 實例並自動補齊缺失執行緒。已存在的執行緒不會重複寫入，發生寫入前會先備份目標實例關鍵檔案。確認繼續？"
+      "syncThreads": "將補齊所有執行個體中缺少的工作階段，並在目標執行個體已停止且歷程一致時追加新增內容，不覆寫既有位元組。歷程分叉或目標仍在執行時，既有工作階段的更新將被拒絕。寫入前會備份目標檔案。確定繼續？"
     },
     "status": {
       "running": "運行中",
@@ -848,6 +869,8 @@
       "data": "數據管理"
     },
     "general": {
+      "errorReporting": "遙測診斷",
+      "errorReportingDesc": "啟用後提交經過去識別處理的啟動及介面診斷；關閉後停止提交。",
       "appearance": "介面外觀",
       "language": "顯示語言",
       "languageDesc": "選擇介面的顯示語言",
@@ -1237,7 +1260,7 @@
       "backup": {
         "title": "備份管理",
         "desc": "集中管理定期備份、備份資料夾與備份清單。",
-        "modalDesc": "在這裡設定自動備份、查看專案備份資料夾中的檔案，並執行還原或清理。",
+        "modalDesc": "管理自動備份規則和所選備份目錄，可遷移到其他磁碟；查看、還原、下載或清理目錄內的本機備份。",
         "statusEnabled": "自動備份已開啟",
         "statusDisabled": "自動備份已關閉",
         "lastRunLabel": "最近備份：{{time}}",
@@ -1255,8 +1278,10 @@
         "retentionDesc": "超過此天數的備份會在下次檢查時自動清理。",
         "retentionUnit": "天",
         "directoryTitle": "備份資料夾",
-        "directoryDesc": "備份一律儲存在專案的 backups 資料夾中。",
+        "directoryDesc": "定時備份和 Cockpit 行為快照儲存於所選目錄；可遷移到其他磁碟。",
         "changeDirectory": "更換資料夾",
+        "sourceUnavailable": "無法讀取舊備份，不能確認檔案數量或遷移。可僅切換到新備份目錄，舊檔案、帳號及應用程式設定目錄保持不變。原因：{{error}}",
+        "loadTimeout": "讀取備份逾時，可重試或更換目錄。",
         "migrating": "搬移中...",
         "migrationConfirm": "要將現有備份從 {{oldPath}} 搬移到 {{newPath}} 嗎？\n\n選擇取消會切換資料夾，但不搬移舊檔案。",
         "usageTitle": "備份佔用空間",
@@ -1384,6 +1409,8 @@
         "accountsOnlyFile": "此備份僅包含帳號資料，請勾選「帳號資料」後再匯入",
         "selectedSectionsMissing": "所選資料類型不在目前備份中",
         "unsupportedLegacyFile": "無法識別此舊版帳號備份格式",
+        "codexTopLayoutInvalid": "備份中的頂部版面格式無效，設定未匯入。",
+        "codexTopLayoutImportFailed": "其他設定已匯入，但頂部版面儲存失敗。請重試匯入。",
         "unsupportedVersion": "目前版本暫不支援此資料包版本"
       }
     },
@@ -2107,6 +2134,10 @@
       "accountsHint": "可多選，用這些帳號進行測試。",
       "start": "開始測試",
       "testing": "測試中..."
+    },
+    "confirmation": {
+      "description": "確認向 {{count}} 個帳號傳送「{{name}}」喚醒請求。取消、關閉或逾時均不會傳送。",
+      "expired": "此次確認已過期或結束，請關閉對話框。"
     }
   },
   "update_notification": {
@@ -2161,6 +2192,16 @@
     "other_group": "其他模型"
   },
   "codex": {
+    "instance": {
+      "errors": {
+        "threadSyncWorkerFailed": "工作階段同步作業失敗：{{error}}",
+        "threadSyncBusy": "Codex 工作階段正在同步，請稍後重試。",
+        "threadSyncTargetRunning": "目標 Codex 執行個體正在執行，請關閉後再同步既有工作階段。",
+        "threadSyncTargetChanged": "目標工作階段在預覽後發生變更，請重新同步；新增內容已保留。",
+        "threadSyncTargetReplaced": "目標工作階段檔案已被替換，請重新預覽同步。",
+        "threadSyncFileBusy": "目標工作階段正由其他同步作業使用，請稍後重試。"
+      }
+    },
     "thresholds": {
       "shortCycle": "短週期額度",
       "weekly": "週額度",
@@ -2295,9 +2336,9 @@
         "autoDisabled": "已關閉自動同步所有實例記錄",
         "autoEnabled": "已開啟自動同步所有實例記錄",
         "autoTooltip": "自動同步所有實例記錄",
-        "autoDesc": "關閉時保持多實例記錄隔離；開啟後僅在所有 Codex 實例已停止時，啟動或關閉實例會自動合併本機記錄。",
+        "autoDesc": "關閉時維持多執行個體記錄隔離；開啟後，僅在所有 Codex 執行個體已停止時，啟動或關閉執行個體會自動補齊缺少的工作階段並追加歷程一致的新增內容，不覆寫既有位元組。",
         "closeFirst": "請先關閉所有 Codex 實例後再同步記錄，避免執行中的實例把舊記錄寫回。",
-        "confirmMessage": "會將所有 Codex 實例中的本機工作階段記錄做一次完整同步；同 ID 工作階段會進行事件級合併，寫入前會備份目標實例關鍵檔案和舊工作階段檔案。確認繼續？",
+        "confirmMessage": "將補齊所有執行個體中缺少的工作階段，並在目標執行個體已停止且歷程一致時追加新增內容，不覆寫既有位元組。歷程分叉或目標仍在執行時，既有工作階段的更新將被拒絕。寫入前會備份目標檔案。確定繼續？",
         "needTwo": "至少需要兩個實例才能同步記錄",
         "settingsSection": "同步設定",
         "settingsSubtitle": "管理 Codex 多實例記錄同步方式",
@@ -2341,12 +2382,12 @@
       "accessModeDirectCons": "1：不能在 codex 內切換模型，也不支援綁定 OAuth 帳號與轉發生圖",
       "accessModeCdpPros": "1：速度與直連一致\n2：可在 codex 官方模型列表切換 Flash / Pro",
       "accessModeCdpCons": "1：需要注入官方用戶端，不支援綁定 OAuth 帳號與轉發生圖",
-      "imageGenPickerDesc": "當遇到生圖需求時會轉發生圖請求：先由基礎模型處理，再由生圖模型出圖，會消耗所選帳號的部分額度。",
+      "imageGenPickerDesc": "OAuth 來源使用基礎模型與生圖工具；API Key 來源使用圖片介面。費用或額度由對應上游計入。",
       "imageGenSwitchTitle": "僅閘道模式支援",
       "imageGenSwitchDescription": "啟用 GPT 生圖需要先切換到「閘道列出」模式，是否切換並勾選？",
       "imageGenSwitchYes": "是",
       "imageGenSwitchNo": "否",
-      "imageGenTitle": "啟用 GPT 生圖",
+      "imageGenTitle": "啟用生圖",
       "oauthBindingHint": "綁定後啟動與一般帳號沒有任何差異，可使用 OAuth 的全部能力（遠端壓縮，瀏覽器操作，各類外掛等）；對話仍由目前的 API Key 供應商處理。",
       "oauthBindingChange": "更換",
       "title": "Codex 啟動預覽",
@@ -2381,6 +2422,7 @@
     "switched": "已切換至 {{email}}",
     "switchFailed": "切換失敗: {{error}}",
     "authError": {
+      "refreshFailed": "Token 重新整理失敗：{{error}}",
       "badge": "授權異常",
       "refreshTokenReused": "Codex 授權已失效：refresh_token 已被其他客戶端或實例使用過。請重新登入，並避免官方 Codex、其他實例或外部工具同時刷新同一帳號。",
       "refreshTokenExpired": "Codex 登入授權已過期，無法自動刷新。請重新登入 Codex 帳號。",
@@ -2566,7 +2608,8 @@
         "audioTooLarge": "音訊請求不能超過 26 MiB。",
         "audioNotSupported": "此 OAuth 帳號僅支援語音轉寫，其他音訊操作需使用 API Key 供應商。",
         "audioUnavailable": "音訊轉送暫時無法使用。",
-        "audioUpstreamFailed": "音訊上游請求失敗。"
+        "audioUpstreamFailed": "音訊上游請求失敗。",
+        "modelNotAvailable": "模型 {{model}} 不在目前 API Key 的可用模型範圍內。"
       },
       "testRateLimited": "服務可達，但上游限流或額度不足：{{detail}}。",
       "testHttpFailed": "服務可達，但請求返回 HTTP {{status}}：{{detail}}。",
@@ -2638,10 +2681,10 @@
       "killPortSuccess": "連接埠已清理（已結束 {{count}} 個處理程序）",
       "killPortSuccessNone": "連接埠已檢查，未發現外部占用程序",
       "killPortSuccessUnknown": "API 服務連接埠已清理",
-      "restartAction": "重新啟動 Sidecar",
-      "restartTitle": "重新啟動 API 服務",
-      "restartConfirmMessage": "只會重新啟動 API 服務 Sidecar，不會修改帳號、Token、API Key 或帳號池設定。進行中的請求可能會中斷，確定繼續嗎？",
-      "restartSuccess": "API 服務 Sidecar 已重新啟動",
+      "restartAction": "僅重啟 API 服務",
+      "restartTitle": "僅重啟 API 服務",
+      "restartConfirmMessage": "僅重啟 API 服務，保留 Codex 視窗及帳號池、API Key 設定。進行中的 API 請求可能中斷。確定繼續嗎？",
+      "restartSuccess": "API 服務已重啟",
       "refreshStats": "刷新統計",
       "refreshStatsSuccess": "API 服務統計已刷新",
       "routingStrategy": {
@@ -2688,7 +2731,20 @@
       "apiPortUrl": "API 連接埠 URL",
       "modelId": "模型 ID",
       "modelIdPlaceholder": "選擇模型 ID",
+      "imageAccounts": {
+        "upstreamModel": "上游型號",
+        "chooseModel": "選擇型號",
+        "modelRequired": "請選擇支援的實際型號。",
+        "sourceUnavailable": "所選來源不支援目前圖片模型，或缺少可用的 API 憑證／請求地址。",
+        "loadFailed": "讀取生圖設定失敗，請重試。",
+        "missingModels": "有 {{count}} 個已選來源需要指定型號。",
+        "locateModel": "定位來源"
+      },
       "imageGenerationModel": {
+        "manage": "管理型號",
+        "deleteSelected": "型號正在使用，請先替換並儲存。",
+        "invalid": "型號不能包含空白或控制字元，最長 200 字元。",
+        "syncFailed": "圖片型號探索失敗，請重試。",
         "label": "生圖模型",
         "custom": "自訂",
         "save": "儲存模型",
@@ -2774,8 +2830,8 @@
       "requestLogSuccess": "成功",
       "requestLogFailed": "失敗",
       "requestLogTokens": "{{value}} 個 Tokens",
-      "imageForwardLabel": "啟用 GPT 生圖",
-      "imageForwardHint": "勾選後選擇 GPT 帳號：生圖與圖片編輯請求交給所選帳號執行並消耗其額度，對話請求仍依帳號池調度。",
+      "imageForwardLabel": "啟用生圖",
+      "imageForwardHint": "API Key 來源須相容 Images API，並在帳號列選擇實際型號；OAuth 僅支援原生 GPT 型號。",
       "imageGenerationMode": {
         "enabled": "啟用",
         "imagesOnly": "僅圖片",
@@ -2880,7 +2936,8 @@
       "removeAction": "從 API 移除",
       "imageGenerationMainModel": {
         "label": "生圖主模型",
-        "hint": "留空沿用 gpt-5.5。此模型負責呼叫圖片工具；所選 OAuth 帳號必須支援該主模型的 image_generation。",
+        "notice": "日常請勿修改生圖主模型。",
+        "hint": "此項僅用於官方生圖介面的底層轉發，不用於切換出圖模型。僅當官方調整主模型時手動更新；留空沿用 gpt-5.5。",
         "invalid": "請輸入不含空白的模型 ID，最長 200 字元。"
       },
       "requestDetail": {
@@ -3390,7 +3447,7 @@
       "confirm": {
         "title": "移到垃圾桶",
         "message": "會將所選會話從對應實例中移到垃圾桶，方便後續恢復；執行中的實例可能需要重新啟動後才會反映。確認繼續？",
-        "syncMessage": "會將缺失的執行緒與對應會話同步到所有實例中，已有內容不會重複寫入，寫入前會先備份目標實例關鍵檔案。確認繼續？",
+        "syncMessage": "將補齊所有執行個體中缺少的工作階段，並在目標執行個體已停止且歷程一致時追加新增內容，不覆寫既有位元組。歷程分叉或目標仍在執行時，既有工作階段的更新將被拒絕。寫入前會備份目標檔案。確定繼續？",
         "repairVisibilityMessage": "會校正官方 Codex state DB 中影響側邊欄顯示的工作階段記錄；寫入前會先備份將修改的 state DB。"
       },
       "empty": {
@@ -3471,7 +3528,7 @@
           "pruneBackups": "正在清理舊備份...",
           "done": "修復已完成",
           "writeSqliteProvider": "正在寫入 {{instance}} 的 SQLite 可見性...",
-          "writeRolloutFiles": "正在寫入舊會話檔案...",
+          "writeRolloutFiles": "正在校正 {{instance}} 的會話檔案時間...",
           "writeSqliteTimestamps": "正在校正 {{instance}} 的 SQLite 時間...",
           "writeSessionIndex": "正在寫入 session_index..."
         },
@@ -3482,9 +3539,9 @@
         "providerLoadFailed": "讀取 provider 候選失敗：{{error}}",
         "modeTitle": "修復方式",
         "modeQuick": "快速修復",
-        "modeQuickDesc": "只校正官方 state DB 和會話檔首條中繼資料，適合日常切號後恢復。",
+        "modeQuickDesc": "僅在官方狀態資料庫與會話索引中統一供應商資訊，保留 rollout 日誌。適合一般切換帳號後使用。",
         "modeDeep": "完整修復",
-        "modeDeepDesc": "完整移轉歷史 Provider 資料，並修復目錄、工作區與子 Agent 索引；執行前需結束目標執行個體。",
+        "modeDeepDesc": "統一歷史供應商資訊，修復目錄、工作區及子代理索引，保留 rollout 日誌。請先結束目標實例。",
         "scopeTitle": "會話範圍",
         "scopeAll": "全部會話",
         "scopeAllDesc": "修復目前管理清單中的 {{count}} 筆會話。",
@@ -3516,7 +3573,7 @@
         "previewFailedWithError": "預覽會話修復失敗：{{error}}",
         "confirmRepair": "確認修復",
         "title": "修復歷史工作階段",
-        "description": "將歷史工作階段移轉到目標執行個體目前的 Provider，並修復工作階段檔案、SQLite 索引、本機工作階段目錄與工作區狀態。執行前會先建立本機備份。",
+        "description": "在 SQLite 索引、本機會話目錄及工作區狀態中統一供應商資訊。原始 rollout 日誌逐位元組保留，僅校正檔案時間。修復前先建立本機備份。",
         "stopInstanceHint": "完整修復前請先完全結束所選 Codex App/ChatGPT 執行個體；仍可先預覽變更。",
         "encryptedContentWarning": "偵測到由其他 Provider 或帳號加密的歷史內容。中繼資料可以移轉，但繼續或壓縮這些工作階段仍可能失敗；需要可靠續聊時請切回原 Provider/帳號或開啟新工作階段。"
       },
@@ -3714,14 +3771,14 @@
         "cdpMode": "CDP 注入",
         "cdpDesc": "透過注入接管 Codex 官方模型清單，速度與直連相同。需要注入官方用戶端，不支援綁定 OAuth。",
         "context": "支援上下文",
-        "imageGen": "支援 GPT 生圖",
-        "imageGenHint": "僅閘道模式支援。對話仍由該供應商的模型處理；生圖走 gpt-image 原鏈路，由所選 GPT 帳號執行並消耗其額度。",
-        "imageGenPick": "選擇 GPT 帳號",
+        "imageGen": "支援生圖",
+        "imageGenHint": "API Key 來源須相容 Images API，並在帳號列選擇實際型號；OAuth 僅支援原生 GPT 型號。",
+        "imageGenPick": "選擇生圖來源",
         "imageGenSelected": "已選 {{count}} 個帳號",
         "imageGenEmpty": "尚未選擇帳號",
         "imageGenLocked": "勾選後可選擇帳號",
         "pickerTitle": "選擇生圖帳號",
-        "pickerEmpty": "沒有可用於生圖的 OAuth 帳號（Free 帳號與 API Key 帳號不支援）。",
+        "pickerEmpty": "沒有可用來源。API Key 須支援所選型號或 GPT 同族型號；OAuth 僅支援非 Free 的原生 GPT 型號。",
         "pickerSelectAll": "全選",
         "pickerClear": "清空",
         "protocol": "協定",
@@ -4224,9 +4281,13 @@
       "standard": "標準",
       "standardDesc": "預設速度，常規用量",
       "fast": "快速",
-      "fastDesc": "1.5 倍速，用量增加",
+      "fastDesc": "加速，用量／費用更高",
       "saveSuccess": "速度已更新",
-      "saveFailed": "儲存速度失敗：{{error}}"
+      "saveFailed": "儲存速度失敗：{{error}}",
+      "loadFailed": "讀取速度失敗：{{error}}",
+      "apiHint": "儲存成功後用於後續 API 請求，無需重新啟動；進行中的請求不變，用戶端明確指定的檔位優先。快速可能增加用量或費用，實際加速取決於模型與供應商。",
+      "apiSyncFailed": "偏好已儲存，但執行中的 API 服務尚未確認更新；請重試。",
+      "launchHint": "切換帳號及透過 Cockpit 啟動時寫入客戶端設定。執行中的客戶端需重新啟動；新對話使用預設檔位，既有對話的獨立速度設定需在客戶端調整。"
     },
     "apiService": {
       "inspection": {
@@ -4410,7 +4471,30 @@
         "reasoningEffortValue": "思考 {{effort}}",
         "serviceTier": "服務等級",
         "serviceTierValue": "等級 {{tier}}",
-        "upstreamModel": "傳送模型"
+        "requestedTier": "請求: {{tier}}",
+        "responseTier": "回報: {{tier}}",
+        "legacyTier": "舊檔位: {{tier}}",
+        "serviceTierHint": "請求檔位是傳送至上游的 service_tier，不代表已確認上游實際處理檔位。Codex OAuth 回報 default 不能據此認定快速已降級。「自動」表示未指定具體檔位（省略欄位或使用 auto）。",
+        "legacyTierHint": "舊記錄混合了請求與回應檔位，無法確認來源及實際處理檔位。",
+        "upstreamModel": "傳送模型",
+        "columns": {
+          "time": "時間",
+          "model": "模型",
+          "result": "結果",
+          "source": "來源",
+          "account": "帳號",
+          "tokens": "Token",
+          "cost": "估算價值",
+          "performance": "效能",
+          "proxy": "代理",
+          "requestId": "請求 ID",
+          "actions": "操作"
+        },
+        "columnSettings": "顯示欄",
+        "tokenInput": "輸入",
+        "tokenOutput": "輸出",
+        "tokenCache": "快取",
+        "tokenTotal": "總量"
       },
       "timeouts": {
         "entryLabel": "進階參數",
@@ -4490,6 +4574,11 @@
         "duplicate": "請求模型不可重複",
         "saveSuccess": "帳號模型對應已儲存",
         "cardCount": "已對應 {{count}}"
+      },
+      "recovery": {
+        "progress": "正在自動恢復帳號設定（{{attempt}}/{{total}}）",
+        "partialUnavailable": "部分帳號暫時無法使用，其他帳號仍可處理請求。請檢查帳號與 Key 綁定。",
+        "unavailable": "帳號設定需要恢復。請檢查帳號與 Key 綁定後重試。"
       }
     },
     "apiKey": {
@@ -4717,6 +4806,12 @@
       "restartFailed": "重新啟動閘道失敗：{{error}}"
     },
     "proxy": {
+      "legacyBoundHint": "沿用先前綁定帳號的代理，重新儲存後將使用所選模式。",
+      "boundAccountUnavailable": "綁定帳號無法使用，請重新選擇代理。",
+      "boundProxyUnavailable": "綁定帳號沒有可用代理，請重新選擇。",
+      "sourceUnavailable": "代理來源或節點已失效，請重新選擇。",
+      "operationTimeout": "代理操作逾時，請重試。",
+      "cardScopeHint": "此卡片代理用於啟動的 Codex 桌面用戶端；模型閘道上游仍使用各自出口。",
       "display": {
         "title": "代理顯示",
         "compact": "簡略",
@@ -4832,7 +4927,7 @@
         "followYes": "是",
         "followNo": "否",
         "empty": "暫無可綁定代理的帳號",
-        "emptyHint": "請先新增標準 OAuth 帳號，再回到此頁設定出口。",
+        "emptyHint": "新增 OAuth 或 API 帳號，或啟用 API 服務卡片後，再到這裡設定出口。",
         "loadFailed": "出口資料讀取失敗",
         "loadFailedHint": "本機代理資源讀取失敗，可重試；帳號獨立綁定不受影響。"
       },
@@ -4958,7 +5053,7 @@
       "disableAction": "解除代理",
       "setIndependent": "設定獨立代理",
       "disabledHint": "略過獨立與統一代理，新連線嘗試直連。",
-      "disabledWarning": "直連可能無法存取服務。已接入本機轉接的桌面對新連線生效，其他執行中的用戶端需重新啟動；既有連線可能繼續使用舊出口。",
+      "disabledWarning": "直連可能無法存取服務。重新啟動 Codex 桌面用戶端後直接連線，不再依賴 Cockpit 本機轉接；重新啟動前，已接入轉接的用戶端僅新連線嘗試直連，既有連線可能繼續使用原出口。",
       "exitIp": "出口 IP",
       "sessionHistory": "執行記錄",
       "sessionHistoryHint": "每 5 秒讀取狀態，僅記錄本次預覽的初始狀態與變化（最多 20 筆）；關閉後清空，並非完整歷史日誌。",
@@ -5017,16 +5112,16 @@
       "modeDefaultHint": "該帳號未使用代理，依原有預設出口連線。",
       "modeStaleHint": "綁定的來源或節點已失效，請重新選擇。",
       "management": "代理管理",
-      "managementHint": "為一般 OAuth 帳號設定獨立出口，不變更系統代理。",
+      "managementHint": "為 OAuth、API 帳號與 API 服務卡片設定代理，不修改系統代理。API 卡片僅用於啟動的桌面用戶端，模型閘道上游仍使用各自出口。",
       "emptyTitle": "為帳號準備獨立出口",
-      "emptyDescription": "目前沒有可設定代理的普通 OAuth 帳號。返回帳號總覽新增帳號後，即可在此綁定代理並檢測出口。",
+      "emptyDescription": "暫無適用帳號卡片。新增 OAuth 或 API 帳號，或啟用 API 服務卡片後，即可在這裡選擇代理。",
       "search": "搜尋帳號",
       "filter": "綁定狀態",
       "filter_all": "全部",
       "filter_bound": "已綁定",
       "filter_unbound": "未綁定",
       "noMatches": "沒有符合的帳號",
-      "oauthOnly": "一般 OAuth 帳號",
+      "oauthOnly": "帳號卡片",
       "saved": "已儲存",
       "hiddenSummary": "憑證已隱藏",
       "inputMode": "輸入方式",
@@ -5057,7 +5152,7 @@
       "action": "代理",
       "boundHint": "已綁定；尚未驗證連線",
       "unboundHint": "尚未設定帳號代理",
-      "unsupportedAccount": "僅一般 OAuth 帳號支援此設定",
+      "unsupportedAccount": "此設定支援一般 OAuth、API 帳號與 API 服務卡片。",
       "invalidUrl": "代理位址無效",
       "unsupportedProtocol": "暫不支援此代理協定",
       "saveFailed": "儲存代理失敗",
@@ -5168,14 +5263,17 @@
         "chooseMember": "選擇群組成員",
         "chooseAccount": "選擇帳號",
         "bind": "綁定帳號",
-        "noAccounts": "新增一般 OAuth 帳號後即可綁定；現在可先測試出口。",
+        "noAccounts": "新增 OAuth 或 API 帳號，或啟用 API 服務卡片後即可指派代理；現在可先測試出口。",
         "autoGroupHint": "使用整個自動群組，無需指定節點；依延遲自動選擇，實際出口可能變更。",
         "policyGroupHint": "使用整個群組，無需指定節點；依群組策略運作，實際出口可能變更。",
         "selectGroupHint": "選擇此群組使用的成員；也可直接選擇群組內節點以固定節點。",
         "chooseResource": "從資源選擇",
         "unsupported": "尚不支援",
         "invalidInput": "請填寫名稱和有效的訂閱位址、節點連結或代理資訊。",
-        "downloadFailed": "無法取得訂閱，請檢查位址與網路；不支援跨站重新導向。",
+        "downloadFailed": "訂閱下載失敗，請檢查網路與代理設定後重試。",
+        "downloadRedirect": "訂閱發生跨站重新導向或重新導向次數過多，已停止下載。",
+        "downloadDenied": "訂閱伺服器拒絕存取（HTTP 401/403），請檢查連結與有效期限。",
+        "downloadTls": "訂閱連線的 TLS 交握或憑證驗證失敗，請檢查網路與代理設定。",
         "timeout": "操作逾時，請重新整理確認結果後再試。",
         "tooLarge": "內容或資源數量超過限制，請縮小訂閱範圍。",
         "busy": "已有工作執行中或正在儲存，請稍後重新整理。",
@@ -5313,7 +5411,7 @@
         "assign": "指派代理",
         "specific": "指定帳號",
         "shared": "設為共用代理",
-        "sharedHint": "未個別設定的 Codex OAuth 帳號會使用此代理，之後新增的適用帳號也會跟隨。既有的個別設定維持不變。 明確選擇「不使用代理」的帳號除外。",
+        "sharedHint": "未單獨設定的適用卡片使用此代理，新增卡片也會跟隨。獨立代理和「不使用代理」優先。API 卡片用於桌面用戶端，模型閘道上游仍使用各自出口。",
         "apply": "確認指派"
       },
       "managerResources": {
@@ -5340,7 +5438,7 @@
         "follow": "恢復跟隨",
         "followHint": "使用共用代理；未開啟時使用用戶端預設網路。",
         "independentHint": "只變更此帳號，優先於共用設定。",
-        "scope": "僅支援符合條件的 Codex OAuth 帳號。API Key 和自訂供應商帳號不適用。",
+        "scope": "OAuth、API 帳號與 API 服務",
         "followConfirm": "將清除 {{count}} 個帳號的個別代理設定。共用代理開啟時跟隨共用代理，否則使用用戶端預設網路。"
       },
       "managerUnified": {
@@ -5386,6 +5484,8 @@
       "noChanges": "沒有待儲存的修改",
       "topLayoutTitle": "頂部版面",
       "topLayoutDesc": "拖曳或點擊上下箭頭排序；前五項顯示於頂部，其餘依序顯示於「更多」。",
+      "topLayoutSaveFailed": "頂部版面尚未儲存，目前順序已生效。請重試；重新啟動可能恢復原順序。",
+      "topLayoutReadFailed": "無法讀取已儲存的頂部版面，目前順序仍可使用。請重試讀取或調整版面後儲存。",
       "locationTop": "頂部",
       "locationMore": "更多",
       "topLayoutHint": "「更多」按鈕固定顯示在右側，不參與排序或隱藏。",
@@ -5456,7 +5556,15 @@
       },
       "failurePhase": "失敗階段",
       "applying": "正在套用至執行中的閘道…",
-      "applyFailed": "設定已儲存，但執行中的閘道未能套用，可重試。原因：{{error}}"
+      "applyFailed": "設定已儲存，但執行中的閘道未能套用，可重試。原因：{{error}}",
+      "timeout": {
+        "open": "等待上游建立串流逾時。可在「逾時與重試 → {{setting}}」調整等待時間（1–600 秒，預設 60 秒）。",
+        "idle": "串流已建立，但等待後續資料逾時。可在「逾時與重試」調整對應的串流閒置逾時。",
+        "canceled": "請求已由用戶端取消，不屬於串流開啟逾時。",
+        "gateway": "HTTP 504 表示閘道等待逾時；目前紀錄不足以確定原因，請查看上游錯誤及請求階段。",
+        "threshold": "本次生效門檻：{{seconds}} 秒。",
+        "settings": "調整逾時"
+      }
     },
     "experimentalModels": {
       "defaultReasoning": "預設檔位",

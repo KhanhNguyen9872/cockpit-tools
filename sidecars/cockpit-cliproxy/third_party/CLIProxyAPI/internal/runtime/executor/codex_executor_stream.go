@@ -13,6 +13,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
+	codexresponses "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/codex/openai/responses"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
@@ -63,6 +64,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	requestPath := helps.PayloadRequestPath(opts)
 	body = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", body, originalTranslated, requestedModel, requestPath, opts.Headers)
+	body = helps.ApplyServiceTierDefault(ctx, body, originalTranslated)
 	body, _ = sjson.DeleteBytes(body, "previous_response_id")
 	body, _ = sjson.DeleteBytes(body, "generate")
 	body, _ = sjson.DeleteBytes(body, "prompt_cache_retention")
@@ -88,6 +90,10 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 	body, replayScope, errReplay := applyCodexReasoningReplayCacheRequired(ctx, from, req, opts, body)
 	if errReplay != nil {
 		return nil, errReplay
+	}
+	if helps.IsCodexOAuthAuth(auth) && !helps.APIKeyModelIsCompat(req) {
+		lite := !useFullResponses && (codexResponsesLiteEnabled(opts.Headers) || isCodexResponsesLiteRequest(body, opts.Headers))
+		body = codexresponses.EnsureCodexWebSearchHistoryTool(body, lite)
 	}
 	reporter.SetTranslatedReasoningEffort(body, to.String())
 
@@ -119,6 +125,11 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 	if !useFullResponses && liteHeaderValue != "" {
 		httpReq.Header[codexResponsesLiteHeaderName] = []string{liteHeaderValue}
 	}
+	// Desktop can carry the Lite hint only in client_metadata. Keep the
+	// outgoing wire mode aligned with the final additional_tools placement.
+	if helps.IsCodexOAuthAuth(auth) && !useFullResponses && isCodexResponsesLiteRequest(body, opts.Headers) && !codexResponsesLiteEnabled(httpReq.Header) {
+		httpReq.Header.Set(codexResponsesLiteHeaderName, "true")
+	}
 	removeCodexResponsesLiteHeaderForAPIKey(httpReq.Header, auth)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
@@ -126,7 +137,14 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 		authLabel = auth.Label
 		authType, authValue = auth.AccountInfo()
 	}
+	recovery := helps.NewCodexHTTPEncryptedRecovery(auth, helps.APIKeyModelIsCompat(req), httpReq, upstreamBody)
+	upstreamBody, err = recovery.PrepareRequest(httpReq, upstreamBody)
+	if err != nil {
+		return nil, err
+	}
+	reporter.SetUpstreamServiceTier(upstreamBody)
 	helps.RecordAPIRequest(ctx, e.cfg, helps.UpstreamRequestLog{
+		Transport: "sse",
 		URL:       url,
 		Method:    http.MethodPost,
 		Headers:   httpReq.Header.Clone(),
@@ -140,7 +158,9 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 
 	httpClient := helps.NewUtlsHTTPClient(ctx, e.cfg, auth, 0)
 	httpClient = reporter.TrackHTTPClientRoundTripOnly(httpClient)
-	httpResp, err := httpClient.Do(httpReq)
+	httpResp, upstreamBody, err := recovery.Do(ctx, e.cfg, httpClient, httpReq, upstreamBody, func(status int, errorBody []byte) error {
+		return clearCodexReasoningReplayOnInvalidSignature(ctx, replayScope, status, errorBody)
+	})
 	if err != nil {
 		helps.RecordAPIResponseError(ctx, e.cfg, err)
 		return nil, err
@@ -247,6 +267,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 					terminalSuccess = true
 					data = normalizeCodexWebsocketCompletion(data)
 					if detail, ok := helps.ParseCodexUsage(data); ok {
+						helps.ObserveCodexCompletionUsage(ctx, data)
 						reporter.Publish(ctx, detail)
 					} else {
 						reporter.EnsurePublished(ctx)
@@ -391,6 +412,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 					terminalSuccess = true
 					data = normalizeCodexWebsocketCompletion(data)
 					if detail, ok := helps.ParseCodexUsage(data); ok {
+						helps.ObserveCodexCompletionUsage(ctx, data)
 						reporter.Publish(ctx, detail)
 					} else {
 						reporter.EnsurePublished(ctx)

@@ -63,6 +63,7 @@ import {
   resolveUpdaterDownloadUrl,
 } from './utils/updaterReleaseNotes';
 import { FloatingCardWindow } from './pages/FloatingCardWindow';
+import { CodexWakeupConfirmation } from './components/CodexWakeupConfirmation';
 import { initWakeupNotificationListener } from './utils/wakeupNotificationListener';
 import {
   createUpdaterCanceledError,
@@ -3762,6 +3763,7 @@ function MainApp() {
       <GlobalModal />
       <CodexSwitchProgressModal />
       <CodexCliDaemonNotice />
+      <CodexWakeupConfirmation />
       <CodexInstanceLaunchProgressModal />
       <CodexPelicanHost />
       <WindowsOperationDialog />

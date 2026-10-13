@@ -65,12 +65,19 @@ pub fn provider_gateway_bind_account_id(account_id: &str) -> Option<String> {
     ))
 }
 
-/// 解析实例绑定账号的出口代理。API 服务聚合入口不直接访问 OpenAI，不需要账号代理。
+/// 预检桌面客户端出口；API 服务与 API Key 卡片使用独立的客户端配置。
 pub async fn preflight_egress_proxy_for_bind_account(bind_account_id: Option<&str>) -> Result<(), String> {
     let Some(bound) = bind_account_id.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(());
     };
     if is_api_service_bind_account_id(bound) {
+        super::codex_client_proxy::resolve(bound).await?;
+        return Ok(());
+    }
+    let normalized = parse_provider_gateway_bind_account_id(bound).unwrap_or_else(|| bound.to_owned());
+    let account = super::codex_proxy_runtime::load(&normalized).await?;
+    if account.is_api_key_auth() {
+        super::codex_client_proxy::resolve(&normalized).await?;
         return Ok(());
     }
     let account_id = parse_provider_gateway_bind_account_id(bound).unwrap_or_else(|| bound.to_owned());
@@ -84,20 +91,34 @@ pub async fn preflight_egress_proxy_for_bind_account(bind_account_id: Option<&st
     Ok(())
 }
 
-/// 解析实例绑定账号的出口代理。API 服务聚合入口不直接访问 OpenAI，不需要账号代理。
+/// 解析桌面客户端出口；API 服务与 API Key 卡片不消费账号上游出口。
 ///
 /// 受管客户端启动时统一走 `codex_proxy_desktop_router::ensure`：账号符合资格且已有
 /// 生效出口（账号绑定或统一代理）时才注入固定入口。已接入入口的客户端换节点或解绑
 /// 只影响新连接；尚未接入的客户端首次绑定后需重启。未绑定账号的新启动沿用原有出口。
 /// 已配置出口的入口创建失败时返回错误，禁止静默沿用其他代理或系统出口。
-pub async fn resolve_egress_proxy_for_bind_account(bind_account_id: Option<&str>) -> Result<Option<String>, String> {
-    let Some(bind_account_id) = bind_account_id.map(str::trim).filter(|value| !value.is_empty()) else { return Ok(None); };
+/// 显式“不使用代理”返回 Direct，由启动层覆盖代理默认值，不创建本地入口。
+pub async fn resolve_egress_proxy_for_bind_account(
+    bind_account_id: Option<&str>,
+) -> Result<crate::modules::process::CodexLaunchProxy, String> {
+    use crate::modules::process::CodexLaunchProxy;
+    let Some(bind_account_id) = bind_account_id.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(CodexLaunchProxy::Inherit);
+    };
     if is_api_service_bind_account_id(bind_account_id) {
-        return Ok(None);
+        return super::codex_client_proxy::resolve(bind_account_id).await;
     }
     let account_id =
         parse_provider_gateway_bind_account_id(bind_account_id).unwrap_or_else(|| bind_account_id.to_string());
-    crate::modules::codex_proxy_desktop_router::ensure(&account_id).await
+    let account = crate::modules::codex_proxy_runtime::load(&account_id).await?;
+    if account.is_api_key_auth() { return super::codex_client_proxy::resolve(&account_id).await; }
+    if crate::modules::codex_account_proxy::eligible(&account) && account.egress_proxy_disabled {
+        return Ok(CodexLaunchProxy::Direct);
+    }
+    Ok(match crate::modules::codex_proxy_desktop_router::ensure(&account_id).await? {
+        Some(url) => CodexLaunchProxy::Proxy(url),
+        None => CodexLaunchProxy::Inherit,
+    })
 }
 
 #[derive(Debug, Clone)]

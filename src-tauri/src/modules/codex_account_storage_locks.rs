@@ -115,6 +115,74 @@ fn account_tombstone_path(account_id: &str) -> PathBuf {
         .join(format!("{}.json", account_id))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CodexAccountStorageStatus {
+    Present,
+    Missing,
+    Deleted,
+}
+
+/// Inspect revocation and file presence without loading credentials or migrating accounts.
+/// Unknown storage errors must remain errors; they cannot authorize reuse of stale auth.
+pub(crate) fn account_storage_status(
+    account_id: &str,
+) -> Result<CodexAccountStorageStatus, String> {
+    validate_recycle_account_id(account_id)?;
+    // Match the account store's override order without creating storage directories.
+    let override_dir = [
+        "COCKPIT_TOOLS_TEST_DATA_DIR",
+        "COCKPIT_TEST_DATA_DIR",
+        "COCKPIT_TOOLS_DATA_DIR",
+    ]
+    .into_iter()
+    .filter_map(|key| std::env::var(key).ok())
+    .map(|value| value.trim().to_string())
+    .find(|value| !value.is_empty());
+    let data_dir = match override_dir {
+        Some(path) => PathBuf::from(path),
+        None => {
+            #[cfg(test)]
+            let path = crate::modules::test_support::fallback_data_dir();
+            #[cfg(not(test))]
+            let path = account::resolve_data_dir()?;
+            path
+        }
+    };
+    account_storage_status_in_dir(&data_dir, account_id)
+}
+
+fn account_storage_status_in_dir(
+    data_dir: &Path,
+    account_id: &str,
+) -> Result<CodexAccountStorageStatus, String> {
+    validate_recycle_account_id(account_id)?;
+    let tombstone_path = data_dir
+        .join(CODEX_ACCOUNT_TOMBSTONES_DIR)
+        .join(format!("{account_id}.json"));
+    match fs::read_to_string(&tombstone_path) {
+        Ok(content) => {
+            let tombstone: CodexAccountTombstone = serde_json::from_str(&content)
+                .map_err(|error| format!("解析 Codex 账号删除状态失败: {error}"))?;
+            if tombstone.deleted {
+                return Ok(CodexAccountStorageStatus::Deleted);
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("读取 Codex 账号删除状态失败: {error}")),
+    }
+    let account_path = data_dir
+        .join("codex_accounts")
+        .join(format!("{account_id}.json"));
+    match fs::metadata(account_path) {
+        Ok(metadata) if metadata.is_file() => Ok(CodexAccountStorageStatus::Present),
+        Ok(_) => Err("Codex 账号详情路径不是文件".to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(CodexAccountStorageStatus::Missing)
+        }
+        Err(error) => Err(format!("读取 Codex 账号详情状态失败: {error}")),
+    }
+}
+
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 struct CodexAccountTombstone {
     deleted: bool,

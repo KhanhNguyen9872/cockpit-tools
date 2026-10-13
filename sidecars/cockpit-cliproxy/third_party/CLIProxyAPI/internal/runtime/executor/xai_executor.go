@@ -15,10 +15,10 @@ import (
 var (
 	xaiDataTag  = []byte("data:")
 	xaiEventTag = []byte("event:")
-	// Codex 的 apply_patch 是 freeform(custom) 工具，声明里带 lark grammar 而不是
-	// JSON parameters，xAI 的 Responses 端点只接受 function 形态。请求侧降级为
-	// 单字段 JSON function，并把官方信封写进每轮 tool description；响应侧再还原
-	// 成客户端期望的 custom_tool_call，同时把独立成行的错误头尾改回官方信封。
+	// Codex apply_patch is a freeform (custom) tool with lark grammar instead of
+	// JSON parameters; xAI Responses accepts only function tools. Convert requests
+	// to a single-field JSON function with the official envelope in each tool
+	// description, then restore custom_tool_call responses and envelope markers.
 	xaiApplyPatchDescription = strings.Join([]string{
 		"Use apply_patch to edit local files. The input is freeform patch text, not JSON.",
 		"",
@@ -82,8 +82,9 @@ const (
 	xaiTokenAuthHeader          = "X-XAI-Token-Auth"
 	xaiTokenAuthValue           = "xai-grok-cli"
 	xaiClientVersionHeader      = "x-grok-client-version"
-	// Keep in sync with the current Grok CLI client version that chat-proxy expects.
-	xaiClientVersionValue         = "0.2.120"
+	// Pinned to @xai-official/grok's stable version, matching CLIProxyAPI v8.0.20's fallback.
+	// Upstream #6252 reports HTTP 426 for versions below 1.0.13.
+	xaiClientVersionValue         = "1.0.46"
 	xaiClientIdentifierHeader     = "x-grok-client-identifier"
 	xaiClientIdentifierValue      = "grok-shell"
 	xaiAuthenticateResponseHeader = "x-authenticateresponse"

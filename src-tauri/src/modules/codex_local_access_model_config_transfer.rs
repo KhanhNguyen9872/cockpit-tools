@@ -140,6 +140,7 @@ pub(crate) fn reload_active_gateway_after_model_config_import(
             }
             ensure_gateway_matches_runtime_locked().await
         };
+        let result = defer_gateway_key_preparation_error(result, expected_generation).await;
         if let Err(error) = result {
             let mut runtime = gateway_runtime().lock().await;
             runtime.last_error = Some(error.clone());

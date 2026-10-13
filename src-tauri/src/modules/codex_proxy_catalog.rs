@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    error::Error as _,
     fs::{self, OpenOptions},
     path::{Path, PathBuf},
     sync::{
@@ -28,7 +29,7 @@ const MAX_BODY: usize = 2 * 1024 * 1024;
 const MAX_STORE: u64 = 32 * 1024 * 1024;
 const MAX_SOURCES: usize = 32;
 const REFRESH_INTERVAL_MS: i64 = 6 * 60 * 60 * 1000;
-const PARSER_VERSION: u8 = 1;
+const PARSER_VERSION: u8 = 2;
 const DEFAULT_LATENCY_URL: &str = "http://www.gstatic.com/generate_204";
 static DOWNLOADS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 static IO: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
@@ -397,6 +398,8 @@ pub struct SourceDependencyAccount {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceDependenciesView {
+    client_targets: Vec<super::codex_client_proxy::Dependency>,
+    client_target_count: usize,
     source_id: String,
     revision: String,
     accounts: Vec<SourceDependencyAccount>,
@@ -541,9 +544,9 @@ pub async fn list() -> Result<CatalogView, String> {
 /// dropping newly imported sources or resurrecting concurrently removed ones.
 pub async fn reorder(source_ids: Vec<String>) -> Result<CatalogView, String> {
     if source_ids.len() > MAX_SOURCES
-        || source_ids.iter().any(|id| {
-            id.trim().is_empty() || id.len() > 256 || id.chars().any(char::is_control)
-        })
+        || source_ids
+            .iter()
+            .any(|id| id.trim().is_empty() || id.len() > 256 || id.chars().any(char::is_control))
     {
         return Err("CATALOG_INVALID".into());
     }
@@ -944,7 +947,7 @@ async fn fetch(input: &str) -> Result<Download, String> {
     let origin = url.origin();
     let client = subscription_client_builder()
         .build()
-        .map_err(|_| "CATALOG_DOWNLOAD")?;
+        .map_err(|error| download_request_error(&error))?;
     fetch_with_client(client, url, origin).await
 }
 
@@ -967,26 +970,27 @@ async fn fetch_with_client(
 ) -> Result<Download, String> {
     // No account auth headers, cookies, remote converter or recursive provider fetches.
     for hop in 0..=3 {
-        let response = client.get(url.clone()).send().await.map_err(|e| {
-            if e.is_timeout() {
-                "CATALOG_TIMEOUT"
-            } else {
-                "CATALOG_DOWNLOAD"
-            }
-        })?;
+        let response = client
+            .get(url.clone())
+            .send()
+            .await
+            .map_err(|error| download_request_error(&error))?;
         if response.status().is_redirection() {
             if hop == 3 {
-                return Err("CATALOG_REDIRECT".into());
+                return Err(download_failure("CATALOG_REDIRECT", None));
             }
             let location = response
                 .headers()
                 .get(reqwest::header::LOCATION)
                 .and_then(|h| h.to_str().ok())
-                .ok_or("CATALOG_REDIRECT")?;
-            let next = url.join(location).map_err(|_| "CATALOG_REDIRECT")?;
-            subscription_url(next.as_str())?;
+                .ok_or_else(|| download_failure("CATALOG_REDIRECT", None))?;
+            let next = url
+                .join(location)
+                .map_err(|_| download_failure("CATALOG_REDIRECT", None))?;
+            subscription_url(next.as_str())
+                .map_err(|_| download_failure("CATALOG_REDIRECT", None))?;
             if next.origin() != origin {
-                return Err("CATALOG_REDIRECT".into());
+                return Err(download_failure("CATALOG_REDIRECT", None));
             }
             url = next;
             continue;
@@ -1009,7 +1013,13 @@ async fn fetch_with_client(
 }
 async fn read_response(mut response: reqwest::Response) -> Result<String, String> {
     if !response.status().is_success() {
-        return Err("CATALOG_DOWNLOAD".into());
+        let status = response.status().as_u16();
+        let code = if matches!(status, 401 | 403) {
+            "CATALOG_DOWNLOAD_DENIED"
+        } else {
+            "CATALOG_DOWNLOAD"
+        };
+        return Err(download_failure(code, Some(status)));
     }
     if response
         .content_length()
@@ -1018,13 +1028,59 @@ async fn read_response(mut response: reqwest::Response) -> Result<String, String
         return Err("CATALOG_LIMIT".into());
     }
     let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| "CATALOG_DOWNLOAD")? {
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| download_request_error(&error))?
+    {
         if body.len() + chunk.len() > MAX_BODY {
             return Err("CATALOG_LIMIT".into());
         }
         body.extend_from_slice(&chunk);
     }
     String::from_utf8(body).map_err(|_| "CATALOG_FORMAT".into())
+}
+
+fn download_failure(code: &'static str, status: Option<u16>) -> String {
+    // Neither the URL (which is a credential), response body nor raw error chain
+    // may reach logs or IPC. Only fixed categories and HTTP status are observable.
+    super::logger::log_warn(&format!(
+        "[ProxyCatalog] subscription_download_failed: code={code}, http_status={status:?}"
+    ));
+    code.into()
+}
+
+fn download_request_error(error: &reqwest::Error) -> String {
+    let code = if error.is_timeout() {
+        "CATALOG_TIMEOUT"
+    } else {
+        // Skip reqwest's outer Display because it embeds the private URL. Inspect
+        // only bounded source causes; their text is never displayed or logged.
+        download_cause_code(error.source())
+    };
+    download_failure(code, None)
+}
+
+fn download_cause_code(mut cause: Option<&(dyn std::error::Error + 'static)>) -> &'static str {
+    for _ in 0..8 {
+        let Some(error) = cause else { break };
+        if error.is::<native_tls::Error>() || error.is::<rustls::Error>() {
+            return "CATALOG_DOWNLOAD_TLS";
+        }
+        let text = error.to_string().to_ascii_lowercase();
+        if text.contains("tls") || text.contains("ssl") || text.contains("certificate") {
+            return "CATALOG_DOWNLOAD_TLS";
+        }
+        if text.contains("dns error")
+            || text.contains("failed to lookup address")
+            || text.contains("name or service not known")
+            || text.contains("nodename nor servname provided")
+        {
+            return "CATALOG_DOWNLOAD_DNS";
+        }
+        cause = error.source();
+    }
+    "CATALOG_DOWNLOAD"
 }
 
 async fn parsed(input: String) -> Result<ParsedCatalog, String> {
@@ -1430,6 +1486,7 @@ pub async fn dependencies(source_id: String) -> Result<SourceDependenciesView, S
     })
     .await?;
     let unified = crate::modules::codex_unified_proxy::ensure_loaded().await?;
+    let client_targets = super::codex_client_proxy::dependencies(&source_id).await?;
     let final_revision = source(&source_id).await?.revision;
     if final_revision != stored.revision {
         return Err("CATALOG_CHANGED".into());
@@ -1441,6 +1498,8 @@ pub async fn dependencies(source_id: String) -> Result<SourceDependenciesView, S
             .as_ref()
             .is_some_and(|reference| reference.source_id == source_id);
     Ok(SourceDependenciesView {
+        client_target_count: client_targets.len(),
+        client_targets,
         source_id,
         revision: stored.revision,
         account_count: accounts.len(),
@@ -1865,6 +1924,7 @@ pub async fn auto_refresh_loop() {
                 if refresh(uuid::Uuid::new_v4().to_string(), id).await.is_ok() {
                     // 统一代理引用同一来源时必须同步快照，否则自动刷新后账号仍走旧节点。
                     super::codex_unified_proxy::resync_source(&source_id, false).await;
+                    if super::codex_client_proxy::resync_source(&source_id, false).await.is_err() { super::logger::log_warn("[ClientProxy] source resync failed"); }
                 }
                 tokio::task::yield_now().await;
             }

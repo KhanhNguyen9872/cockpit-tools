@@ -86,6 +86,34 @@
     }
 
     #[test]
+    fn restored_fast_default_reaches_responses_compact_and_chat_without_overriding_client() {
+        for path in ["/v1/responses", "/v1/responses/compact", "/v1/chat/completions"] {
+            for configured_tier in [None, Some("priority")] {
+                for explicit in [None, Some("default"), Some("standard"), Some("fast"), Some("priority"), Some("flex"), Some("auto"), Some("ultrafast")] {
+                    let mut body = if path.contains("chat") {
+                        json!({"model":"custom-model", "messages":[{"role":"user", "content":"fixture"}]})
+                    } else {
+                        json!({"model":"custom-model", "input":"fixture"})
+                    };
+                    if let Some(tier) = explicit { body["service_tier"] = json!(tier); }
+                    let request = ParsedRequest {
+                        method: "POST".to_string(), target: path.to_string(),
+                        headers: HashMap::new(), body: serde_json::to_vec(&body).unwrap(),
+                    };
+                    let (prepared, _) = super::prepare_gateway_request_with_default_service_tier(request, configured_tier).unwrap();
+                    let forwarded: Value = serde_json::from_slice(&prepared.body).unwrap();
+                    let expected = match explicit {
+                        Some("fast") => Some("priority"),
+                        Some("standard") => Some("default"),
+                        _ => explicit.or(configured_tier),
+                    };
+                    assert_eq!(forwarded.get("service_tier").and_then(Value::as_str), expected, "{path} {configured_tier:?} {explicit:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn extracts_usage_from_codex_response_completed_payload() {
         let payload = json!({
             "type": "response.completed",
@@ -293,6 +321,8 @@ data: {"type":"response.completed","response":{"id":"resp_123","usage":{"input_t
             client_instance_id: "instance-1".to_string(),
             request_kind: "text".to_string(),
             service_tier: None,
+            requested_service_tier: None,
+            response_service_tier: None,
             reasoning_effort: None,
             success: false,
             status: Some(200),
@@ -300,6 +330,7 @@ data: {"type":"response.completed","response":{"id":"resp_123","usage":{"input_t
             error_message: Some("stream error: stream disconnected before completion: stream closed before response.completed/response.done, last_event=response.failed".to_string()),
             latency_ms: 1754,
             first_response_ms: None,
+            output_generation_ms: None,
             usage: SidecarUsageDetails::default(),
         };
 

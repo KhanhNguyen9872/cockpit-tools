@@ -62,7 +62,7 @@ const LEGACY_CODEX_MODEL_PRESET_MODELS: &[&str] = &[
 
 #[path = "codex_wakeup_task_state.rs"]
 mod task_state;
-pub use task_state::{claim_task_run, mark_task_run_failed, try_task_run_lease};
+pub use task_state::{authorize_task_dispatch, claim_task_run, mark_task_run_failed, try_task_run_lease};
 
 static TASKS_LOCK: std::sync::LazyLock<Mutex<()>> = std::sync::LazyLock::new(|| Mutex::new(()));
 static HISTORY_LOCK: std::sync::LazyLock<Mutex<()>> = std::sync::LazyLock::new(|| Mutex::new(()));

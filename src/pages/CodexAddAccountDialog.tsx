@@ -10,7 +10,7 @@ import { useModalScrollLock } from "../hooks/useModalScrollLock";
 import "./CodexAccountDialogs.css";
 import { CODEX_TEMP_LOGIN_STEPS } from "../services/codexTempLoginService";
 import { CODEX_API_PROVIDER_CUSTOM_ID, CODEX_API_PROVIDER_PRESETS, COCKPIT_API_PROVIDER_ID } from "../utils/codexProviderPresets";
-import { canUseCodexAccountProxy } from "../utils/codexAccountProxy";
+import { canUseCodexOAuthAccountProxy } from "../utils/codexAccountProxy";
 import type { CodexAccountsViewProps } from "./CodexAccountsView";
 
 /** 渲染 CodexAccountsOverviewPanel 的 expr:showAddModal && 业务面板。 */
@@ -138,6 +138,8 @@ export function CodexAddAccountDialog(props: CodexAccountsViewProps) {
     tokenInput,
   } = props;
   const addStatusRef = useRef<HTMLDivElement>(null);
+  const addDialogRef = useRef<HTMLDivElement>(null);
+  const instancePickerDialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!showAddModal || addStatus !== "error" || !addMessage) return;
     const frame = window.requestAnimationFrame(() => {
@@ -153,20 +155,21 @@ export function CodexAddAccountDialog(props: CodexAccountsViewProps) {
   // 选实例弹框叠加在添加账号弹框之上：只让最上层响应 ESC。
   useEscCloseTopmost(
     Boolean(localImportInstances),
-    handleCloseLocalImportInstancePicker,
+    handleCloseLocalImportInstancePicker, instancePickerDialogRef,
   );
   useModalScrollLock(Boolean(showAddModal));
   // 官方登录进行中时，ESC 先取消登录再关闭弹框，避免留下无人接管的临时 profile。
   useEscCloseTopmost(tempLoginRunning, () => {
     void handleCancelCodexTempLogin();
     closeCodexAddModal();
-  });
+  }, addDialogRef);
   return showAddModal &&
             createPortal(
               <>
                 <div className="modal-overlay codex-account-dialog-overlay">
                 <div
                   className="modal-content codex-add-modal codex-account-add-modal codex-provider-modal codex-account-dialog"
+                  ref={addDialogRef}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="modal-header">
@@ -538,7 +541,7 @@ export function CodexAddAccountDialog(props: CodexAccountsViewProps) {
                         {/* macOS 当前构建不支持内置授权窗口代理：如实说明，不让重新授权看起来已走该出口。 */}
                         {reauthTargetAccount &&
                           isMacOS &&
-                          canUseCodexAccountProxy(reauthTargetAccount) && (
+                          canUseCodexOAuthAccountProxy(reauthTargetAccount) && (
                             <p className="section-desc">
                               {t("codex.oauthProxy.macUnavailable")}
                             </p>
@@ -1544,6 +1547,7 @@ export function CodexAddAccountDialog(props: CodexAccountsViewProps) {
                 <div className="modal-overlay codex-local-import-instance-overlay">
                   <div
                     className="modal codex-local-import-instance-modal"
+                    ref={instancePickerDialogRef}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="modal-header">

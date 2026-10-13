@@ -71,10 +71,13 @@ type rawDiagnosticSnapshot struct {
 
 type diagnosticAttempt struct {
 	requestAttemptDetail
-	identity any
-	started  time.Time
-	finished bool
-	first    bool
+	identity        any
+	started         time.Time
+	finished        bool
+	first           bool
+	firstFragmentAt time.Time
+	outputTerminal  bool
+	outputComplete  bool
 }
 
 // Request-owned collectors retain bounded memory and never write to stdout or
@@ -191,6 +194,9 @@ func (d *requestDiagnosticsCollector) chunk(ctx context.Context) {
 		return
 	}
 	a.first = true
+	if a.firstFragmentAt.IsZero() {
+		a.firstFragmentAt = time.Now()
+	}
 	if d.firstResponseMS == nil {
 		value := time.Since(d.started).Milliseconds()
 		d.firstResponseMS = &value
@@ -281,7 +287,11 @@ func (d *requestDiagnosticsCollector) finish(ctx context.Context, status int) pe
 	for _, a := range d.attempts {
 		if !a.finished {
 			a.LatencyMS = time.Since(a.started).Milliseconds()
-			if ctx != nil && ctx.Err() != nil {
+			if a.outputComplete && a.FailurePhase == "" && status >= 200 && status < 400 {
+				// The complete terminal usage was observed before client cleanup,
+				// even if the asynchronous auth/usage callback has not run yet.
+				a.Success = true
+			} else if ctx != nil && ctx.Err() != nil {
 				a.Success = false
 				a.ErrorCategory = "client_canceled"
 				a.FailurePhase = diagnosticFailurePhase(ctx, "", a.first, ctx.Err())

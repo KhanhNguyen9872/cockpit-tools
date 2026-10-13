@@ -7,7 +7,8 @@ export interface CodexTopLayoutPreference {
   placement: Record<CodexTab, CodexTopTabPlacement>;
 }
 
-const STORAGE_KEY = 'agtools.codex.top_layout.v1';
+export const CODEX_TOP_LAYOUT_STORAGE_KEY = 'agtools.codex.top_layout.v1';
+export const CODEX_TOP_LAYOUT_UPDATED_EVENT = 'codex:top-layout-updated';
 export const CODEX_TOP_TAB_LIMIT = 5;
 
 export const CODEX_TOP_LAYOUT_TABS: CodexTab[] = [
@@ -66,21 +67,32 @@ export function moveCodexTopLayoutTab(
   return normalizeCodexTopLayout(normalized, availableTabs);
 }
 
+/** Strict read for callers that must surface unavailable or corrupt storage. */
+export function loadCodexTopLayoutPreference(): CodexTopLayoutPreference {
+  const raw = localStorage.getItem(CODEX_TOP_LAYOUT_STORAGE_KEY);
+  if (!raw) return createDefaultCodexTopLayout();
+  const parsed: unknown = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+    || !Array.isArray((parsed as { order?: unknown }).order)
+    || !(parsed as { order: unknown[] }).order.every(tab => typeof tab === 'string')) {
+    throw new Error('invalid_codex_top_layout');
+  }
+  return normalizeCodexTopLayout(parsed);
+}
+
 export function readCodexTopLayoutPreference(): CodexTopLayoutPreference {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createDefaultCodexTopLayout();
-    const parsed = JSON.parse(raw);
-    return normalizeCodexTopLayout(parsed);
+    return loadCodexTopLayoutPreference();
   } catch {
     return createDefaultCodexTopLayout();
   }
 }
 
+/** Failure propagates; only persisted changes are broadcast to other mounted views. */
 export function writeCodexTopLayoutPreference(layout: CodexTopLayoutPreference): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ order: normalizeCodexTopLayout(layout).order }));
-  } catch {
-    // ignore localStorage write failures
+  const normalized = normalizeCodexTopLayout(layout);
+  localStorage.setItem(CODEX_TOP_LAYOUT_STORAGE_KEY, JSON.stringify({ order: normalized.order }));
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(CODEX_TOP_LAYOUT_UPDATED_EVENT, { detail: normalized }));
   }
 }

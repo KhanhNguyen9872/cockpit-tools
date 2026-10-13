@@ -299,7 +299,7 @@ async fn occupied_entry_reports_start_failure_and_successful_retry() {
 
 #[tokio::test]
 async fn desktop_launch_never_falls_back_when_configured_entry_cannot_listen() {
-    for mode in ["account", "unified", "disabled"] {
+    for mode in ["account", "unified"] {
         let id = format!("launch-entry-failure-{mode}");
         let fixture = LaunchFixture::new(&id);
         let mut account = eligible_account(&id);
@@ -308,7 +308,7 @@ async fn desktop_launch_never_falls_back_when_configured_entry_cannot_listen() {
             "unified" => { codex_unified_proxy::enable(
                 codex_unified_proxy::Reference::default(), "cockpit-proxy://entry-startup-fixture".into(),
             ).unwrap(); },
-            _ => account.egress_proxy_disabled = true,
+            _ => unreachable!(),
         }
         fixture.save(&account);
         let mut blockers = Vec::new();
@@ -319,7 +319,7 @@ async fn desktop_launch_never_falls_back_when_configured_entry_cannot_listen() {
         }
         assert_eq!(ensure(&id).await.unwrap_err(), "PROXY_ENTRY_PORT_UNAVAILABLE", "{mode}");
         if mode != "unified" {
-            // Native and disabled routes need no engine. Shared catalog routes
+            // Native routes need no engine. Shared catalog routes
             // have a separate engine prerequisite, covered by preflight_tests.
             assert_eq!(
                 crate::modules::codex_instance::preflight_egress_proxy_for_bind_account(Some(&id)).await.unwrap_err(),

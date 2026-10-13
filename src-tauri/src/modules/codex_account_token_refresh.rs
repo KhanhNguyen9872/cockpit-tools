@@ -82,7 +82,8 @@ fn clear_refresh_token_reused_state(account: &mut CodexAccount) -> Result<(), St
     if quota_reused {
         account.quota_error = None;
     }
-    save_account(account)
+    *account = save_account_preserving_egress_proxy(account)?;
+    Ok(())
 }
 
 /// 服务端明确撤销授权是账号级终止状态，不能再降级为仅客户端需授权。
@@ -115,7 +116,19 @@ fn format_refresh_error_for_user(raw: &str) -> String {
             "当前网络地区不支持刷新 Codex 授权。OpenAI 授权服务拒绝了当前网络出口的刷新请求，请切换到支持的网络地区后重试。原始错误: {}",
             raw
         ),
-        CodexRefreshErrorKind::Other => format!("Token 已过期且刷新失败: {}", raw),
+        CodexRefreshErrorKind::Other => {
+            // Force refresh is also allowed while the current access token is
+            // valid. Transport/storage/proxy failures do not prove expiration.
+            // Preserve local proxy codes for their existing UI classification.
+            if crate::modules::codex_quota::is_local_proxy_error(raw) {
+                return raw.to_string();
+            }
+            crate::modules::i18n::translate(
+                &crate::modules::config::get_user_config().language,
+                "codex.authError.refreshFailed",
+                &[("error", raw)],
+            )
+        }
     }
 }
 
@@ -196,7 +209,8 @@ pub(crate) fn format_account_switch_error(account_id: &str, error: String) -> St
 fn mark_account_requires_reauth(account: &mut CodexAccount, reason: &str) -> Result<(), String> {
     account.requires_reauth = true;
     account.reauth_reason = Some(reason.to_string());
-    save_account(account)
+    *account = save_account_preserving_egress_proxy(account)?;
+    Ok(())
 }
 
 fn is_missing_refresh_token_reason(reason: &str) -> bool {
@@ -735,7 +749,8 @@ fn clear_stale_missing_refresh_token_reauth(account: &mut CodexAccount) -> Resul
 
     account.requires_reauth = false;
     account.reauth_reason = None;
-    save_account(account)
+    *account = save_account_preserving_egress_proxy(account)?;
+    Ok(())
 }
 
 fn clear_stale_id_token_reauth(account: &mut CodexAccount) -> Result<(), String> {
@@ -753,7 +768,8 @@ fn clear_stale_id_token_reauth(account: &mut CodexAccount) -> Result<(), String>
 
     account.requires_reauth = false;
     account.reauth_reason = None;
-    save_account(account)
+    *account = save_account_preserving_egress_proxy(account)?;
+    Ok(())
 }
 
 /// 清理已撤回的 app-server 主动预检写入的误判状态。

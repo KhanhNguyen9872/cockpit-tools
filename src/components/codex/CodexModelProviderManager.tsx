@@ -3083,6 +3083,7 @@ export function useCodexModelProviderManagerController({
             launchOptions.deepSeekAccessMode,
             null,
             launchOptions.imageGenerationAccountIds ?? [],
+            launchOptions.imageGenerationAccountModels ?? {},
           );
         }
         const presetId = resolveCodexApiProviderPresetId(preview.provider.baseUrl);

@@ -2,11 +2,14 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -21,26 +24,40 @@ type responsesWebsocketInboundMessage struct {
 
 // Read independently of bootstrap and output forwarding, so a real downstream
 // disconnect cancels an upstream that has not produced any frame yet. Messages
-// still execute serially. Excess pipelining terminates the connection instead of
+// still execute serially, except interrupts handled immediately by the reader.
+// Excess pipelining terminates the connection instead of
 // occupying unbounded memory or preventing the reader from observing closure.
 type responsesWebsocketReadPump struct {
-	ctx      context.Context
-	cancel   context.CancelCauseFunc
-	conn     *websocket.Conn
-	writer   *responsesWebsocketWriter
-	messages chan responsesWebsocketInboundMessage
-	done     chan struct{}
-	bytes    atomic.Int64
+	ctx               context.Context
+	cancel            context.CancelCauseFunc
+	conn              *websocket.Conn
+	writer            *responsesWebsocketWriter
+	messages          chan responsesWebsocketInboundMessage
+	done              chan struct{}
+	bytes             atomic.Int64
+	interrupt         func(context.Context, []byte) error
+	local             *responsesLocalInterrupt
+	interruptMu       sync.Mutex
+	interruptJobs     chan responsesWebsocketInterruptJob
+	interruptDone     chan struct{}
+	interruptPending  map[responsesWebsocketInterruptKey]struct{}
+	interruptBytes    int64
+	lastInterruptKey  responsesWebsocketInterruptKey
+	lastInterruptSent bool
 }
 
-func newResponsesWebsocketReadPump(parent context.Context, conn *websocket.Conn, writers ...*responsesWebsocketWriter) *responsesWebsocketReadPump {
+func newResponsesWebsocketReadPump(parent context.Context, conn *websocket.Conn, interrupt func(context.Context, []byte) error, local *responsesLocalInterrupt, writers ...*responsesWebsocketWriter) *responsesWebsocketReadPump {
 	ctx, cancel := context.WithCancelCause(parent)
 	writer := newResponsesWebsocketWriter(conn)
 	if len(writers) > 0 && writers[0] != nil {
 		writer = writers[0]
 	}
 	pump := &responsesWebsocketReadPump{ctx: ctx, cancel: cancel, conn: conn,
-		writer: writer, messages: make(chan responsesWebsocketInboundMessage, responsesWebsocketInboundQueueSize), done: make(chan struct{})}
+		writer: writer, interrupt: interrupt, local: local, messages: make(chan responsesWebsocketInboundMessage, responsesWebsocketInboundQueueSize), done: make(chan struct{})}
+	pump.interruptJobs = make(chan responsesWebsocketInterruptJob, 1)
+	pump.interruptDone = make(chan struct{})
+	pump.interruptPending = make(map[responsesWebsocketInterruptKey]struct{})
+	go pump.runInterrupts()
 	go pump.read()
 	return pump
 }
@@ -52,6 +69,14 @@ func (p *responsesWebsocketReadPump) read() {
 		if errRead != nil {
 			p.cancel(errRead)
 			return
+		}
+		// Control frames bypass response.create normalization. The original
+		// response_id, mode, and extension fields must reach upstream unchanged.
+		if p.interrupt != nil && (kind == websocket.TextMessage || kind == websocket.BinaryMessage) && json.Valid(payload) && gjson.GetBytes(payload, "type").String() == wsRequestTypeInterrupt {
+			if !p.queueInterrupt(payload) {
+				return
+			}
+			continue
 		}
 		queuedBytes := p.bytes.Add(int64(len(payload)))
 		// Preserve the existing single-frame acceptance. The budget limits
@@ -103,6 +128,7 @@ func (p *responsesWebsocketReadPump) stop() {
 	p.cancel(context.Canceled)
 	_ = p.conn.Close()
 	<-p.done
+	<-p.interruptDone
 	for {
 		select {
 		case <-p.messages:

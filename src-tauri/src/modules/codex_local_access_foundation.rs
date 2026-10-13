@@ -25,6 +25,7 @@ use crate::models::codex_local_access::{
     CodexLocalAccessTestResult, CodexLocalAccessTimeoutPreset, CodexLocalAccessTimeouts,
     CodexLocalAccessUsageEvent, CodexLocalAccessUsageEventPage, CodexLocalAccessUsageStats,
     CodexLocalAccessUsageTrendPoint, CodexTokenBreakdown, DEFAULT_CODEX_IMAGE_GENERATION_MODEL,
+    DEFAULT_MAX_ACCOUNT_CONCURRENCY,
 };
 use crate::models::{CodexInstanceApiRoute, CodexInstanceModelRouting};
 use crate::modules::atomic_write::{
@@ -654,6 +655,8 @@ struct GatewayRuntime {
     actual_port: Option<u16>,
     actual_bind_host: Option<String>,
     sidecar_config_fingerprint: Option<String>,
+    applied_collection: Option<CodexLocalAccessCollection>,
+    applied_account_signatures: HashMap<String, String>,
     last_error: Option<String>,
     shutdown_sender: Option<watch::Sender<bool>>,
     task: Option<tokio::task::JoinHandle<()>>,
@@ -1741,6 +1744,9 @@ fn preserve_runtime_collection_fields(
 ) {
     // Only the dedicated settings command changes this field after initial load.
     collection.request_payload_logging = current.request_payload_logging;
+    if collection.image_generation_model_catalog_revision <= current.image_generation_model_catalog_revision {
+        copy_image_model_catalog_fields(collection, current);
+    }
     for api_key in &mut collection.api_keys {
         if let Some(current_api_key) = current.api_keys.iter().find(|item| item.id == api_key.id) {
             api_key.token_used = api_key.token_used.max(current_api_key.token_used);

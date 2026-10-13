@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
 )
 
 type codexWebsocketSessionStore struct {
@@ -66,13 +68,15 @@ type codexWebsocketSession struct {
 
 	writeMu sync.Mutex
 
-	activeMu     sync.Mutex
-	activeConn   *websocket.Conn
-	activeCh     chan codexWebsocketRead
-	activeDone   <-chan struct{}
-	activeCancel context.CancelFunc
-	terminalConn *websocket.Conn
-	terminalErr  error
+	activeMu            sync.Mutex
+	activeConn          *websocket.Conn
+	activeCh            chan codexWebsocketRead
+	activeDone          <-chan struct{}
+	activeCancel        context.CancelFunc
+	terminalConn        *websocket.Conn
+	terminalErr         error
+	responseStateConn   *websocket.Conn
+	terminalResponseIDs helps.TerminalResponseIDs
 
 	readerConn *websocket.Conn
 
@@ -137,6 +141,10 @@ func (s *codexWebsocketSession) resetTerminalError(conn *websocket.Conn) {
 	s.activeMu.Lock()
 	s.terminalConn = conn
 	s.terminalErr = nil
+	if s.responseStateConn != conn {
+		s.responseStateConn = conn
+		s.terminalResponseIDs.Reset()
+	}
 	s.activeMu.Unlock()
 }
 
@@ -205,6 +213,65 @@ func (s *codexWebsocketSession) writeMessage(conn *websocket.Conn, msgType int, 
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	return conn.WriteMessage(msgType, payload)
+}
+
+// writeInterruptMessage preserves the captured connection and active read epoch.
+// Waiting for another writer is cancellable; cancelling an in-flight network
+// write closes only the captured socket, without selecting or dialing a successor.
+func (s *codexWebsocketSession) writeInterruptMessage(ctx context.Context, conn *websocket.Conn, readCh chan codexWebsocketRead, activeDone <-chan struct{}, payload []byte) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for !s.writeMu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-activeDone:
+			return cliproxyexecutor.ErrNoActiveUpstreamWebsocket
+		case <-ticker.C:
+		}
+	}
+	defer s.writeMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// The reader may record completion while this control waits for a writer,
+	// before the consumer finishes the current read epoch.
+	s.connMu.Lock()
+	s.activeMu.Lock()
+	current := s.conn == conn
+	alreadyTerminal := current && s.responseStateConn == conn && s.terminalResponseIDs.Contains(gjson.GetBytes(payload, "response_id").String())
+	active := current && s.activeConn == conn && s.activeCh == readCh
+	s.activeMu.Unlock()
+	s.connMu.Unlock()
+	if alreadyTerminal {
+		return nil
+	}
+	if !active {
+		return cliproxyexecutor.ErrNoActiveUpstreamWebsocket
+	}
+	select {
+	case <-activeDone:
+		return cliproxyexecutor.ErrNoActiveUpstreamWebsocket
+	default:
+	}
+	closeDone := make(chan struct{})
+	stopClose := context.AfterFunc(ctx, func() {
+		defer close(closeDone)
+		_ = conn.Close()
+	})
+	defer func() {
+		if !stopClose() {
+			<-closeDone
+		}
+	}()
+	errWrite := conn.WriteMessage(websocket.TextMessage, payload)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return errWrite
 }
 
 func (s *codexWebsocketSession) setMultiAgentV2Optimized(conn *websocket.Conn, optimized bool) {
@@ -639,6 +706,15 @@ func (e *CodexWebsocketsExecutor) readUpstreamLoop(sess *codexWebsocketSession, 
 				return
 			}
 			continue
+		}
+
+		// Record before delivery so an interrupt racing completion can be acknowledged.
+		if id := helps.TerminalResponseID(payload); id != "" {
+			sess.activeMu.Lock()
+			if sess.responseStateConn == conn {
+				sess.terminalResponseIDs.Add(id)
+			}
+			sess.activeMu.Unlock()
 		}
 
 		ch, done := sess.activeForConn(conn)

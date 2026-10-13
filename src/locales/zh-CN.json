@@ -96,6 +96,9 @@
     "providerClear": "清空选择"
   },
   "common": {
+    "apiKeyAccount": "API Key 账号",
+    "status": "状态",
+    "cliQuickLaunch": "CLI 启动",
     "requestId": "请求 ID",
     "failureTime": "失败时间",
     "clearRecord": "清除记录",
@@ -251,7 +254,8 @@
           "statusRunning": "导入中...",
           "statusSkipped": "已跳过",
           "statusPending": "待导入"
-        }
+        },
+        "invalidJson": "JSON 格式无效，请检查文件或粘贴内容。"
       },
       "externalImport": {
         "bundleInvalidJson": "导入包不是有效 JSON",
@@ -426,7 +430,24 @@
     "show": "显示",
     "configSaveTimeout": "操作超时，请刷新确认结果后重试。",
     "clearAll": "取消全选",
-    "clear": "清除"
+    "clear": "清除",
+    "outputSpeed": {
+      "label": "速度",
+      "pageAverage": "本页加权速度",
+      "pageSamples": "{{count}} 个有效样本",
+      "hint": "近似上游输出速度：输出 Token ÷ 首个响应片段至执行结束的时间，排除首响等待；至少 100 输出 Token 且窗口不少于 100 毫秒。推理 Token 按上游输出用量口径计入，不重复相加；不计缓存输入。",
+      "unavailableHint": "无有效测量：缺用量或计时、不支持的传输、旧日志、短回复、极短窗口、失败或取消。未经过网关计时的普通客户端会话不测速度。",
+      "pageHint": "仅统计当前页：有效样本的总输出 Token ÷ 总观测时间。并发请求分别采样，不代表全部历史平均速度。",
+      "value": "≈ {{value}} tok/s",
+      "unavailableReasons": {
+        "canceled": "请求已取消，不测速度。",
+        "failed": "请求失败或未完整结束，不测速度。",
+        "missingUsage": "未记录有效输出用量。",
+        "shortOutput": "输出不足 100 Token，不测速度。",
+        "missingTiming": "未记录有效输出计时。",
+        "shortWindow": "输出观测窗口不足 100 毫秒。"
+      }
+    }
   },
   "floatingCard": {
     "selectPlatform": "切换平台",
@@ -793,7 +814,7 @@
       "startAll": "确认启动所有未运行实例？",
       "restartAll": "确认重启所有运行中的实例？",
       "stopAll": "确认关闭全部实例？",
-      "syncThreads": "将扫描所有 Codex 实例并自动补齐缺失线程。已存在线程不会重复写入，发生写入前会先备份目标实例关键文件。确认继续？"
+      "syncThreads": "将补齐所有实例中缺失的会话，并在目标实例已停止且历史一致时追加新增内容，不覆盖已有字节。分叉历史或运行中目标的已有会话更新会被拒绝。写入前会备份目标文件。确认继续？"
     },
     "status": {
       "running": "运行中",
@@ -1062,6 +1083,8 @@
     "title": "应用设置",
     "subtitle": "个性化您的 Cockpit Tools 体验。",
     "general": {
+      "errorReporting": "遥测诊断",
+      "errorReportingDesc": "启用后提交经过脱敏的启动及界面诊断；关闭后停止提交。",
       "appearance": "界面外观",
       "language": "显示语言",
       "languageDesc": "选择界面的显示语言",
@@ -1386,7 +1409,7 @@
       "backup": {
         "title": "备份管理",
         "desc": "统一管理定期备份、备份目录和备份列表。",
-        "modalDesc": "在这里配置自动备份规则，查看项目目录内的备份文件，并执行恢复、下载或清理。",
+        "modalDesc": "管理自动备份规则和所选备份目录，可迁移到其他磁盘；查看、恢复、下载或清理目录内的本地备份。",
         "statusEnabled": "自动备份已开启",
         "statusDisabled": "自动备份已关闭",
         "lastRunLabel": "最近备份：{{time}}",
@@ -1404,8 +1427,10 @@
         "retentionDesc": "超过天数的备份会在下次检查时自动清理。",
         "retentionUnit": "天",
         "directoryTitle": "备份目录",
-        "directoryDesc": "定时备份和 Cockpit 行为快照都保存到此目录；可迁移到其他磁盘。",
+        "directoryDesc": "定时备份和 Cockpit 行为快照保存到所选目录；可迁移到其他磁盘。",
         "changeDirectory": "更换目录",
+        "sourceUnavailable": "旧备份无法读取，不能确认文件数量或迁移。可仅切换到新备份目录，旧文件、账号及应用配置目录保持不变。原因：{{error}}",
+        "loadTimeout": "备份读取超时，可重试或更换目录。",
         "migrating": "迁移中...",
         "migrationConfirm": "是否将现有备份从 {{oldPath}} 迁移到 {{newPath}}？\n\n选择“取消”仍会切换目录，但不会迁移旧文件。",
         "migrationConfirmTitle": "更换备份目录",
@@ -1533,6 +1558,8 @@
         "accountsOnlyFile": "该备份仅包含账号数据，请勾选“账号数据”后再导入",
         "selectedSectionsMissing": "所选数据类型不在当前备份中",
         "unsupportedLegacyFile": "无法识别该旧版账号备份格式",
+        "codexTopLayoutInvalid": "备份中的顶部布局格式无效，配置未导入。",
+        "codexTopLayoutImportFailed": "其他配置已导入，但顶部布局保存失败。请重试导入。",
         "unsupportedVersion": "当前版本暂不支持该数据包版本"
       }
     },
@@ -2327,6 +2354,10 @@
       "accountsHint": "可多选，用这些账号进行测试。",
       "start": "开始测试",
       "testing": "测试中..."
+    },
+    "confirmation": {
+      "description": "确认向 {{count}} 个账号发送“{{name}}”唤醒请求。取消、关闭或超时均不会发送。",
+      "expired": "此次确认已过期或结束，请关闭弹框。"
     }
   },
   "update_notification": {
@@ -2381,6 +2412,16 @@
     "other_group": "其他模型"
   },
   "codex": {
+    "instance": {
+      "errors": {
+        "threadSyncWorkerFailed": "会话同步任务失败：{{error}}",
+        "threadSyncBusy": "Codex 会话同步正在进行，请稍后重试。",
+        "threadSyncTargetRunning": "目标 Codex 实例正在运行，请关闭后再同步已有会话。",
+        "threadSyncTargetChanged": "目标会话在预览后发生变化，请重新同步；已保留新增内容。",
+        "threadSyncTargetReplaced": "目标会话文件已被替换，请重新预览同步。",
+        "threadSyncFileBusy": "目标会话正在被其他同步操作使用，请稍后重试。"
+      }
+    },
     "thresholds": {
       "shortCycle": "短周期额度",
       "weekly": "周额度",
@@ -2515,9 +2556,9 @@
         "autoDisabled": "已关闭自动同步所有实例记录",
         "autoEnabled": "已开启自动同步所有实例记录",
         "autoTooltip": "自动同步所有实例记录",
-        "autoDesc": "关闭时保持多实例记录隔离；开启后仅在所有 Codex 实例已停止时，启动或关闭实例会自动合并本地记录。",
+        "autoDesc": "关闭时保持多实例记录隔离；开启后，仅在所有 Codex 实例已停止时，启动或关闭实例会自动补齐缺失会话并追加匹配历史的新增内容，不覆盖已有字节。",
         "closeFirst": "请先关闭所有 Codex 实例后再同步记录，避免运行中的实例把旧记录写回。",
-        "confirmMessage": "会把所有 Codex 实例中的本地会话记录做一次全量同步；同 ID 会话会进行事件级合并，写入前会备份目标实例关键文件和旧会话文件。确认继续？",
+        "confirmMessage": "将补齐所有实例中缺失的会话，并在目标实例已停止且历史一致时追加新增内容，不覆盖已有字节。分叉历史或运行中目标的已有会话更新会被拒绝。写入前会备份目标文件。确认继续？",
         "needTwo": "至少需要两个实例才能同步记录",
         "settingsSection": "同步设置",
         "settingsSubtitle": "管理 Codex 多实例记录同步方式",
@@ -2561,12 +2602,12 @@
       "accessModeDirectCons": "1：不能在 codex 内切换模型，也不支持绑定 OAuth 账号与转发生图",
       "accessModeCdpPros": "1：速度与直连一致\n2：可在 codex 官方模型列表切换 Flash / Pro",
       "accessModeCdpCons": "1：需要注入官方客户端，不支持绑定 OAuth 账号与转发生图",
-      "imageGenPickerDesc": "当遇到生图需求时会转发生图请求：先由基础模型处理，再由生图模型出图，会消耗所选账号的部分额度。",
+      "imageGenPickerDesc": "OAuth 来源使用基础模型和生图工具；API Key 来源使用图片接口。费用或额度由对应上游计入。",
       "imageGenSwitchTitle": "仅网关模式支持",
       "imageGenSwitchDescription": "启用 GPT 生图需要先切换到「网关列出」模式，是否切换并勾选？",
       "imageGenSwitchYes": "是",
       "imageGenSwitchNo": "否",
-      "imageGenTitle": "启用 GPT 生图",
+      "imageGenTitle": "启用生图",
       "oauthBindingHint": "绑定后启动与普通账号没有任何差异，可使用 OAuth 的全部能力（远端压缩，浏览器操作，各类插件等）；对话仍由当前 API Key 供应商处理。",
       "oauthBindingChange": "更换",
       "title": "Codex 启动预览",
@@ -2601,6 +2642,7 @@
     "switched": "已切换至 {{email}}",
     "switchFailed": "切换失败: {{error}}",
     "authError": {
+      "refreshFailed": "Token 刷新失败：{{error}}",
       "badge": "授权异常",
       "refreshTokenReused": "Codex 授权已失效：refresh_token 已被其它客户端或实例使用过。请重新登录，并避免官方 Codex、其它实例或外部工具同时刷新同一账号。",
       "refreshTokenExpired": "Codex 登录授权已过期，无法自动刷新。请重新登录 Codex 账号。",
@@ -2854,8 +2896,8 @@
       "imageGenerationLabel": "image_generation",
       "imageGenerationDesc": "控制普通对话是否声明图片工具，以及图片接口是否可用。",
       "imageGenerationSaveSuccess": "image_generation 设置已更新",
-      "imageForwardLabel": "启用 GPT 生图",
-      "imageForwardHint": "勾选后选择 GPT 账号：生图与图片编辑请求交给所选账号执行并消耗其额度，对话请求仍按账号池调度。",
+      "imageForwardLabel": "启用生图",
+      "imageForwardHint": "API Key 来源须兼容 Images API，并在账号行选择实际型号；OAuth 仅支持原生 GPT 型号。",
       "imageGenerationMode": {
         "enabled": "启用",
         "imagesOnly": "仅图片",
@@ -2866,7 +2908,20 @@
       "modelId": "模型 ID",
       "modelIdViewOnly": "仅查看，无切换功能",
       "modelIdPlaceholder": "选择模型 ID",
+      "imageAccounts": {
+        "upstreamModel": "上游型号",
+        "chooseModel": "选择型号",
+        "modelRequired": "请选择支持的实际型号。",
+        "sourceUnavailable": "所选来源不支持当前图片模型，或缺少可用的 API 凭据/请求地址。",
+        "loadFailed": "读取生图设置失败，请重试。",
+        "missingModels": "有 {{count}} 个已选来源需要指定型号。",
+        "locateModel": "定位来源"
+      },
       "imageGenerationModel": {
+        "manage": "管理型号",
+        "deleteSelected": "型号正在使用，请先替换并保存。",
+        "invalid": "型号不能包含空白或控制字符，最长 200 字符。",
+        "syncFailed": "图片型号发现失败，请重试。",
         "label": "生图模型",
         "custom": "自定义",
         "save": "保存模型",
@@ -2932,7 +2987,8 @@
         "audioTooLarge": "音频请求不能超过 26 MiB。",
         "audioNotSupported": "此 OAuth 账号仅支持语音转写，其他音频操作需使用 API Key 供应商。",
         "audioUnavailable": "音频转发暂不可用。",
-        "audioUpstreamFailed": "音频上游请求失败。"
+        "audioUpstreamFailed": "音频上游请求失败。",
+        "modelNotAvailable": "模型 {{model}} 不在当前 API Key 的可用模型范围内。"
       },
       "testRateLimited": "服务可达，但上游限流或额度不足：{{detail}}。",
       "testHttpFailed": "服务可达，但请求返回 HTTP {{status}}：{{detail}}。",
@@ -2974,10 +3030,10 @@
       "killPortSuccess": "端口已清理（结束 {{count}} 个进程）",
       "killPortSuccessNone": "端口已检查，未发现外部占用进程",
       "killPortSuccessUnknown": "API 服务端口已清理",
-      "restartAction": "重启 Sidecar",
-      "restartTitle": "重启 API 服务",
-      "restartConfirmMessage": "将仅重启 API 服务 Sidecar，不修改账号、Token、API Key 或账号池配置。正在进行中的请求可能中断，确认继续吗？",
-      "restartSuccess": "API 服务 Sidecar 已重启",
+      "restartAction": "仅重启 API 服务",
+      "restartTitle": "仅重启 API 服务",
+      "restartConfirmMessage": "仅重启 API 服务，保留 Codex 窗口和账号池、API Key 配置。正在进行的 API 请求可能中断。确认继续吗？",
+      "restartSuccess": "API 服务已重启",
       "refreshStats": "刷新统计",
       "refreshStatsSuccess": "API 服务统计已刷新",
       "accountStatsTitle": "按账号统计",
@@ -3231,7 +3287,8 @@
       "testChatEmptyResponse": "响应为空",
       "imageGenerationMainModel": {
         "label": "生图主模型",
-        "hint": "留空沿用 gpt-5.5。此模型负责调用图片工具；所选 OAuth 账号必须支持该主模型的 image_generation。",
+        "notice": "日常请勿修改生图主模型。",
+        "hint": "此项仅用于官方生图接口的底层转发，不用于切换出图模型。仅当官方调整主模型时手动更新；留空沿用 gpt-5.5。",
         "invalid": "请输入不含空白的模型 ID，最长 200 字符。"
       },
       "requestDetail": {
@@ -3404,14 +3461,14 @@
         "confirm": "确认启动",
         "chooseAtStart": "启动时选择",
         "context": "支持上下文",
-        "imageGen": "支持 GPT 生图",
-        "imageGenHint": "仅网关模式支持。对话仍由该供应商的模型处理；生图走 gpt-image 原链路，由所选 GPT 账号执行并消耗其额度。",
-        "imageGenPick": "选择 GPT 账号",
+        "imageGen": "支持生图",
+        "imageGenHint": "API Key 来源须兼容 Images API，并在账号行选择实际型号；OAuth 仅支持原生 GPT 型号。",
+        "imageGenPick": "选择生图来源",
         "imageGenSelected": "已选 {{count}} 个账号",
         "imageGenEmpty": "尚未选择账号",
         "imageGenLocked": "勾选后可选择账号",
         "pickerTitle": "选择生图账号",
-        "pickerEmpty": "没有可用于生图的 OAuth 账号（Free 账号与 API Key 账号不支持）。",
+        "pickerEmpty": "没有可用来源。API Key 须支持所选型号或 GPT 同族型号；OAuth 仅支持非 Free 的原生 GPT 型号。",
         "pickerSelectAll": "全选",
         "pickerClear": "清空",
         "protocol": "协议",
@@ -4143,7 +4200,7 @@
       "confirm": {
         "title": "移到废纸篓",
         "message": "会将所选会话从对应实例中移到废纸篓，便于后续恢复；运行中的实例可能需要重启后才会反映。确认继续？",
-        "syncMessage": "会将缺失的 rollout、session_index 条目和会话文件时间同步到所有实例，并触发官方 Codex 重建会话索引；已有内容不会重复写入，写入前会先备份目标文件。确认继续？",
+        "syncMessage": "将补齐所有实例中缺失的会话，并在目标实例已停止且历史一致时追加新增内容，不覆盖已有字节。分叉历史或运行中目标的已有会话更新会被拒绝。写入前会备份目标文件。确认继续？",
         "repairVisibilityMessage": "会校正官方 Codex state DB 中影响侧边栏显示的会话记录；写入前会先备份将要修改的 state DB。"
       },
       "empty": {
@@ -4235,7 +4292,7 @@
       },
       "repairModal": {
         "title": "修复历史会话",
-        "description": "将历史会话迁移到目标实例当前的 Provider，并修复会话文件、SQLite 索引、本地会话目录和工作区状态。执行前会创建本地备份。",
+        "description": "将历史会话的 Provider 归一到目标实例当前状态（仅修正 SQLite 索引、会话目录和工作区状态；会话日志文件保持原样，只校正文件时间）。执行前会创建本地备份。",
         "stopInstanceHint": "完整修复前请先完全退出所选 Codex App/ChatGPT 实例；仍可先预览变更。",
         "encryptedContentWarning": "检测到由其他 Provider/账号加密的历史内容。元数据可以完成迁移，但继续或压缩这些会话仍可能失败；需要可靠续聊时请切回原 Provider/账号或开启新会话。",
         "running": "正在修复...",
@@ -4250,7 +4307,7 @@
           "pruneBackups": "正在清理旧备份...",
           "done": "修复已完成",
           "writeSqliteProvider": "正在写入 {{instance}} 的 SQLite 可见性...",
-          "writeRolloutFiles": "正在写入旧会话文件...",
+          "writeRolloutFiles": "正在校正 {{instance}} 的会话文件时间...",
           "writeSqliteTimestamps": "正在校正 {{instance}} 的 SQLite 时间...",
           "writeSessionIndex": "正在写入 session_index..."
         },
@@ -4261,9 +4318,9 @@
         "providerLoadFailed": "读取 provider 候选失败：{{error}}",
         "modeTitle": "修复方式",
         "modeQuick": "快速修复",
-        "modeQuickDesc": "只校正官方 state DB 和会话文件首条元数据，适合日常切号后恢复。",
+        "modeQuickDesc": "只校正官方 state DB 和会话索引的 Provider，会话日志文件保持原样，适合日常切号后恢复。",
         "modeDeep": "完整修复",
-        "modeDeepDesc": "全量迁移历史 Provider，并修复目录、工作区和子 Agent 索引；执行前需退出目标实例。",
+        "modeDeepDesc": "全量归一历史 Provider，并修复目录、工作区和子 Agent 索引；会话日志文件保持原样，执行前需退出目标实例。",
         "scopeTitle": "会话范围",
         "scopeAll": "全部会话",
         "scopeAllDesc": "修复当前管理列表中的 {{count}} 条会话。",
@@ -4456,9 +4513,13 @@
       "standard": "标准",
       "standardDesc": "默认速度，常规用量",
       "fast": "快速",
-      "fastDesc": "1.5 倍速，用量增加",
+      "fastDesc": "加速，用量／费用更高",
       "saveSuccess": "速度已更新",
-      "saveFailed": "保存速度失败：{{error}}"
+      "saveFailed": "保存速度失败：{{error}}",
+      "loadFailed": "读取速度失败：{{error}}",
+      "apiHint": "保存成功后用于后续 API 请求，无需重启；在途请求不变，客户端显式档位优先。快速可能增加用量或费用，实际加速取决于模型与供应商。",
+      "apiSyncFailed": "偏好已保存，但运行中的 API 服务未确认更新；请重试。",
+      "launchHint": "切号及通过 Cockpit 启动时写入客户端配置。运行中的客户端需重启；新会话使用默认档位，已有会话的独立速度设置需在客户端调整。"
     },
     "apiService": {
       "inspection": {
@@ -4723,7 +4784,35 @@
         "reasoningEffortValue": "思考 {{effort}}",
         "serviceTier": "服务等级",
         "serviceTierValue": "等级 {{tier}}",
-        "upstreamModel": "发送模型"
+        "requestedTier": "请求: {{tier}}",
+        "responseTier": "回报: {{tier}}",
+        "legacyTier": "旧档位: {{tier}}",
+        "serviceTierHint": "请求档位是发往上游的 service_tier，不代表上游实际处理档位已确认。Codex OAuth 回报 default 不能据此认定快速已降级。“自动”表示未指定具体档位（省略字段或使用 auto）。",
+        "legacyTierHint": "旧记录混合了请求与响应档位，无法确认来源及实际处理档位。",
+        "upstreamModel": "发送模型",
+        "columns": {
+          "time": "时间",
+          "model": "模型",
+          "result": "结果",
+          "source": "来源",
+          "account": "账号",
+          "tokens": "Token",
+          "cost": "估算价值",
+          "performance": "性能",
+          "proxy": "代理",
+          "requestId": "请求 ID",
+          "actions": "操作"
+        },
+        "columnSettings": "显示列",
+        "tokenInput": "输入",
+        "tokenOutput": "输出",
+        "tokenCache": "缓存",
+        "tokenTotal": "总量"
+      },
+      "recovery": {
+        "progress": "正在自动恢复账号配置（{{attempt}}/{{total}}）",
+        "partialUnavailable": "部分账号暂不可用，其他账号可继续使用。请检查账号与 Key 绑定。",
+        "unavailable": "账号配置需要恢复。请检查账号与 Key 绑定后重试。"
       }
     },
     "apiKey": {
@@ -4939,6 +5028,12 @@
       "restartFailed": "重启网关失败：{{error}}"
     },
     "proxy": {
+      "legacyBoundHint": "沿用此前绑定账号代理，重新保存将使用所选模式。",
+      "boundAccountUnavailable": "绑定账号不可用，请重新选择代理。",
+      "boundProxyUnavailable": "绑定账号没有可用代理，请重新选择。",
+      "sourceUnavailable": "代理来源或节点已失效，请重新选择。",
+      "operationTimeout": "代理操作超时，请重试。",
+      "cardScopeHint": "此卡片代理用于启动的 Codex 桌面客户端；模型网关上游仍使用各自出口。",
       "display": {
         "title": "代理展示",
         "compact": "简略",
@@ -5054,7 +5149,7 @@
         "followYes": "是",
         "followNo": "否",
         "empty": "暂无可绑定代理的账号",
-        "emptyHint": "先添加标准 OAuth 账号，再回到此页配置出口。",
+        "emptyHint": "添加 OAuth 或 API 账号，或开启 API 服务卡片后，再到这里配置出口。",
         "loadFailed": "出口数据读取失败",
         "loadFailedHint": "本地代理资源读取失败，可重试；账号独立绑定不受影响。"
       },
@@ -5180,7 +5275,7 @@
       "disableAction": "解除代理",
       "setIndependent": "设置独立代理",
       "disabledHint": "跳过独立与统一代理，新连接尝试直连。",
-      "disabledWarning": "直连可能无法访问服务。已接入本地转接的桌面对新连接生效，其他运行中的客户端需重启；已有连接可能继续使用旧出口。",
+      "disabledWarning": "直连可能无法访问服务。重启 Codex 桌面客户端后直接联网，不再依赖 Cockpit 本地转接；重启前，已接入转接的客户端仅新连接尝试直连，已有连接可能继续使用旧出口。",
       "exitIp": "出口 IP",
       "sessionHistory": "运行记录",
       "sessionHistoryHint": "每 5 秒读取状态，仅记录本次预览的初始状态与变化（最多 20 条）；关闭后清空，并非完整历史日志。",
@@ -5239,16 +5334,16 @@
       "modeDefaultHint": "该账号未使用代理，按原有默认出口连接。",
       "modeStaleHint": "绑定的来源或节点已失效，请重新选择。",
       "management": "代理管理",
-      "managementHint": "为普通 OAuth 账号配置独立出口，不修改系统代理。",
+      "managementHint": "为 OAuth、API 账号与 API 服务卡片配置代理，不修改系统代理。API 卡片仅用于启动的桌面客户端，模型网关上游仍使用各自出口。",
       "emptyTitle": "为账号准备独立出口",
-      "emptyDescription": "还没有可配置代理的普通 OAuth 账号。返回账号总览添加账号后，即可在这里绑定代理并检测出口。",
+      "emptyDescription": "暂无适用账号卡片。添加 OAuth 或 API 账号，或开启 API 服务卡片后，即可在这里选择代理。",
       "search": "搜索账号",
       "filter": "绑定状态",
       "filter_all": "全部",
       "filter_bound": "已绑定",
       "filter_unbound": "未绑定",
       "noMatches": "没有匹配的账号",
-      "oauthOnly": "普通 OAuth 账号",
+      "oauthOnly": "账号卡片",
       "saved": "已保存",
       "hiddenSummary": "凭据已隐藏",
       "inputMode": "输入方式",
@@ -5279,7 +5374,7 @@
       "action": "代理",
       "boundHint": "已绑定；尚未验证连通性",
       "unboundHint": "未配置账号代理",
-      "unsupportedAccount": "仅普通 OAuth 账号支持此设置",
+      "unsupportedAccount": "此设置支持普通 OAuth、API 账号与 API 服务卡片。",
       "invalidUrl": "代理地址无效",
       "unsupportedProtocol": "暂不支持此代理协议",
       "saveFailed": "代理保存失败",
@@ -5390,14 +5485,17 @@
         "chooseMember": "选择分组成员",
         "chooseAccount": "选择账号",
         "bind": "绑定账号",
-        "noAccounts": "添加普通 OAuth 账号后即可绑定；现在可先测试出口。",
+        "noAccounts": "添加 OAuth 或 API 账号，或开启 API 服务卡片后即可分配代理；现在可先测试出口。",
         "autoGroupHint": "使用整个自动组，无需指定节点；按延迟自动选择，实际出口可能变化。",
         "policyGroupHint": "使用整个分组，无需指定节点；按分组策略运行，实际出口可能变化。",
         "selectGroupHint": "选择此分组要使用的成员；可直接选择组内节点以固定节点。",
         "chooseResource": "从资源选择",
         "unsupported": "暂不支持",
         "invalidInput": "请填写名称和有效的订阅地址、节点链接或代理信息。",
-        "downloadFailed": "订阅获取失败，请检查地址和网络；跨站跳转不受支持。",
+        "downloadFailed": "订阅下载失败，请检查网络及代理设置后重试。",
+        "downloadRedirect": "订阅发生跨站跳转或跳转次数过多，下载已停止。",
+        "downloadDenied": "订阅服务器拒绝访问（HTTP 401/403），请检查链接及有效期。",
+        "downloadTls": "订阅连接的 TLS 握手或证书校验失败，请检查网络及代理设置。",
         "timeout": "操作超时，请刷新确认结果后重试。",
         "tooLarge": "内容或资源数量超出限制，请缩小订阅范围。",
         "busy": "已有任务进行中或正在保存，请稍后刷新。",
@@ -5535,7 +5633,7 @@
         "assign": "分配代理",
         "specific": "指定账号",
         "shared": "设为统一代理",
-        "sharedHint": "未单独配置的 Codex OAuth 账号使用此代理，之后新增的适用账号也会跟随。已有独立配置保持不变。 明确选择“不使用代理”的账号除外。",
+        "sharedHint": "未单独配置的适用卡片使用此代理，新增卡片也会跟随。独立代理和“不使用代理”优先。API 卡片用于桌面客户端，模型网关上游仍使用各自出口。",
         "apply": "确认分配"
       },
       "managerResources": {
@@ -5562,7 +5660,7 @@
         "follow": "恢复跟随",
         "followHint": "使用统一代理；未开启时使用客户端默认网络。",
         "independentHint": "只更改这个账号，优先于统一设置。",
-        "scope": "仅支持符合条件的 Codex OAuth 账号。API Key 和自定义供应商账号不适用。",
+        "scope": "OAuth、API 账号与 API 服务",
         "followConfirm": "将清除 {{count}} 个账号的单独代理配置。统一代理开启时跟随统一代理，否则使用客户端默认网络。"
       },
       "managerUnified": {
@@ -5608,6 +5706,8 @@
       "noChanges": "没有待保存的修改",
       "topLayoutTitle": "顶部布局",
       "topLayoutDesc": "拖动或点击上下箭头排序；前五项显示在顶部，其余按顺序显示在“更多”中。",
+      "topLayoutSaveFailed": "顶部布局暂未保存，当前顺序已生效。请重试；重启可能恢复原顺序。",
+      "topLayoutReadFailed": "无法读取已保存的顶部布局，当前顺序仍可使用。请重试读取或调整布局后保存。",
       "locationTop": "顶部",
       "locationMore": "更多",
       "topLayoutHint": "“更多”按钮始终显示在右侧，不参与排序或隐藏。",
@@ -5678,7 +5778,15 @@
       },
       "failurePhase": "失败阶段",
       "applying": "正在应用到运行中的网关…",
-      "applyFailed": "设置已保存，但运行中的网关未能应用，可重试。原因：{{error}}"
+      "applyFailed": "设置已保存，但运行中的网关未能应用，可重试。原因：{{error}}",
+      "timeout": {
+        "open": "等待上游建立流超时。可在“超时与重试 → {{setting}}”调整等待时间（1–600 秒，默认 60 秒）。",
+        "idle": "流已建立，但等待后续数据超时。可在“超时与重试”调整对应的流空闲超时。",
+        "canceled": "请求已由客户端取消，不属于流打开超时。",
+        "gateway": "HTTP 504 表示网关等待超时；当前记录不足以确定原因，请查看上游错误和请求阶段。",
+        "threshold": "本次生效阈值：{{seconds}} 秒。",
+        "settings": "调整超时"
+      }
     },
     "experimentalModels": {
       "defaultReasoning": "默认档位",

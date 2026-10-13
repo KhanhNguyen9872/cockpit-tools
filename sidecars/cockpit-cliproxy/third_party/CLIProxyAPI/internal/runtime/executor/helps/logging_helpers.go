@@ -32,6 +32,7 @@ const (
 
 // UpstreamRequestLog captures the outbound upstream request details for logging.
 type UpstreamRequestLog struct {
+	Transport string
 	URL       string
 	Method    string
 	Headers   http.Header
@@ -64,7 +65,11 @@ func requestLogCaptureEnabled(cfg *config.Config) bool {
 // RecordAPIRequest stores the upstream request metadata in Gin context for request logging.
 func RecordAPIRequest(ctx context.Context, cfg *config.Config, info UpstreamRequestLog) {
 	if observer := cliproxyexecutor.DiagnosticsObserver(ctx); observer != nil {
-		observer.UpstreamRequest(ctx, cliproxyexecutor.DiagnosticRequest{Provider: info.Provider, AuthID: info.AuthID, Transport: "http", Headers: info.Headers, Body: info.Body})
+		transport := info.Transport
+		if transport == "" {
+			transport = "http"
+		}
+		observer.UpstreamRequest(ctx, cliproxyexecutor.DiagnosticRequest{Provider: info.Provider, AuthID: info.AuthID, Transport: transport, Headers: info.Headers, Body: info.Body})
 	}
 	if cfg == nil || cfg.CommercialMode {
 		return

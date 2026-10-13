@@ -91,6 +91,8 @@ fn create_instance_with_profile_copy(
     copy_profile: impl FnOnce(&Path, &Path) -> Result<(), String>,
 ) -> Result<InstanceProfile, String> {
     check_instance_creation_cancelled(cancelled)?;
+    let directory_preexisted = std::path::Path::new(params.user_data_dir.trim()).exists();
+    let creation_mode = params.init_mode.clone().unwrap_or_else(|| "copy".to_string());
     let _creation_guard = crate::modules::instance_storage_cleanup::protect_instance_creation()?;
     let name = instance_store::normalize_name(&params.name)?;
     let user_data_dir = params.user_data_dir.trim().to_string();
@@ -212,6 +214,9 @@ fn create_instance_with_profile_copy(
         last_pid: None,
     };
 
+    crate::modules::instance_directory_ownership::record_creation(
+        std::path::Path::new(&instance.user_data_dir), &instance.id, &creation_mode, directory_preexisted,
+    )?;
     store.instances.push(instance.clone());
     save_instance_store(&store)?;
     Ok(instance)

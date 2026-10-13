@@ -2248,7 +2248,9 @@ pub fn start_codex_with_args_and_env(
     extra_args: &[String],
     extra_env: &[(String, String)],
 ) -> Result<u32, String> {
-    start_codex_with_args_and_env_and_egress(codex_home, extra_args, extra_env, None)
+    start_codex_with_args_and_env_and_egress(
+        codex_home, extra_args, extra_env, &CodexLaunchProxy::Inherit,
+    )
 }
 
 /// 启动 Codex 桌面实例，并按账号覆盖全局出口代理。
@@ -2256,7 +2258,7 @@ pub fn start_codex_with_args_and_env_and_egress(
     codex_home: &str,
     extra_args: &[String],
     extra_env: &[(String, String)],
-    egress_proxy_url: Option<&str>,
+    launch_proxy: &CodexLaunchProxy,
 ) -> Result<u32, String> {
     #[cfg(target_os = "macos")]
     {
@@ -2307,7 +2309,7 @@ pub fn start_codex_with_args_and_env_and_egress(
                     &launch_args,
                     true,
                     &env_refs,
-                    egress_proxy_url,
+                    launch_proxy,
                 )
                 .map_err(|e| format!("启动 Codex 失败: {}", e))?;
                 crate::modules::logger::log_info(&format!(
@@ -2339,7 +2341,7 @@ pub fn start_codex_with_args_and_env_and_egress(
             &args,
             true,
             &[],
-            egress_proxy_url,
+            launch_proxy,
         )
         .map_err(|e| format!("启动 Codex 失败: {}", e))?;
         crate::modules::logger::log_info("Codex 启动命令已发送（open -n -a）");
@@ -2378,13 +2380,11 @@ pub fn start_codex_with_args_and_env_and_egress(
             )
         })?;
         let mut effective_extra_env: Vec<(String, String)> = extra_env.to_vec();
-        if let Some(proxy_url) = egress_proxy_url {
-            effective_extra_env.extend(
-                account_proxy_env_pairs(proxy_url)
-                    .into_iter()
-                    .map(|(key, value)| (key.to_string(), value)),
-            );
-        }
+        effective_extra_env.extend(
+            launch_proxy.env_overrides()
+                .into_iter()
+                .map(|(key, value)| (key.to_string(), value)),
+        );
 
         return launch_windows_codex_managed_instance(
             &resolved_launch_path,
@@ -2414,7 +2414,9 @@ pub fn start_codex_with_args_and_env_and_egress(
         })?;
 
         let mut command = Command::new(&launch_path);
-        apply_effective_proxy_env_to_command(&mut command, egress_proxy_url);
+        if !matches!(launch_proxy, CodexLaunchProxy::Direct) {
+            apply_effective_proxy_env_to_command(&mut command, launch_proxy);
+        }
         sanitize_linux_gui_launch_env(&mut command);
         command
             .env("CODEX_HOME", codex_home_trimmed)
@@ -2422,6 +2424,9 @@ pub fn start_codex_with_args_and_env_and_egress(
             .arg(format!("--user-data-dir={}", app_user_data_dir.display()));
         for (key, value) in extra_env {
             command.env(key, value);
+        }
+        if matches!(launch_proxy, CodexLaunchProxy::Direct) {
+            apply_effective_proxy_env_to_command(&mut command, launch_proxy);
         }
         for arg in build_codex_app_launch_args(extra_args) {
             command.arg(arg);
@@ -2462,7 +2467,7 @@ pub fn start_codex_with_args_and_env_and_egress(
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
-        let _ = (codex_home, extra_args, extra_env, egress_proxy_url);
+        let _ = (codex_home, extra_args, extra_env, launch_proxy);
         Err("当前系统不支持 Codex 应用多开".to_string())
     }
 }

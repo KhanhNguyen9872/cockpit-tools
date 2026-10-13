@@ -166,8 +166,9 @@ fn validate_tls(v: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// Strict capability allowlist: no files, detours, sockets, direct routes, plugins,
-/// arbitrary transport headers can enter a running engine. TLS bypass is an explicit node opt-in.
+/// Validate the resource envelope and host boundaries, preserving native engine
+/// parameters. Legacy intermediate formats remain explicitly decoded below.
+/// TLS bypass is an explicit node opt-in.
 pub fn validate_outbound(v: &Value) -> Result<(), String> {
     if is_insecure(v) {
         return Err(UNSUPPORTED.into());

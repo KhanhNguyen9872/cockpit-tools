@@ -11,7 +11,7 @@ import { proxyAssignmentAccounts } from '../../utils/codexProxyAssignment';
 import { canUseCodexAccountProxy } from '../../utils/codexAccountProxy';
 import { getCodexPlanBadgePresentation } from '../../types/codex';
 import { CODEX_PLAN_BADGE_STYLE_CHANGED_EVENT, getCodexPlanBadgeStyle, withCodexPlanBadgeStyle } from '../../utils/codexPreferences';
-import { useCodexAccountStore } from '../../stores/useCodexAccountStore';
+import { applyCodexProxyAccountSnapshot } from '../../services/codexProxyTargetService';
 import { useCodexProxyWorkspace } from './CodexProxyWorkspaceContext';
 import { useCodexProxyAccountName } from './useCodexProxyExitEditor';
 import { ModalErrorMessage } from '../ModalErrorMessage';
@@ -71,7 +71,7 @@ export function CodexProxyAssignDialog({ choice: initialChoice, onClose }: { cho
   const summary = batchBindSummary(results);
   const allVisible = visible.length > 0 && visible.every((entry) => selectedIds.includes(entry.id));
 
-  useEscCloseTopmost(true, () => { if (!running.current) onClose(); });
+  useEscCloseTopmost(true, () => { if (!running.current) onClose(); }, dialog);
   useModalScrollLock(true);
   useModalFocusTrap(dialog, true);
   useEffect(() => {
@@ -135,7 +135,7 @@ export function CodexProxyAssignDialog({ choice: initialChoice, onClose }: { cho
           cancelled: () => cancelled.current,
           bind: (account) => bindProxyCatalog(account.id, choice.sourceId, choice.itemId, selections!, choice.groupId),
           applied: (updated) => {
-            useCodexAccountStore.getState().applyAccountSnapshot(updated);
+            applyCodexProxyAccountSnapshot(updated);
             if (mounted.current) setAppliedIds((old) => [...old, updated.id]);
           },
           errorKey: catalogErrorKey,

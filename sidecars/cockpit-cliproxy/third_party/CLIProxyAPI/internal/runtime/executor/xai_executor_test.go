@@ -5973,6 +5973,16 @@ func TestXAICompactBaseURL(t *testing.T) {
 }
 
 func TestApplyXAIChatHeaders(t *testing.T) {
+	t.Run("pinned version meets upstream reported server floor", func(t *testing.T) {
+		// Upstream #6252 reports a 1.0.13 floor; do not regress to 0.2.x.
+		var major, minor, patch int
+		if n, err := fmt.Sscanf(xaiClientVersionValue, "%d.%d.%d", &major, &minor, &patch); err != nil || n != 3 {
+			t.Fatalf("invalid pinned Grok client version %q", xaiClientVersionValue)
+		}
+		if major < 1 || (major == 1 && minor == 0 && patch < 13) {
+			t.Fatalf("pinned Grok client version %q is below upstream reported floor 1.0.13", xaiClientVersionValue)
+		}
+	})
 	t.Run("non OAuth defaults to official API headers", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "https://example.invalid/responses", nil)
 		auth := &cliproxyauth.Auth{
@@ -6069,6 +6079,7 @@ func TestApplyXAIChatHeaders(t *testing.T) {
 				xaiUsingAPIAttr:                    "false",
 				"header:" + xaiTokenAuthHeader:     "custom-token-auth",
 				"header:" + xaiClientVersionHeader: "custom-client-version",
+				"header:User-Agent":                "custom-agent/9.9.9",
 				"header:x-grok-client-identifier":  "custom-client-identifier",
 				"header:x-authenticateresponse":    "custom-authenticate-response",
 			},
@@ -6080,6 +6091,9 @@ func TestApplyXAIChatHeaders(t *testing.T) {
 		}
 		if got := req.Header.Get(xaiClientVersionHeader); got != "custom-client-version" {
 			t.Fatalf("%s = %q, want custom-client-version", xaiClientVersionHeader, got)
+		}
+		if got := req.Header.Get("User-Agent"); got != "custom-agent/9.9.9" {
+			t.Fatalf("User-Agent = %q, want custom-agent/9.9.9", got)
 		}
 		if got := req.Header.Get("x-grok-client-identifier"); got != "custom-client-identifier" {
 			t.Fatalf("x-grok-client-identifier = %q, want custom-client-identifier", got)

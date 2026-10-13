@@ -27,7 +27,7 @@ export function CodexProxyConnectionSummary({ account, status, failed, onSwitch,
   const badge = getCodexPlanBadgePresentation(account, { preserveRawNonProLabel: true });
   const rawPlan = account.plan_type?.trim() ? badge.label : undefined;
   const planClass = rawPlan ? withCodexPlanBadgeStyle(badge.className) : '';
-  const sourceKey = account.egress_proxy_disabled ? 'codex.proxy.modeDisabled' : binding.source === 'account' ? 'codex.proxy.modeIndependent' : binding.source === 'unified'
+  const sourceKey = account.egress_proxy_error ? 'codex.proxy.modeStale' : account.egress_proxy_disabled ? 'codex.proxy.modeDisabled' : binding.source === 'account' ? 'codex.proxy.modeIndependent' : binding.source === 'unified'
     ? 'codex.proxy.modeUnified' : binding.source === 'unknown'
       ? failed ? 'codex.proxy.runtimeUnavailable' : 'codex.proxy.runtimeLoading' : 'codex.proxy.filter_unbound';
   return <section className="codex-proxy-preview-connection" aria-label={t('codex.proxy.connectionTitle')}>

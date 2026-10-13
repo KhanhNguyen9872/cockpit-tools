@@ -170,7 +170,7 @@ export function StrategyEditorDialog({ source, sources, busy, onClose, onSaved, 
   /** Any edit clears the previous failure so nothing is reported twice (rule 17). */
   const edit = () => { if (error) setError(''); };
 
-  useEscCloseTopmost(true, () => { if (!saving) onClose(); });
+  useEscCloseTopmost(true, () => { if (!saving) onClose(); }, dialog);
   useModalScrollLock(true);
   useModalFocusTrap(dialog, true);
   useEffect(() => {
@@ -385,7 +385,7 @@ export function StrategyDeleteDialog({ source, busy, onClose, onRemoved, onBindi
     else onClose();
   };
 
-  useEscCloseTopmost(true, () => { if (!removing) close(); });
+  useEscCloseTopmost(true, () => { if (!removing) close(); }, dialog);
   useModalScrollLock(true);
   useModalFocusTrap(dialog, true);
   useEffect(() => {

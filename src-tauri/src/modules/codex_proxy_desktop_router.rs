@@ -12,7 +12,8 @@
 //! 启动时只为**已有生效出口**（独立绑定或统一代理）的账号安装入口：未绑定账号若也被注入
 //! 本地入口，会替代应用全局代理环境变量、用户自定义的 `--proxy-server`/PAC 参数与系统代理，
 //! 属于静默改变出口。因此未绑定账号保持原有启动参数，首次绑定后需要重启一次，之后换节点、
-//! 换策略或解绑都不再需要重启。显式“不使用代理”也安装固定入口以覆盖启动时的代理默认值。
+//! 换策略或解绑都不再需要重启。显式“不使用代理”的新启动不安装入口，
+//! 由启动层清除代理环境并强制客户端直连；旧客户端需重启才能脱离本地入口。
 //!
 //! 端口属于账号入口而不是某次内核：分配结果持久化在应用数据目录的
 //! `codex-proxy-desktop-ports.json`，宿主重启后优先复用，端口被占用时按确定性顺序探测
@@ -296,9 +297,10 @@ async fn ensure_for_account(
     if !codex_account_proxy::eligible(account) {
         return Ok(None);
     }
-    // An explicit direct choice also uses the stable entry, overriding launch proxy defaults.
-    if !account.egress_proxy_disabled
-        && !codex_account_proxy::has_effective_proxy(account, unified_active)
+    // Keep old listeners alive for existing clients, but never inject them into
+    // a new explicit-direct launch: they stop when the host exits.
+    if account.egress_proxy_disabled
+        || !codex_account_proxy::has_effective_proxy(account, unified_active)
     {
         return Ok(None);
     }

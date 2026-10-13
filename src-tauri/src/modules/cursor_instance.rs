@@ -94,6 +94,8 @@ pub fn get_instance_defaults() -> Result<InstanceDefaults, String> {
 }
 
 pub fn create_instance(params: CreateInstanceParams) -> Result<InstanceProfile, String> {
+    let directory_preexisted = std::path::Path::new(params.user_data_dir.trim()).exists();
+    let creation_mode = params.init_mode.clone().unwrap_or_else(|| "copy".to_string());
     let _creation_guard = crate::modules::instance_storage_cleanup::protect_instance_creation()?;
     let _lock = CURSOR_INSTANCE_STORE_LOCK
         .lock()
@@ -193,6 +195,9 @@ pub fn create_instance(params: CreateInstanceParams) -> Result<InstanceProfile, 
         last_pid: None,
     };
 
+    crate::modules::instance_directory_ownership::record_creation(
+        std::path::Path::new(&instance.user_data_dir), &instance.id, &creation_mode, directory_preexisted,
+    )?;
     store.instances.push(instance.clone());
     save_instance_store(&store)?;
     Ok(instance)

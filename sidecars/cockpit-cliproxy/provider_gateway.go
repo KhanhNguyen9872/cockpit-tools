@@ -75,6 +75,9 @@ func (s *relayServer) handleExecutorBody(c *gin.Context, spec *apiKeySpec, body 
 		writeAPIError(c, http.StatusBadRequest, "model is required", "invalid_request")
 		return
 	}
+	if s.handleImageAPIResponses(c, spec, body, sourceFormat, fixedAlt) {
+		return
+	}
 	if spec.ModelRouting != nil && spec.ModelRouting.Automatic {
 		s.handleAutomaticModelRequest(c, spec, body, model, sourceFormat, fixedAlt)
 		return
@@ -263,7 +266,7 @@ func (s *relayServer) handleProviderGatewayRequest(c *gin.Context, gateway *prov
 	wireAPI := normalizeProviderGatewayWireAPI(gateway.WireAPI)
 	upstreamModel := s.providerGatewayUpstreamModel(gateway, model)
 	if strings.TrimSpace(upstreamModel) == "" {
-		writeAPIError(c, http.StatusNotFound, fmt.Sprintf("model %s is not available for this provider gateway", model), "model_not_available")
+		writeAPIError(c, http.StatusNotFound, s.manifest.modelUnavailableMessage(model), "model_not_available")
 		return
 	}
 	supportsVision := providerGatewayModelSupportsVision(gateway, upstreamModel)
@@ -562,21 +565,12 @@ func (s *relayServer) writeProviderGatewayChatStream(c *gin.Context, body io.Rea
 	startedAt := time.Now()
 	doneSeen := false
 	completedEventSeen := false
+	terminalEventSeen := false
 	convertedEventCount := 0
 	rawLineCount := 0
 	eventCounts := make(map[string]int)
 	itemIDRewriter := newProviderGatewayItemIDRewriter()
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 {
-			continue
-		}
-		rawLineCount++
-		if providerGatewayStreamLineIsDone(line) {
-			doneSeen = true
-		}
+	writeEvents := func(line []byte) bool {
 		events := responsesconverter.ConvertOpenAIChatCompletionsResponseToOpenAIResponses(relayContext(c), model, originalBody, chatBody, line, &state)
 		for index := range events {
 			events[index] = helps.RestoreCodexMultiAgentV2Response(events[index], multiAgentV2Optimized)
@@ -593,17 +587,54 @@ func (s *relayServer) writeProviderGatewayChatStream(c *gin.Context, body io.Rea
 				if eventName == "response.completed" {
 					completedEventSeen = true
 				}
+				if eventName == "response.completed" || eventName == "response.incomplete" {
+					terminalEventSeen = true
+				}
 			}
 			convertedEventCount++
 			if _, err := c.Writer.Write(providerGatewaySSEFrame(event)); err != nil {
-				return
+				return false
 			}
 			flusher.Flush()
+		}
+		return true
+	}
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		rawLineCount++
+		if providerGatewayChatStreamFailed(line) {
+			writeStreamTerminalErrorForFormat(c, relayStatusError{status: http.StatusBadGateway, message: "upstream returned a streaming error"}, sdktranslator.FormatOpenAIResponse)
+			flusher.Flush()
+			return
+		}
+		if providerGatewayStreamLineIsDone(line) {
+			doneSeen = true
+		}
+		if !writeEvents(line) {
+			return
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		s.emitExecutorDiagnostic(c, "provider_gateway_stream_scan_failed", model, "provider_gateway_chat_stream", startedAt, err.Error())
 		writeStreamTerminalErrorForFormat(c, err, sdktranslator.FormatOpenAIResponse)
+		flusher.Flush()
+		return
+	}
+	// Match the executor's EOF policy: only a finalized translator state may
+	// synthesize a source terminator. Partial output and read errors stay failed.
+	if !doneSeen && relayContext(c).Err() == nil && helps.CanFinalizeResponseStream(state) {
+		if !writeEvents([]byte("data: [DONE]")) {
+			return
+		}
+		doneSeen = terminalEventSeen
+	}
+	if doneSeen && !terminalEventSeen && relayContext(c).Err() == nil {
+		writeStreamTerminalErrorForFormat(c, relayStatusError{status: http.StatusBadGateway, message: "upstream stream ended with unfinished output"}, sdktranslator.FormatOpenAIResponse)
 		flusher.Flush()
 		return
 	}
@@ -648,16 +679,8 @@ func (s *relayServer) writeProviderGatewayTranslatedChatStream(c *gin.Context, b
 	var state any
 	itemIDRewriter := newProviderGatewayItemIDRewriter()
 	doneSeen := false
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 {
-			continue
-		}
-		if providerGatewayStreamLineIsDone(line) {
-			doneSeen = true
-		}
+	terminalEventSeen := false
+	writeOutputs := func(line []byte) bool {
 		outputs := sdktranslator.TranslateStream(relayContext(c), sdktranslator.FormatOpenAI, targetFormat, model, originalBody, chatBody, line, &state)
 		for _, output := range outputs {
 			if len(bytes.TrimSpace(output)) == 0 {
@@ -667,16 +690,52 @@ func (s *relayServer) writeProviderGatewayTranslatedChatStream(c *gin.Context, b
 				output = frameOpenAIStreamChunk(output)
 			}
 			if sourceFormatEqual(targetFormat, sdktranslator.FormatOpenAIResponse) {
+				eventName := providerGatewayResponseSSEEventName(output)
+				if eventName == "response.completed" || eventName == "response.incomplete" {
+					terminalEventSeen = true
+				}
 				output = itemIDRewriter.RewriteSSEFrame(output)
+				output = providerGatewaySSEFrame(output)
 			}
 			if _, err := c.Writer.Write(output); err != nil {
-				return
+				return false
 			}
 			flusher.Flush()
+		}
+		return true
+	}
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		if providerGatewayChatStreamFailed(line) {
+			writeStreamTerminalErrorForFormat(c, relayStatusError{status: http.StatusBadGateway, message: "upstream returned a streaming error"}, targetFormat)
+			flusher.Flush()
+			return
+		}
+		if providerGatewayStreamLineIsDone(line) {
+			doneSeen = true
+		}
+		if !writeOutputs(line) {
+			return
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		writeStreamTerminalErrorForFormat(c, err, targetFormat)
+		flusher.Flush()
+		return
+	}
+	if !doneSeen && sourceFormatEqual(targetFormat, sdktranslator.FormatOpenAIResponse) && relayContext(c).Err() == nil && helps.CanFinalizeResponseStream(state) {
+		if !writeOutputs([]byte("data: [DONE]")) {
+			return
+		}
+		doneSeen = terminalEventSeen
+	}
+	if doneSeen && sourceFormatEqual(targetFormat, sdktranslator.FormatOpenAIResponse) && !terminalEventSeen && relayContext(c).Err() == nil {
+		writeStreamTerminalErrorForFormat(c, relayStatusError{status: http.StatusBadGateway, message: "upstream stream ended with unfinished output"}, targetFormat)
 		flusher.Flush()
 		return
 	}
@@ -800,6 +859,27 @@ func providerGatewayStreamLineIsDone(line []byte) bool {
 		line = bytes.TrimSpace(line[len("data:"):])
 	}
 	return bytes.Equal(line, []byte("[DONE]"))
+}
+
+// An upstream error after finish_reason must not become a synthetic success at EOF.
+func providerGatewayChatStreamFailed(line []byte) bool {
+	if bytes.HasPrefix(line, []byte("event:")) {
+		name := bytes.TrimSpace(line[len("event:"):])
+		return bytes.Equal(name, []byte("error")) || bytes.Equal(name, []byte("response.failed"))
+	}
+	if bytes.HasPrefix(line, []byte("data:")) {
+		line = bytes.TrimSpace(line[len("data:"):])
+	} else if !bytes.HasPrefix(line, []byte("{")) {
+		return false
+	}
+	var event struct {
+		Type  string          `json:"type"`
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal(line, &event) != nil {
+		return false
+	}
+	return event.Type == "error" || event.Type == "response.failed" || (len(event.Error) > 0 && !bytes.Equal(event.Error, []byte("null")))
 }
 
 func providerGatewayURL(baseURL string, path string) (string, error) {

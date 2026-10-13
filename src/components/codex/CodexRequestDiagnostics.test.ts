@@ -14,6 +14,7 @@ const modalImports = {
   'react-i18next': { useTranslation: () => ({ t }) },
   '../ModalErrorMessage': { ModalErrorMessage: 'ModalErrorMessage' },
   '../SingleSelectDropdown': { SingleSelectDropdown: 'SingleSelectDropdown' },
+  './CodexOutputSpeed': { CodexOutputSpeed: 'CodexOutputSpeed' },
 };
 
 test('payload setting retains old preference on save failure, deduplicates saves and requires confirmation before clearing', async () => {
@@ -83,6 +84,7 @@ test('request details open before IPC completes, reject stale responses and keep
   await settlePromises();
   const tree = nodes(hook.flush());
   assert.equal(tree.some((node) => node.props.children === '0 ms'), true);
+  assert.equal(tree.find((node) => node.type === 'CodexOutputSpeed')!.props.event.requestId, 'B');
   await tree.find((node) => node.type === 'button' && Array.isArray(node.props.children) && node.props.children.includes('common.copy'))!.props.onClick();
   await settlePromises();
   const failed = nodes(hook.flush());

@@ -1411,19 +1411,17 @@ pub fn import_sessions(
         if let Some(cwd) = mapped_cwd {
             set_session_index_entry_cwd(&mut session_index_entry, cwd);
         }
-        if let Err(error) = upsert_session_index_with_entry(
+        commit_imported_session_index_with(
             &target.data_dir,
             &next_session_index_content,
-            session_id,
-            &session_index_entry,
-        ) {
-            let _ = fs::remove_file(&written_path);
-            let _ = restore_session_index_content(
+            &written_path,
+            || upsert_session_index_with_entry(
                 &target.data_dir,
-                original_session_index_content.as_deref(),
-            );
-            return Err(error);
-        }
+                &next_session_index_content,
+                session_id,
+                &session_index_entry,
+            ),
+        )?;
         next_session_index_content = read_session_index_content(&target.data_dir)?;
         if let Some(cwd) = mapped_cwd {
             mapped_threads.push((session_id.clone(), cwd.to_string()));
@@ -1965,9 +1963,21 @@ fn write_imported_rollout_from_archive(
     }
 
     let sha256 = hex_lower(hasher.finalize().as_slice());
-    if size_bytes != item.size_bytes || !sha256.eq_ignore_ascii_case(&item.sha256) {
+    let rollout_id = rollout_session_id(&temp_path).map_err(|error| {
+        let _ = fs::remove_file(&temp_path);
+        error
+    })?;
+    if size_bytes != item.size_bytes
+        || !sha256.eq_ignore_ascii_case(&item.sha256)
+        || rollout_id.as_deref() != Some(item.session_id.as_str())
+    {
         let _ = fs::remove_file(&temp_path);
         return Err(format!("会话包文件校验失败: {}", item.session_id));
+    }
+    let checked = BufReader::new(File::open(&temp_path).map_err(|e| e.to_string())?);
+    if let Err(error) = modules::codex_session_import_paths::ensure_standalone_rollout_reader(checked) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error);
     }
     let mut import_temp_path = temp_path.clone();
     if let Some(cwd) = cwd_override {
@@ -1995,7 +2005,7 @@ fn write_imported_rollout_from_archive(
         }
         import_temp_path = remapped_temp_path;
     }
-    fs::rename(&import_temp_path, target_path).map_err(|error| {
+    fs::hard_link(&import_temp_path, target_path).map_err(|error| {
         let _ = fs::remove_file(&temp_path);
         let _ = fs::remove_file(&import_temp_path);
         format!(
@@ -2004,11 +2014,36 @@ fn write_imported_rollout_from_archive(
             error
         )
     })?;
+    let _ = fs::remove_file(&import_temp_path);
     modules::codex_session_file_time::restore_modified_time(
         target_path,
         system_time_from_unix_seconds(item.updated_at),
     )?;
     Ok(target_path.to_path_buf())
+}
+
+fn commit_imported_session_index_with(
+    root: &Path,
+    checkpoint: &Option<String>,
+    written_rollout: &Path,
+    persist: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    if let Err(error) = persist() {
+        // Each imported session commits independently. A later failure must
+        // retain the index of earlier successful imports, not the batch's
+        // initial index while leaving their rollout files on disk.
+        let removed = fs::remove_file(written_rollout);
+        let restored = restore_session_index_content(root, checkpoint.as_deref());
+        let mut error = error;
+        if let Err(cleanup_error) = removed {
+            error.push_str(&format!("; {cleanup_error}"));
+        }
+        if let Err(restore_error) = restored {
+            error.push_str(&format!("; {restore_error}"));
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn resolve_import_cwd_mapping<'a>(
@@ -3192,6 +3227,7 @@ fn cleanup_empty_trash_ancestors(entry_dir: &Path) {
 
 #[cfg(test)]
 mod tests {
+    include!("codex_session_transfer_isolated_tests.rs");
 
     #[test]
     fn classify_session_kind_detects_subagent_and_external() {

@@ -4,10 +4,12 @@ import { isCodexApiKeyAccount, isCodexAgentIdentityAccount, isCodexChatCompletio
 import { isVerboseCodexQuotaErrorMessage, summarizeCodexQuotaErrorMessage } from "../utils/codexQuotaError";
 import { CodexQuotaMiniRows } from "../components/codex/CodexQuotaMiniRows";
 import { CodexAccountProxyButton } from "../components/codex/CodexAccountProxyButton";
+import { apiServiceProxyAccount } from "../services/codexProxyTargetService";
+import { CodexSpeedControl } from "../components/codex/CodexSpeedControl";
 import { CodexAccountProxyCard } from "../components/codex/CodexAccountProxyCard";
 import { canUseCodexAccountProxy } from "../utils/codexAccountProxy";
 import { CodexTeamQuotaHistory } from "../components/codex/CodexTeamQuotaHistory";
-import { isCodexClientReauthNoticeOnly, isCodexRefreshTokenNoticeOnly, isCodexRefreshTokenReusedAccount, isCodexServerRevokedReauth } from "../utils/codexSwitchAuthFailure";
+import { isCodexAccountReauthRequired, isCodexClientReauthNoticeOnly, isCodexRefreshTokenNoticeOnly, isCodexRefreshTokenReusedAccount, isCodexServerRevokedReauth } from "../utils/codexSwitchAuthFailure";
 import { CODEX_LAUNCH_PREVIEW_API_SERVICE_CARD_KEY } from "../utils/codexLaunchPreviewInstancePreference";
  import { isDeepSeekAccount, isCodexTokenPlanAccount, shouldShowCodexApiKeyUsagePanel } from "../utils/codexDeepSeekAccess";
 import { SingleSelectDropdown } from "../components/SingleSelectDropdown";
@@ -26,6 +28,7 @@ import type { useCodexAccountsOverviewController } from "./useCodexAccountsOverv
 /** 封装 useCodexAccountsPageController 的 useCodexAccountsRenderers 业务域状态与动作。 */
 export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCodexAccountsBaseController> & ReturnType<typeof useCodexAccountsOAuthController> & ReturnType<typeof useCodexAccountsAccessController> & ReturnType<typeof useCodexAccountsLocalAccessController> & ReturnType<typeof useCodexAccountsOverviewController>,
   | "accountIdLabel"
+  | "accounts"
   | "activeGroupId"
   | "addingLocalAccessAccountId"
   | "apiKeyUsageDetailAccount"
@@ -348,44 +351,46 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
             key={groupKey ? `${groupKey}-${account.id}` : account.id}
             className={`codex-compact-row ${isCurrent ? "current" : ""} ${isSelected ? "selected" : ""}`}
           >
-            <div className="codex-compact-select">
-              <input
-                type="checkbox"
-                checked={isSelected}
-                onChange={() => handleToggleOverviewAccount(account.id)}
-              />
+            <div className="codex-compact-header">
+              <div className="codex-compact-select">
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => handleToggleOverviewAccount(account.id)}
+                />
+              </div>
+              <span
+                className="codex-compact-email"
+                title={maskAccountText(presentation.displayName)}
+              >
+                {maskAccountText(presentation.displayName)}
+              </span>
+              {!isApiKeyAccount &&
+                !refreshTokenReusedState &&
+                (account.requires_reauth || serverRevokedReauth) && (
+                <span
+                  className={`codex-status-pill ${reauthNoticeOnly ? "quota-refresh" : "quota-error"} codex-client-auth-status-pill`}
+                  title={account.reauth_reason || t("codex.authError.badge", "授权异常")}
+                >
+                  <CircleAlert size={11} />
+                  {reauthNoticeOnly
+                    ? t("codex.switchAuth.apiOnlyBadge", "客户端需授权")
+                    : t("codex.authError.badge", "授权异常")}
+                </span>
+              )}
+              {clientAuthRequired && (
+                <span
+                  className="codex-status-pill quota-refresh codex-client-auth-status-pill"
+                  title={t(
+                    "codex.switchAuth.apiOnlyDescription",
+                    "检测到当前账号的客户端需要重新授权，API 服务仍可用。",
+                  )}
+                >
+                  <CircleAlert size={11} />
+                  {t("codex.switchAuth.apiOnlyBadge", "客户端需授权")}
+                </span>
+              )}
             </div>
-            <span
-              className="codex-compact-email"
-              title={maskAccountText(presentation.displayName)}
-            >
-              {maskAccountText(presentation.displayName)}
-            </span>
-            {!isApiKeyAccount &&
-              !refreshTokenReusedState &&
-              (account.requires_reauth || serverRevokedReauth) && (
-              <span
-                className={`codex-status-pill ${reauthNoticeOnly ? "quota-refresh" : "quota-error"} codex-client-auth-status-pill`}
-                title={account.reauth_reason || t("codex.authError.badge", "授权异常")}
-              >
-                <CircleAlert size={11} />
-                {reauthNoticeOnly
-                  ? t("codex.switchAuth.apiOnlyBadge", "客户端需授权")
-                  : t("codex.authError.badge", "授权异常")}
-              </span>
-            )}
-            {clientAuthRequired && (
-              <span
-                className="codex-status-pill quota-refresh codex-client-auth-status-pill"
-                title={t(
-                  "codex.switchAuth.apiOnlyDescription",
-                  "检测到当前账号的客户端需要重新授权，API 服务仍可用。",
-                )}
-              >
-                <CircleAlert size={11} />
-                {t("codex.switchAuth.apiOnlyBadge", "客户端需授权")}
-              </span>
-            )}
             <div className="codex-compact-quotas">
               {isDeepSeekAccount(account) ? (
                 <>
@@ -503,47 +508,51 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                 </span>
               )}
             </div>
-            {renderAddLocalAccessAccountButton(
-              account,
-              "codex-compact-api-service-btn",
-              13,
-            )}
-            {clientAuthRequired && (
-              <button
-                type="button"
-                className="codex-compact-note-btn codex-compact-reauthorize-btn"
-                onClick={() => openCodexAddModal("tempLogin", account)}
-                title={t("common.reauthorize", "重新授权")}
-                aria-label={t("common.reauthorize", "重新授权")}
-              >
-                <RefreshCw size={13} />
-              </button>
-            )}
-            {!isApiKeyAccount && (
-              <button
-                className={`codex-compact-note-btn ${hasCodexAccountNoteDetails(account) ? "has-note" : ""}`}
-                onClick={() => openAccountNoteModal(account)}
-                title={
-                  getCodexAccountNoteTitle(account, "") ||
-                  t("codex.accountNote.emptyTitle", "填写账号备注")
-                }
-                aria-label={t("codex.accountNote.title", "账号备注")}
-              >
-                <FileText size={13} />
-              </button>
-            )}
-            <button
-              className={`codex-compact-switch-btn ${!isCurrent ? "success" : ""}`}
-              onClick={() => handleSwitch(account.id)}
-              disabled={!!switching || Boolean(switchOrLaunchBlockedReason)}
-              title={switchOrLaunchBlockedReason || t("codex.switch", "切换")}
-            >
-              {switching === account.id ? (
-                <RefreshCw size={14} className="loading-spinner" />
-              ) : (
-                <Play size={14} />
+            <div className="codex-compact-actions">
+              <CodexSpeedControl scope="account" account={account} compact disabled={!!switching}
+                onError={(text) => setMessage(text ? { text, tone: "error" } : null)} />
+              {renderAddLocalAccessAccountButton(
+                account,
+                "codex-compact-api-service-btn",
+                13,
               )}
-            </button>
+              {(clientAuthRequired || isCodexAccountReauthRequired(account)) && (
+                <button
+                  type="button"
+                  className="codex-compact-note-btn codex-compact-reauthorize-btn"
+                  onClick={() => openCodexAddModal("tempLogin", account)}
+                  title={t("common.reauthorize", "重新授权")}
+                  aria-label={t("common.reauthorize", "重新授权")}
+                >
+                  <RefreshCw size={13} />
+                </button>
+              )}
+              {!isApiKeyAccount && (
+                <button
+                  className={`codex-compact-note-btn ${hasCodexAccountNoteDetails(account) ? "has-note" : ""}`}
+                  onClick={() => openAccountNoteModal(account)}
+                  title={
+                    getCodexAccountNoteTitle(account, "") ||
+                    t("codex.accountNote.emptyTitle", "填写账号备注")
+                  }
+                  aria-label={t("codex.accountNote.title", "账号备注")}
+                >
+                  <FileText size={13} />
+                </button>
+              )}
+              <button
+                className={`codex-compact-switch-btn ${!isCurrent ? "success" : ""}`}
+                onClick={() => handleSwitch(account.id)}
+                disabled={!!switching || Boolean(switchOrLaunchBlockedReason)}
+                title={switchOrLaunchBlockedReason || t("codex.switch", "切换")}
+              >
+                {switching === account.id ? (
+                  <RefreshCw size={14} className="loading-spinner" />
+                ) : (
+                  <Play size={14} />
+                )}
+              </button>
+            </div>
           </div>
         );
       });
@@ -662,6 +671,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
           !isApiKeyAccount &&
           !isRefreshTokenNotice &&
           (isPendingOAuthAccount ||
+            isCodexAccountReauthRequired(account) ||
             (hasQuotaError && shouldOfferReauthorizeAction(accountIssueMeta)));
         const accountIdText =
           meta.chatgptAccountId &&
@@ -816,7 +826,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
               isInLocalAccess ||
               canAddToLocalAccess ||
               (!isApiKeyAccount && hasCodexAccountNoteDetails(account)) ||
-              resetCreditControls || canUseCodexAccountProxy(account)) && (
+              resetCreditControls || canUseCodexAccountProxy(account) || isApiKeyAccount) && (
               <div className="account-sub-line">
                 {meta.accountContextText && (
                   <span
@@ -1056,6 +1066,8 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
             <div className="codex-card-bottom">
               <CodexAccountProxyCard account={account} placement="detailed" />
               <span className="card-date">{formatDate(account.created_at)}</span>
+              <CodexSpeedControl scope="account" account={account} disabled={!!switching}
+                onError={(text) => setMessage(text ? { text, tone: "error" } : null)} />
               <div className="card-footer">
                 <div className="card-actions">
                   <button
@@ -1067,7 +1079,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                     }
                     title={
                       switchOrLaunchBlockedReason ||
-                      t("codex.cli.quickLaunch", "CLI 快速启动")
+                      t("common.cliQuickLaunch", "CLI 快速启动")
                     }
                   >
                     {cliLaunchingAccountId === account.id ? (
@@ -1385,7 +1397,9 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
               </button>
             </div>
           </div>
-  
+          <div className="account-sub-line"><CodexAccountProxyButton account={apiServiceProxyAccount(t("codex.localAccess.title"))} /></div>
+          <CodexAccountProxyCard account={apiServiceProxyAccount(t("codex.localAccess.title"))} placement="summary" />
+          <CodexAccountProxyCard account={apiServiceProxyAccount(t("codex.localAccess.title"))} placement="detailed" />
           {showLocalAccessDetails && (
             <>
               <div className="codex-local-access-meta">
@@ -1683,6 +1697,8 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                     defaultValue: "监听范围：{{scope}}",
                   })}
                 </span>
+                <CodexSpeedControl scope="api" disabled={localAccessBusy || localAccessStarting}
+                  onError={(text) => setMessage(text ? { text, tone: "error" } : null)} />
                 <div
                   className={`card-footer codex-local-access-footer ${
                     importApiServiceGuideCount !== null &&
@@ -1704,7 +1720,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                     <button
                       className="card-action-btn"
                       onClick={() => void handleLaunchLocalAccessCli()}
-                      title={t("codex.cli.quickLaunch", "CLI 快速启动")}
+                      title={t("common.cliQuickLaunch", "CLI 快速启动")}
                       disabled={
                         localAccessBusy ||
                         !localAccessCollection ||
@@ -1911,6 +1927,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
           !isApiKeyAccount &&
           !isRefreshTokenNotice &&
           (isPendingOAuthAccount ||
+            isCodexAccountReauthRequired(account) ||
             (hasQuotaError && shouldOfferReauthorizeAction(accountIssueMeta)));
         const accountIdText =
           meta.chatgptAccountId &&
@@ -2026,7 +2043,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                 {(meta.accountContextText ||
                   isInLocalAccess ||
                   (!isApiKeyAccount && hasCodexAccountNoteDetails(account)) ||
-                  resetCreditControls || canUseCodexAccountProxy(account)) && (
+                  resetCreditControls || canUseCodexAccountProxy(account) || isApiKeyAccount) && (
                   <div className="account-sub-line codex-account-meta-inline">
                     {meta.accountContextText && (
                       <span
@@ -2065,6 +2082,8 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                     {!isApiKeyAccount && renderAccountNoteButton(account)}
                     {resetCreditControls}
                     <CodexAccountProxyButton account={account} />
+                    <CodexSpeedControl scope="account" account={account} compact disabled={!!switching}
+                      onError={(text) => setMessage(text ? { text, tone: "error" } : null)} />
                   </div>
                 )}
                 {!isApiKeyAccount && (
@@ -2271,7 +2290,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                   }
                   title={
                     switchOrLaunchBlockedReason ||
-                    t("codex.cli.quickLaunch", "CLI 快速启动")
+                    t("common.cliQuickLaunch", "CLI 快速启动")
                   }
                 >
                   {cliLaunchingAccountId === account.id ? (
@@ -2801,7 +2820,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                 ) : (
                   <Terminal size={14} />
                 )}
-                {t("codex.cli.quickLaunch", "CLI 快速启动")}
+                {t("common.cliQuickLaunch", "CLI 快速启动")}
               </button>
             </div>
           </div>
@@ -3108,7 +3127,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                 ) : (
                   <Terminal size={14} />
                 )}
-                {t("codex.cli.quickLaunch", "CLI 快速启动")}
+                {t("common.cliQuickLaunch", "CLI 快速启动")}
               </button>
             </div>
           </div>

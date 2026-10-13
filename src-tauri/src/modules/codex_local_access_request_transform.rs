@@ -1065,6 +1065,7 @@ fn normalize_proxy_service_tier(value: &str) -> Option<&'static str> {
         "priority" | "fast" => Some("priority"),
         "ultrafast" => Some("ultrafast"),
         "flex" => Some("flex"),
+        "auto" => Some("auto"),
         "standard" | "default" => Some("standard"),
         _ => None,
     }

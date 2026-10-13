@@ -994,6 +994,24 @@ pub fn save_account(account: &CodexAccount) -> Result<(), String> {
     save_account_with_tombstone_guard(account)
 }
 
+/// Quota, subscription and credential maintenance own their refreshed fields, not the
+/// user's proxy choice. Merge the latest durable choice in the same transaction
+/// as the write, and return that exact snapshot to account-returning callers.
+pub(crate) fn save_account_preserving_egress_proxy(
+    account: &CodexAccount,
+) -> Result<CodexAccount, String> {
+    let _guard = CODEX_ACCOUNT_MUTATION_LOCK
+        .lock()
+        .map_err(|_| "Codex 账号写入锁已损坏".to_string())?;
+    let current = load_account_with_summary(&account.id, None)?
+        .ok_or_else(|| format!("账号已删除或无法读取，拒绝后台写回: account_id={}", account.id))?;
+    let mut merged = account.clone();
+    merged.egress_proxy_url = current.egress_proxy_url;
+    merged.egress_proxy_disabled = current.egress_proxy_disabled;
+    save_account_with_tombstone_guard(&merged)?;
+    Ok(merged)
+}
+
 fn save_account_with_tombstone_guard(account: &CodexAccount) -> Result<(), String> {
     let mut next_tombstone = None;
     if let Some(tombstone) = read_account_tombstone(&account.id) {
@@ -1021,6 +1039,7 @@ fn save_account_with_tombstone_guard(account: &CodexAccount) -> Result<(), Strin
             credential_hash,
         )?;
     }
+    crate::modules::codex_local_access::notify_gateway_key_account_restored(account);
     Ok(())
 }
 
@@ -1051,6 +1070,7 @@ fn save_account_from_user_action(account: &mut CodexAccount) -> Result<(), Strin
             account_credential_hash(account),
         )?;
     }
+    crate::modules::codex_local_access::notify_gateway_key_account_restored(account);
     Ok(())
 }
 
@@ -1069,6 +1089,7 @@ fn delete_account_file_unlocked(account_id: &str) -> Result<(), String> {
             .map_err(|e| format!("删除文件失败: {}", e))?;
     }
     crate::modules::codex_proxy_runtime::release_deleted_account(account_id);
+    crate::modules::codex_proxy_runtime::release_deleted_account(&crate::modules::codex_client_proxy::route_id(account_id));
     Ok(())
 }
 

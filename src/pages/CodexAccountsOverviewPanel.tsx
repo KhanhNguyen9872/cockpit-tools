@@ -21,7 +21,7 @@ import { SingleSelectFilterDropdown } from "../components/SingleSelectFilterDrop
 import { SingleSelectDropdown } from "../components/SingleSelectDropdown";
 import { CODEX_API_PROVIDER_CUSTOM_ID, CODEX_API_PROVIDER_PRESETS, COCKPIT_API_PROVIDER_ID } from "../utils/codexProviderPresets";
 import { formatCodexQuotaPoolPercent, formatCodexQuotaPoolWindowLabel } from "../utils/codexQuotaPool";
-import { getCodexLocalAccessRiskNoticeConfirmLabel } from "../utils/codexLocalAccessRiskNotice";
+import { CodexLocalAccessRiskNoticeDialog } from "../components/codex/CodexLocalAccessRiskNoticeDialog";
 import { getMfaOtpToken } from "../utils/mfaVault";
 import type { CodexExportFormat } from "../utils/codexExportFormats";
 import type { CodexAccountsViewProps } from "./CodexAccountsView";
@@ -2412,69 +2412,9 @@ export function CodexAccountsOverviewPanel(props: CodexAccountsViewProps) {
           )}
 
           {localAccessRiskNoticeAction && (
-            <div className="modal-overlay codex-local-access-hide-confirm-overlay codex-local-access-risk-notice-overlay">
-              <div
-                className="modal codex-local-access-hide-confirm-modal codex-local-access-risk-notice-modal"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <div className="modal-header">
-                  <h2>
-                    {t("codex.localAccess.riskNotice.title", "使用风险提示")}
-                  </h2>
-                  <button
-                    className="modal-close"
-                    onClick={() => closeLocalAccessRiskNotice(false)}
-                    aria-label={t("common.close", "关闭")}
-                  >
-                    <X />
-                  </button>
-                </div>
-                <div className="modal-body">
-                  <p className="codex-local-access-hide-confirm-desc">
-                    {t(
-                      "codex.localAccess.riskNotice.message",
-                      "当前 Codex API 服务相关功能，本质上属于代理转发使用方式。就目前情况看，官方暂未对此类行为进行明确管控，但后续政策、规则或可用性是否发生变化，仍存在不确定性。继续使用该功能，即表示您已知悉相关情况，并愿意自行承担可能产生的风险。",
-                    )}
-                  </p>
-                  <div className="codex-local-access-hide-confirm-points codex-local-access-risk-notice-points">
-                    <label className="codex-local-access-risk-notice-remember">
-                      <input
-                        type="checkbox"
-                        checked={localAccessRiskNoticeRemember}
-                        onChange={(event) => {
-                          setLocalAccessRiskNoticeRemember(
-                            event.target.checked,
-                          );
-                        }}
-                      />
-                      <span>
-                        {t(
-                          "codex.localAccess.riskNotice.remember",
-                          "我已知晓，不再提示",
-                        )}
-                      </span>
-                    </label>
-                  </div>
-                </div>
-                <div className="modal-footer">
-                  <button
-                    className="btn btn-secondary"
-                    onClick={() => closeLocalAccessRiskNotice(false)}
-                  >
-                    {t("common.cancel", "取消")}
-                  </button>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => closeLocalAccessRiskNotice(true)}
-                  >
-                    {getCodexLocalAccessRiskNoticeConfirmLabel(
-                      localAccessRiskNoticeAction,
-                      t,
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
+            <CodexLocalAccessRiskNoticeDialog action={localAccessRiskNoticeAction}
+              remember={localAccessRiskNoticeRemember} onRememberChange={setLocalAccessRiskNoticeRemember}
+              onClose={closeLocalAccessRiskNotice} />
           )}
 
           {resetCreditConfirmAccount && (
@@ -3587,9 +3527,9 @@ export function CodexAccountsOverviewPanel(props: CodexAccountsViewProps) {
             onUpdateImageGenerationMainModel={(model) =>
               codexLocalAccessService.updateCodexLocalAccessImageGenerationMainModel(model).then(setLocalAccessState)
             }
-            onUpdateImageGenerationAccounts={(accountIds) =>
+            onUpdateImageGenerationAccounts={(accountIds, models) =>
               codexLocalAccessService
-                .updateCodexLocalAccessImageGenerationAccounts(accountIds)
+                .updateCodexLocalAccessImageGenerationAccounts(accountIds, models)
                 .then(setLocalAccessState)
             }
             onUpdateUpstreamProxyConfig={

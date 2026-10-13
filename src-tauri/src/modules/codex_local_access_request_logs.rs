@@ -128,6 +128,40 @@ fn quarantine_local_access_logs_db(
     Ok(backup_path)
 }
 
+fn request_logs_output_generation_select(conn: &Connection) -> Result<&'static str, String> {
+    request_logs_has_column(conn, "output_generation_ms")
+        .map(|present| {
+            if present {
+                "output_generation_ms"
+            } else {
+                "NULL AS output_generation_ms"
+            }
+        })
+        .map_err(|error| format!("检查输出计时列失败: {error}"))
+}
+
+// Keep the evidence source and raw value; do not normalize default to standard.
+fn recorded_service_tier_value(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn request_logs_service_tier_evidence_select(conn: &Connection) -> Result<String, String> {
+    ["requested_service_tier", "response_service_tier"]
+        .into_iter()
+        .map(|column| {
+            request_logs_has_column(conn, column)
+                .map(|present| {
+                    if present { column.to_string() } else { format!("'' AS {column}") }
+                })
+                .map_err(|error| format!("检查 API 服务日志 {column} 列失败: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(|columns| columns.join(", "))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RequestLogsSchemaState {
     MissingTable,
@@ -173,6 +207,7 @@ fn create_request_logs_table(
             error_message TEXT NOT NULL DEFAULT '',
             latency_ms INTEGER NOT NULL DEFAULT 0,
             first_response_ms INTEGER,
+            output_generation_ms INTEGER,
             input_tokens INTEGER NOT NULL DEFAULT 0,
             output_tokens INTEGER NOT NULL DEFAULT 0,
             total_tokens INTEGER NOT NULL DEFAULT 0,
@@ -276,6 +311,11 @@ fn open_local_access_logs_db_once(
     )?;
     ensure_request_logs_column(&conn, "latency_ms", "latency_ms INTEGER NOT NULL DEFAULT 0")?;
     ensure_request_logs_column(&conn, "first_response_ms", "first_response_ms INTEGER")?;
+    ensure_request_logs_column(
+        &conn,
+        "output_generation_ms",
+        "output_generation_ms INTEGER",
+    )?;
     ensure_request_logs_column(
         &conn,
         "input_tokens",
@@ -562,6 +602,14 @@ fn insert_local_access_usage_event(
         "proxy_route_json TEXT NOT NULL DEFAULT ''",
     )
     .map_err(|e| format!("添加 API 服务日志代理快照列失败: {}", e))?;
+    for column in ["requested_service_tier", "response_service_tier"] {
+        ensure_request_logs_column(conn, column, &format!("{column} TEXT NOT NULL DEFAULT ''"))
+            .map_err(|error| format!("添加 API 服务日志 {column} 列失败: {error}"))?;
+    }
+    let requested_service_tier = recorded_service_tier_value(event.requested_service_tier.as_deref())
+        .unwrap_or_default();
+    let response_service_tier = recorded_service_tier_value(event.response_service_tier.as_deref())
+        .unwrap_or_default();
     let proxy_route_json = event
         .proxy_route
         .as_ref()
@@ -606,8 +654,10 @@ fn insert_local_access_usage_event(
                 cached_input_usd_per_million,
                 turn_state_length,
                 turn_state_class,
-                proxy_route_json
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)
+                proxy_route_json,
+                requested_service_tier,
+                response_service_tier
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36)
             "#,
             params![
                 local_access_log_event_key(event),
@@ -647,6 +697,8 @@ fn insert_local_access_usage_event(
                 turn_state_length,
                 turn_state_class,
                 proxy_route_json,
+                requested_service_tier,
+                response_service_tier,
             ],
         )
         .map_err(|e| format!("写入 API 服务请求日志失败: {}", e))?;
@@ -686,8 +738,10 @@ fn insert_local_access_usage_event(
                 cached_input_usd_per_million,
                 turn_state_length,
                 turn_state_class,
-                proxy_route_json
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)
+                proxy_route_json,
+                requested_service_tier,
+                response_service_tier
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35)
             "#,
             params![
                 local_access_log_event_key(event),
@@ -726,6 +780,8 @@ fn insert_local_access_usage_event(
                 turn_state_length,
                 turn_state_class,
                 proxy_route_json,
+                requested_service_tier,
+                response_service_tier,
             ],
         )
         .map_err(|e| format!("写入 API 服务请求日志失败: {}", e))?;
@@ -764,8 +820,10 @@ fn insert_local_access_usage_event(
                 cached_input_usd_per_million,
                 turn_state_length,
                 turn_state_class,
-                proxy_route_json
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32)
+                proxy_route_json,
+                requested_service_tier,
+                response_service_tier
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)
             "#,
             params![
                 local_access_log_event_key(event),
@@ -803,6 +861,8 @@ fn insert_local_access_usage_event(
                 turn_state_length,
                 turn_state_class,
                 proxy_route_json,
+                requested_service_tier,
+                response_service_tier,
             ],
         )
         .map_err(|e| format!("写入 API 服务请求日志失败: {}", e))?;
@@ -814,6 +874,12 @@ fn insert_local_access_usage_event(
         )
         .map_err(|e| format!("写入 API 服务请求日志官方账号 ID 失败: {}", e))?;
     }
+    ensure_request_logs_column(conn, "output_generation_ms", "output_generation_ms INTEGER")
+        .map_err(|error| format!("添加输出计时列失败: {error}"))?;
+    conn.execute(
+        "UPDATE request_logs SET output_generation_ms=COALESCE(?1,output_generation_ms) WHERE event_key=?2",
+        params![event.output_generation_ms.map(|value| value.min(i64::MAX as u64) as i64),local_access_log_event_key(event)],
+    ).map_err(|error| format!("保存输出计时失败: {error}"))?;
     ensure_request_logs_column(conn, "first_response_ms", "first_response_ms INTEGER")
         .map_err(|error| format!("添加请求首响列失败: {error}"))?;
     let first_response_ms = event
@@ -1642,6 +1708,12 @@ fn usage_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodexLocalA
         gateway_mode: gateway_mode_from_db_value(gateway_mode.as_str()),
         request_kind: request_kind_from_db_value(request_kind.as_str()),
         service_tier: normalize_proxy_service_tier(service_tier.as_str()).map(str::to_string),
+        requested_service_tier: recorded_service_tier_value(
+            row.get::<_, String>("requested_service_tier").ok().as_deref(),
+        ),
+        response_service_tier: recorded_service_tier_value(
+            row.get::<_, String>("response_service_tier").ok().as_deref(),
+        ),
         reasoning_effort: normalize_recorded_reasoning_effort(reasoning_effort.as_str())
             .map(str::to_string),
         success: success != 0,
@@ -1651,6 +1723,11 @@ fn usage_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodexLocalA
         latency_ms: read_u64("latency_ms")?,
         first_response_ms: row
             .get::<_, Option<i64>>("first_response_ms")
+            .ok()
+            .flatten()
+            .and_then(|value| u64::try_from(value).ok()),
+        output_generation_ms: row
+            .get::<_, Option<i64>>("output_generation_ms")
             .ok()
             .flatten()
             .and_then(|value| u64::try_from(value).ok()),
@@ -1698,8 +1775,10 @@ where
     } else {
         "'' AS reasoning_effort"
     };
+    let service_tier_evidence_select = request_logs_service_tier_evidence_select(conn)?;
     let proxy_route_select = request_logs_proxy_route_select(conn)?;
     let first_response_select = request_logs_first_response_select(conn)?;
+    let output_generation_select = request_logs_output_generation_select(conn)?;
     let load_sql = format!(
         r#"
             SELECT
@@ -1717,8 +1796,9 @@ where
                 request_kind,
                 {service_tier_select},
                 {reasoning_effort_select},
+                {service_tier_evidence_select},
                 {proxy_route_select},
-            {first_response_select},
+            {first_response_select}, {output_generation_select},
                 turn_state_length,
                 turn_state_class,
                 success,
@@ -2110,8 +2190,10 @@ fn query_local_access_usage_events_blocking(
             return Ok(empty_usage_event_page(page, page_size));
         }
     };
+    let service_tier_evidence_select = request_logs_service_tier_evidence_select(&conn)?;
     let proxy_route_select = request_logs_proxy_route_select(&conn)?;
     let first_response_select = request_logs_first_response_select(&conn)?;
+    let output_generation_select = request_logs_output_generation_select(&conn)?;
     let list_sql = format!(
         r#"
         SELECT
@@ -2129,8 +2211,9 @@ fn query_local_access_usage_events_blocking(
             request_kind,
             {service_tier_select},
             {reasoning_effort_select},
+            {service_tier_evidence_select},
             {proxy_route_select},
-            {first_response_select},
+            {first_response_select}, {output_generation_select},
             turn_state_length,
             turn_state_class,
             success,
@@ -2254,12 +2337,14 @@ fn query_local_access_stats_window_blocking(
     } else {
         "'' AS reasoning_effort"
     };
+    let service_tier_evidence_select = request_logs_service_tier_evidence_select(&conn)?;
     let proxy_route_select = request_logs_proxy_route_select(&conn)?;
     let first_response_select = request_logs_first_response_select(&conn)?;
+    let output_generation_select = request_logs_output_generation_select(&conn)?;
     let sql = format!(
         r#"SELECT timestamp, request_id, account_id, email, api_key_id, api_key_label,
-                  client_instance_id, model_id, requested_model, upstream_model, gateway_mode, request_kind, {service_tier_select}, {reasoning_effort_select}, {proxy_route_select},
-            {first_response_select}, turn_state_length, turn_state_class, success,
+                  client_instance_id, model_id, requested_model, upstream_model, gateway_mode, request_kind, {service_tier_select}, {reasoning_effort_select}, {service_tier_evidence_select}, {proxy_route_select},
+            {first_response_select}, {output_generation_select}, turn_state_length, turn_state_class, success,
                   http_status, error_category, error_message, latency_ms, input_tokens,
                   output_tokens, total_tokens, cached_tokens, reasoning_tokens, token_breakdown_json,
                   estimated_cost_usd, model_pricing_version, input_usd_per_million,
@@ -2665,6 +2750,8 @@ fn append_usage_event_with_meta(
         model_id,
         gateway_mode,
         request_kind,
+        requested_service_tier: None,
+        response_service_tier: None,
         service_tier: service_tier
             .and_then(normalize_proxy_service_tier)
             .map(str::to_string),
@@ -2677,6 +2764,7 @@ fn append_usage_event_with_meta(
         error_message: error_message.unwrap_or_default().trim().to_string(),
         latency_ms,
         first_response_ms: cached_request_first_response(request_id),
+        output_generation_ms: None,
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
         total_tokens: usage.total_tokens,

@@ -123,13 +123,16 @@ export interface CodexLocalAccessCollection {
   clientBaseUrlHost: CodexLocalAccessClientBaseUrlHost;
   imageGenerationMode: CodexLocalAccessImageGenerationMode;
   imageGenerationModel: string;
+  imageGenerationModels?: string[];
+  imageGenerationDeletedModels?: string[];
   imageGenerationMainModel?: string | null;
   imageGenerationAccountPolicies: Record<
     string,
     CodexLocalAccessImageGenerationPolicy
   >;
-  /** 生图转发账号池：生图与图片编辑请求只交给这些 OAuth 账号执行。 */
+  /** 生图转发账号池：生图与图片编辑请求交给这些 OAuth 或图片 API 来源执行。 */
   imageGenerationAccountIds?: string[];
+  imageGenerationAccountModels?: Record<string, string>;
   gatewayMode: CodexLocalAccessGatewayMode;
   upstreamProxyUrl?: string | null;
   routingStrategy: CodexLocalAccessRoutingStrategy;
@@ -285,6 +288,10 @@ export interface CodexLocalAccessUsageEvent {
   gatewayMode?: CodexLocalAccessGatewayMode | null;
   requestKind: CodexLocalAccessRequestKind;
   serviceTier?: string | null;
+  /** Final outbound field (auto when omitted); absent for historical records. */
+  requestedServiceTier?: string | null;
+  /** Upstream feedback, preserved verbatim (including default). */
+  responseServiceTier?: string | null;
   /** Request reasoning effort (e.g. low/medium/high/xhigh/max), when present. */
   reasoningEffort?: string | null;
   success: boolean;
@@ -294,6 +301,8 @@ export interface CodexLocalAccessUsageEvent {
   latencyMs: number;
   /** Time to the first upstream response fragment; absent on older records. */
   firstResponseMs?: number | null;
+  /** Observed streaming window for this successful upstream attempt; never inferred for older logs. */
+  outputGenerationMs?: number | null;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
@@ -472,6 +481,9 @@ export interface CodexLocalAccessState {
   preparing: boolean;
   preparationTotal: number;
   preparationCompleted: number;
+  recovering?: boolean;
+  recoveryAttempt?: number;
+  recoveryTotal?: number;
   refreshingAccounts: boolean;
   accountRefreshTotal: number;
   accountRefreshCompleted: number;

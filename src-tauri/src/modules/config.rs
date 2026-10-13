@@ -1491,6 +1491,9 @@ fn restore_inherited_proxy_env() {
 }
 
 pub fn sync_global_proxy_env(config: &UserConfig) {
+    // Capture the startup values before either branch clears or replaces them.
+    // The first call may already have the application proxy enabled.
+    let _ = inherited_proxy_env();
     let pairs = managed_proxy_env_pairs(config);
     if pairs.is_empty() {
         restore_inherited_proxy_env();
@@ -2597,6 +2600,7 @@ mod tests {
     }
 
     include!("config_tests_nonblocking.rs");
+    include!("config_tests_proxy_env.rs");
     #[test]
     fn startup_client_preferences_preserve_app_ide_and_legacy_overview() {
         for value in ["antigravity", "antigravity-ide", "overview", "last"] {

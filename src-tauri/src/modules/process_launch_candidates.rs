@@ -1817,16 +1817,12 @@ fn account_proxy_env_pairs(proxy_url: &str) -> Vec<(&'static str, String)> {
     pairs
 }
 
-pub fn apply_effective_proxy_env_to_command(cmd: &mut Command, egress_proxy_url: Option<&str>) {
-    let Some(proxy_url) = egress_proxy_url
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
+pub fn apply_effective_proxy_env_to_command(cmd: &mut Command, launch_proxy: &CodexLaunchProxy) {
+    if matches!(launch_proxy, CodexLaunchProxy::Inherit) {
         apply_managed_proxy_env_to_command(cmd);
         return;
-    };
-
-    let pairs = account_proxy_env_pairs(proxy_url);
+    }
+    let pairs = launch_proxy.env_overrides();
     log_managed_proxy_injection("account-env", cmd, &pairs);
     for (key, value) in pairs {
         cmd.env(key, value);
@@ -1948,8 +1944,13 @@ pub fn append_electron_proxy_args(args: &mut Vec<String>, proxy_url: &str) {
     if proxy_url.is_empty() {
         return;
     }
-    // An explicitly selected account or global proxy takes precedence over old
-    // launch flags; otherwise Chromium can bypass it.
+    clear_electron_proxy_args(args);
+    let chromium_proxy_url = proxy_url.replace("socks5h://", "socks5://");
+    args.push(format!("--proxy-server={chromium_proxy_url}"));
+    args.push("--proxy-bypass-list=localhost;127.0.0.1;[::1]".to_string());
+}
+
+fn clear_electron_proxy_args(args: &mut Vec<String>) {
     let mut cleaned = Vec::with_capacity(args.len());
     let mut iter = args.drain(..).peekable();
     while let Some(arg) = iter.next() {
@@ -1975,9 +1976,6 @@ pub fn append_electron_proxy_args(args: &mut Vec<String>, proxy_url: &str) {
     }
     drop(iter);
     *args = cleaned;
-    let chromium_proxy_url = proxy_url.replace("socks5h://", "socks5://");
-    args.push(format!("--proxy-server={chromium_proxy_url}"));
-    args.push("--proxy-bypass-list=localhost;127.0.0.1;[::1]".to_string());
 }
 
 #[cfg(target_os = "macos")]
@@ -1993,16 +1991,12 @@ pub fn append_managed_proxy_env_to_open_args(cmd: &mut Command) {
 }
 
 #[cfg(target_os = "macos")]
-pub fn append_effective_proxy_env_to_open_args(cmd: &mut Command, egress_proxy_url: Option<&str>) {
-    let Some(proxy_url) = egress_proxy_url
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
+pub fn append_effective_proxy_env_to_open_args(cmd: &mut Command, launch_proxy: &CodexLaunchProxy) {
+    if matches!(launch_proxy, CodexLaunchProxy::Inherit) {
         append_managed_proxy_env_to_open_args(cmd);
         return;
-    };
-
-    let pairs = account_proxy_env_pairs(proxy_url);
+    }
+    let pairs = launch_proxy.env_overrides();
     log_managed_proxy_injection("account-open-arg", cmd, &pairs);
     for (key, value) in pairs {
         cmd.arg("--env").arg(format!("{}={}", key, value));
@@ -2015,7 +2009,7 @@ pub fn append_managed_proxy_env_to_open_args(_cmd: &mut Command) {}
 #[cfg(not(target_os = "macos"))]
 pub fn append_effective_proxy_env_to_open_args(
     _cmd: &mut Command,
-    _egress_proxy_url: Option<&str>,
+    _launch_proxy: &CodexLaunchProxy,
 ) {
 }
 

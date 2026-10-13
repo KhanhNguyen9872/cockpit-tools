@@ -504,7 +504,7 @@ fn spawn_open_app_with_options_and_env(
         args,
         force_new_instance,
         env_pairs,
-        None,
+        &CodexLaunchProxy::Inherit,
     )
 }
 
@@ -514,13 +514,18 @@ fn spawn_open_app_with_options_and_env_and_egress(
     args: &[String],
     force_new_instance: bool,
     env_pairs: &[(&str, &str)],
-    egress_proxy_url: Option<&str>,
+    launch_proxy: &CodexLaunchProxy,
 ) -> Result<u32, String> {
     let mut cmd = Command::new("open");
     sanitize_macos_gui_launch_env(&mut cmd);
-    append_effective_proxy_env_to_open_args(&mut cmd, egress_proxy_url);
+    if !matches!(launch_proxy, CodexLaunchProxy::Direct) {
+        append_effective_proxy_env_to_open_args(&mut cmd, launch_proxy);
+    }
     for (key, value) in env_pairs {
         cmd.arg("--env").arg(format!("{}={}", key, value));
+    }
+    if matches!(launch_proxy, CodexLaunchProxy::Direct) {
+        append_effective_proxy_env_to_open_args(&mut cmd, launch_proxy);
     }
     if force_new_instance {
         cmd.arg("-n");

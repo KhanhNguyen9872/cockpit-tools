@@ -466,34 +466,13 @@ QQ 交流群、微信群或新建的 Telegram 畅聊群都可以加入。
 
 ## 致谢
 
-- Codex 账号池轮询、Token 刷新并发写入保护、首包前故障处理、请求首响与尝试轨迹、可选请求快照，以及模型默认推理档位和配置导入保护的实现思路参考了 [Codex-Manager](https://github.com/qxcnm/Codex-Manager)；仅作为设计与实现参考。
-
-- 部分账号导入校验、网关凭据读取及稳定性改进参考了 [super-ai-tools](https://github.com/lihah111222333-cloud/super-ai-tools) 的本地保留源码快照；来源与许可见 [来源声明](docs/third-party/super-ai-tools.md)。
-
-- Codex 代理工作台的页面层级、订阅卡片、当前节点展示、分组/节点下拉、延迟徽章与排序、原生测速接口调用、快速切换交互和订阅来源命名参考 [Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev) 的界面及实现思路；仅为设计与实现参考，不是运行时依赖或官方合作。
-- Codex 代理首次绑定的简短操作路径与当前节点展示参考 [Hiddify](https://github.com/hiddify/hiddify-app)；仅参考交互方向，未集成其代码或服务。
-- Codex 代理节点筛选、排序、延迟测试及窄窗口布局参考 [FlClash](https://github.com/chen08209/FlClash)；仅参考交互方向，未集成其代码或服务。
+- Antigravity 账号切号逻辑参考：[Antigravity-Manager](https://github.com/lbjlaq/Antigravity-Manager)
+- Codex API 服务集成 CLIProxyAPI，Codex Live WebRTC/sideband、Responses WebSocket 状态安全、canonical token accounting v2、Multi-Agent V2 兼容、Grok CLI 账号与 OAuth、Grok `apply_patch` 协议兼容，以及账号池错误分类与状态恢复边界参考其开源实现：[router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)（MIT）
+- Codex、Claude CLI 与 Claude Desktop Gateway 第三方供应商预设、模型映射，以及从会话 JSONL 汇总真实用量的方向参考：[CC Switch](https://github.com/farion1231/cc-switch)
+- Claude 可选登录 helper 运行时基于：[Electron](https://github.com/electron/electron)
 - Codex 账号代理使用 [Mihomo](https://github.com/MetaCubeX/mihomo) 独立进程处理受支持的 Clash 节点与分组，节点参数、嵌套分组与内置阻断策略的配置语义、本地连接日志接口以及健康检查与故障转移设计参考其官方源码和文档；内核由用户主动下载或导入，宿主安装包不内置，不代表官方合作关系。
 
-- 代理管理页面的侧栏层级与账号筛选交互参考 [Carbon Design System](https://carbondesignsystem.com/components/UI-shell-left-panel/usage/) 与 [Tailscale 控制台文档](https://tailscale.com/docs/features/access-control/device-management/how-to/filter)，仅参考设计方向，未集成其组件或服务。
-- [Linear](https://linear.app/now/behind-the-latest-design-refresh) 与 [Vercel Geist](https://vercel.com/geist/empty-state)：参考其界面层级、控件尺度和空状态引导思路，用于 Codex 工具页视觉设计，不涉及运行时集成。
-- Codex 独立代理的早期实现及旧配置兼容参考 [sing-box](https://github.com/SagerNet/sing-box) 官方节点配置与进程文档；后续自动测速与已有连接处理的设计也参考其源码，当前运行内核仍为 Mihomo，不代表官方合作关系。
-- Antigravity 账号切号逻辑参考：[Antigravity-Manager](https://github.com/lbjlaq/Antigravity-Manager)
-- Codex API 服务集成 CLIProxyAPI，Codex Live WebRTC/sideband、Responses WebSocket 状态安全、canonical token accounting v2、Multi-Agent V2 兼容、Grok CLI 账号与 OAuth，以及 Grok `apply_patch` 协议兼容方向，以及账号池错误分类与状态恢复边界亦参考其开源实现：[router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)（MIT）
-- Grok 图标造型参考：[LobeHub/lobe-icons](https://github.com/lobehub/lobe-icons)（MIT）
-- Grok CLI 任务用量查询与兼容解析方向参考：[junhoyeo/tokscale](https://github.com/junhoyeo/tokscale)（MIT）
-- Grok CLI 第三方 BYOK 与 custom model 配置格式对照上游实现及文档：[xai-org/grok-build](https://github.com/xai-org/grok-build)
-- Codex API 服务协议兼容方向参考：[codex-proxy](https://github.com/icebear0828/codex-proxy)
-- Codex Agent Identity 导入、动态签名、task 失效恢复、账号备份格式兼容、官方账号窗口用量（req / token / A$）展示口径，代理取消与响应失败边界，以及账号池诊断与人工恢复操作设计参考：[sub2api](https://github.com/Wei-Shaw/sub2api)。API 服务的客户端兼容、指纹、容量错误与请求级重试处理以 CLIProxyAPI 为准，不再保留“仅官方客户端／允许第三方客户端”等 Sub2API 式独立策略；API Key 鉴权与账号范围控制保持不变，Agent Identity 兼容暂保留为本地扩展。
-- Codex 本地认证存储格式、登录凭据回收规则、Agent Identity runtime 注册协议、Ed25519 密钥格式、Responses 客户端 freeform 工具调用（`custom_tool_call`）事件语义、Responses Lite 请求标记与并行工具约束，以及鹈鹕测智的响应生命周期与生成产物处理思路参考官方实现：[openai/codex](https://github.com/openai/codex)（Apache-2.0）；鹈鹕测智使用直接对话请求，不等同于官方客户端的完整编码 Agent 流程。
-- Codex、Claude CLI 与 Claude Desktop Gateway 第三方供应商预设、模型映射，以及从会话 JSONL 汇总真实用量的方向参考：[CC Switch](https://github.com/farion1231/cc-switch)
-- Codex 模型目录、前端模型显示、loopback CDP 诊断、官方 live auth 保留策略，以及历史会话 Provider、SQLite 本地目录和工作区状态修复方向参考：[CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus)
-- Codex 用量统计看板、走势图和 Studio 风格界面设计方向参考：[Antigravity Studio](https://github.com/yuzhiqiang1993/antigravity-studio)
-- Codex 外部桥接的可选兼容验证参考 [Codex Web GPT](https://github.com/miuuyy/codex-chatgpt-web) 的本地集成记录与配置约定；仅用于保留用户已安装的有效桥接，不代表运行时依赖或官方合作。
-- Codex 受管模型目录中展示实验模型的思路参考：[gptsolwm](https://github.com/yynxxxxx/gptsolwm)
-- Claude 可选登录 helper 运行时基于：[Electron](https://github.com/electron/electron)
-
-感谢项目作者的开源贡献！如果这些项目对你有帮助，也请给他们点个 ⭐ Star 支持一下！
+感谢以上项目作者的开源贡献！如果这些项目对你有帮助，也请给他们点个 ⭐ Star 支持一下！
 
 ---
 

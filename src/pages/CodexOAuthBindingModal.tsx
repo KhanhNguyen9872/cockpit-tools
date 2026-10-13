@@ -1,3 +1,6 @@
+import { useRef } from "react";
+import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
+import { useEscCloseTopmost } from "../hooks/useEscClose";
 import {
   ArrowDown,
   ArrowDownWideNarrow,
@@ -20,6 +23,7 @@ import {
 import { isCodexOAuthBindingEligibleAccount } from "../utils/codexLocalAccessAccounts";
 import { parseCodexSwitchAuthFailure } from "../utils/codexSwitchAuthFailure";
 import type { CodexAccountsViewProps } from "./CodexAccountsView";
+import "./CodexOAuthBindingModal.css";
 
 /**
  * 账号级 OAuth 绑定弹框。
@@ -86,6 +90,15 @@ export function CodexOAuthBindingModal(props: CodexAccountsViewProps) {
     validateOAuthBindingQuotaReserveField,
   } = props;
 
+  const bindingDialogRef = useRef<HTMLDivElement>(null);
+  const reserveDialogRef = useRef<HTMLDivElement>(null);
+  const bindingOpen = Boolean(oauthBindingTargetActive);
+  const reserveOpen = Boolean(oauthBindingQuotaReserveEditorOpen && isLocalAccessOAuthBinding);
+  useModalFocusTrap(bindingDialogRef, bindingOpen, true, !reserveOpen);
+  useModalFocusTrap(reserveDialogRef, reserveOpen);
+  useEscCloseTopmost(bindingOpen && !reserveOpen && !oauthBindingSaving, closeOAuthBindingModal, bindingDialogRef);
+  useEscCloseTopmost(reserveOpen, closeOAuthBindingQuotaReserveEditor, reserveDialogRef);
+
   if (!oauthBindingTargetActive && !oauthBindingQuotaReserveEditorOpen) {
     return null;
   }
@@ -96,6 +109,12 @@ export function CodexOAuthBindingModal(props: CodexAccountsViewProps) {
         <div className="modal-overlay">
           <div
             className="modal-content codex-add-modal codex-oauth-binding-modal"
+            ref={bindingDialogRef}
+            role="dialog"
+            aria-modal={!reserveOpen}
+            aria-hidden={reserveOpen || undefined}
+            aria-label={t("codex.api.oauthBinding.title", "绑定 OAuth 账号")}
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-header">
@@ -198,7 +217,7 @@ export function CodexOAuthBindingModal(props: CodexAccountsViewProps) {
                           {oauthBindingQuotaReserve && (
                             <button
                               type="button"
-                              className="btn btn-icon codex-oauth-binding-quota-edit"
+                              className="btn codex-oauth-binding-quota-summary"
                               onClick={openOAuthBindingQuotaReserveEditor}
                               disabled={oauthBindingSaving}
                               title={`${t(
@@ -213,6 +232,14 @@ export function CodexOAuthBindingModal(props: CodexAccountsViewProps) {
                                 "保留 OAuth 额度",
                               )}`}
                             >
+                              <span>
+                                {t("codex.instances.quota.hourly", "5小时")}{" "}
+                                <strong>{oauthBindingQuotaReserve.hourlyPercent}%</strong>
+                              </span>
+                              <span>
+                                {t("codex.instances.quota.weekly", "周")}{" "}
+                                <strong>{oauthBindingQuotaReserve.weeklyPercent}%</strong>
+                              </span>
                               <Pencil size={12} />
                             </button>
                           )}
@@ -489,6 +516,11 @@ export function CodexOAuthBindingModal(props: CodexAccountsViewProps) {
         <div className="modal-overlay codex-oauth-binding-quota-overlay">
           <div
             className="modal-content codex-add-modal codex-oauth-binding-quota-modal"
+            ref={reserveDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("codex.localAccess.oauthBinding.quotaReserveToggle", "保留 OAuth 额度")}
+            tabIndex={-1}
             onClick={(event) => event.stopPropagation()}
           >
             <div className="modal-header">

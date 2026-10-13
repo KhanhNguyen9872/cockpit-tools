@@ -1105,7 +1105,8 @@ html[data-reduced-motion="true"] .platform-group-switcher-trigger.is-open .platf
   background: var(--bg-secondary);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   box-shadow: var(--shadow-sm);
 }
 
@@ -1194,7 +1195,37 @@ html[data-reduced-motion="true"] .platform-group-switcher-trigger.is-open .platf
   min-width: 0;
 }
 
+.codex-speed-control {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.codex-speed-control-hint {
+  flex-basis: 100%;
+  max-width: 340px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.codex-account-card .codex-card-bottom > .codex-speed-control {
+  justify-self: end;
+}
+
+.codex-launch-preview-summary-controls > .codex-speed-control {
+  margin-right: 12px;
+  align-self: center;
+  flex-shrink: 0;
+}
+
 .codex-speed-trigger {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: inherit;
   height: 22px;
   display: inline-flex;
   align-items: center;
@@ -1289,6 +1320,12 @@ html[data-reduced-motion="true"] .platform-group-switcher-trigger.is-open .platf
 }
 
 .codex-speed-option {
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
   width: 100%;
   min-height: 42px;
   border: 1px solid transparent;
@@ -1316,6 +1353,11 @@ html[data-reduced-motion="true"] .platform-group-switcher-trigger.is-open .platf
 
 .codex-speed-option:hover {
   background: color-mix(in srgb, var(--primary) 6%, var(--bg-secondary));
+}
+
+.codex-speed-option:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .codex-speed-option.active {

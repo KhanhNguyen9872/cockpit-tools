@@ -182,3 +182,33 @@ fn refresh_response_cannot_recreate_deleted_account() {
         .join(format!("{}.json", original.id))
         .exists());
 }
+
+#[test]
+fn force_refresh_transport_failures_do_not_claim_expiration_or_require_reauth() {
+    for raw in [
+        "Token 刷新请求失败: error sending request for url (https://auth.openai.com/oauth/token)",
+        "Token 刷新请求失败: operation timed out",
+        "Token 刷新失败: status=503 Service Unavailable, body_len=42",
+        "解析 Token 响应失败: invalid JSON",
+    ] {
+        assert!(matches!(
+            super::classify_refresh_error(raw),
+            super::CodexRefreshErrorKind::Other
+        ));
+        assert!(!super::is_reauth_required_refresh_error(raw));
+        let formatted = format_refresh_error_for_user(raw);
+        assert!(formatted.contains(raw));
+        for misleading in ["已过期", "expired", "请重新登录", "sign in again"] {
+            assert!(!formatted.contains(misleading), "{formatted}");
+        }
+    }
+
+    for code in [
+        "PROXY_RUNTIME_BUSY",
+        "PROXY_ENGINE_MISSING",
+        "PROXY_RUNTIME_READ_TIMEOUT",
+    ] {
+        assert_eq!(format_refresh_error_for_user(code), code);
+        assert!(!super::is_reauth_required_refresh_error(code));
+    }
+}

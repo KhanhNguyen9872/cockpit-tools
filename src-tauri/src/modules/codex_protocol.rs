@@ -230,6 +230,8 @@ pub(crate) fn ensure_codex_reserve_fallback(catalog: &mut Value) {
     models.push(reserve);
 }
 
+pub(crate) const CODEX_REASONING_EFFORT_ORDER: &[&str] = &["low", "medium", "high", "xhigh", "max", "ultra"];
+
 fn apply_reasoning_effort_override(object: &mut Map<String, Value>, efforts: &[String]) {
     let levels = object
         .get("supported_reasoning_levels")
@@ -243,7 +245,7 @@ fn apply_reasoning_effort_override(object: &mut Map<String, Value>, efforts: &[S
                 .cloned()
         })
         .unwrap_or_default();
-    let selected = efforts
+    let mut selected = efforts
         .iter()
         .filter_map(|effort| {
             levels
@@ -255,27 +257,17 @@ fn apply_reasoning_effort_override(object: &mut Map<String, Value>, efforts: &[S
     if selected.is_empty() {
         return;
     }
-    object.insert(
-        "supported_reasoning_levels".to_string(),
-        Value::Array(selected.clone()),
-    );
-    let current_default = object
-        .get("default_reasoning_level")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if !selected.iter().any(|level| {
-        level.get("effort").and_then(Value::as_str) == Some(current_default)
-    }) {
-        if let Some(first) = selected
-            .first()
-            .and_then(|level| level.get("effort"))
-            .and_then(Value::as_str)
-        {
-            object.insert(
-                "default_reasoning_level".to_string(),
-                Value::String(first.to_string()),
-            );
-        }
+    // Capture the old input-order fallback before canonicalizing the output.
+    let current_default = object.get("default_reasoning_level").and_then(Value::as_str)
+        .filter(|default| selected.iter().any(|level| level["effort"].as_str() == Some(default)))
+        .map(str::to_owned)
+        .or_else(|| selected.first()?.get("effort")?.as_str().map(str::to_owned));
+    selected.sort_by_key(|level| CODEX_REASONING_EFFORT_ORDER.iter()
+        .position(|effort| level["effort"].as_str() == Some(effort)).unwrap_or(usize::MAX));
+    selected.dedup_by(|a, b| a["effort"] == b["effort"]);
+    object.insert("supported_reasoning_levels".to_string(), Value::Array(selected));
+    if let Some(default) = current_default {
+        object.insert("default_reasoning_level".to_string(), Value::String(default));
     }
 }
 
@@ -1212,11 +1204,26 @@ fn remove_unsupported_responses_fields(obj: &mut Map<String, Value>) -> bool {
         changed |= obj.remove(key).is_some();
     }
 
-    if obj.get("service_tier").is_some()
-        && obj.get("service_tier").and_then(Value::as_str) != Some("priority")
-    {
-        obj.remove("service_tier");
-        changed = true;
+    if let Some(tier) = obj.get("service_tier") {
+        let normalized = tier.as_str().and_then(|tier| match tier.trim().to_ascii_lowercase().as_str() {
+            "fast" | "priority" => Some("priority"),
+            "standard" | "default" => Some("default"),
+            "flex" => Some("flex"),
+            "auto" => Some("auto"),
+            "ultrafast" => Some("ultrafast"),
+            _ => None,
+        });
+        // Preserve explicit standard/other tiers until routing has selected the
+        // provider. Dropping them here lets a later Fast default replace them.
+        if let Some(normalized) = normalized {
+            if tier.as_str() != Some(normalized) {
+                obj.insert("service_tier".to_string(), Value::String(normalized.to_string()));
+                changed = true;
+            }
+        } else {
+            obj.remove("service_tier");
+            changed = true;
+        }
     }
 
     changed
@@ -2221,7 +2228,7 @@ mod tests {
             .iter()
             .filter_map(|level| level.get("effort").and_then(Value::as_str))
             .collect::<Vec<_>>();
-        assert_eq!(efforts, vec!["low", "ultra", "max"]);
+        assert_eq!(efforts, vec!["low", "max", "ultra"]);
         assert_eq!(
             model.get("default_reasoning_level").and_then(Value::as_str),
             Some("low")

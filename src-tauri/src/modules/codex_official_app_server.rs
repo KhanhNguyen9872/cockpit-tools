@@ -734,6 +734,7 @@ fn finish_child(child: &mut Child) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("codex_official_app_server_isolated_tests.rs");
 
     #[test]
     fn imported_project_binding_rejects_repeated_pagination_cursor() {

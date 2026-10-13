@@ -530,6 +530,22 @@
     }
 
     #[test]
+    fn model_scope_error_translations_preserve_model_placeholder_for_all_locales() {
+        let value = super::sidecar_localized_messages(
+            "codex.localAccess.gatewayErrors.modelNotAvailable",
+        );
+        let messages = value.as_object().expect("localized error messages");
+        assert_eq!(messages.len(), 18);
+        for (locale, message) in messages {
+            let message = message.as_str().expect("message text");
+            assert_eq!(message.matches("{{model}}").count(), 1, "{locale}");
+            if locale != "en" && locale != "en-us" {
+                assert_ne!(Some(message), messages["en"].as_str(), "{locale}");
+            }
+        }
+    }
+
+    #[test]
     fn calendar_stats_windows_start_at_local_day_week_and_month() {
         use chrono::{Datelike, TimeZone, Timelike};
 
@@ -839,6 +855,7 @@
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::Message;
     use toml_edit::{value, Document};
+    include!("codex_local_access_tests_env_ordering.rs");
 
     #[tokio::test]
     async fn read_http_request_rejects_declared_request_above_limit() {
@@ -932,6 +949,36 @@
 
     #[tokio::test]
     async fn official_wakeup_agent_identity_recovers_invalid_task_once() {
+        const ISOLATED_MOCK: &str = "COCKPIT_TEST_AGENT_WAKEUP_ISOLATED";
+        if std::env::var_os(ISOLATED_MOCK).is_none() {
+            // This mock must use its loopback server even when the developer
+            // has an application, environment or system proxy configured.
+            let data_dir = make_temp_dir("agent-wakeup-isolated");
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(0x08000000);
+            }
+            for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] {
+                command.env_remove(key);
+            }
+            for key in ["COCKPIT_TOOLS_TEST_DATA_DIR", "COCKPIT_TOOLS_DATA_DIR", "COCKPIT_TEST_DATA_DIR"] {
+                command.env(key, &data_dir);
+            }
+            let output = command
+                .env(ISOLATED_MOCK, "1")
+                .env("NO_PROXY", "*")
+                .env("no_proxy", "*")
+                .args(["--exact", "modules::codex_local_access::tests::official_wakeup_agent_identity_recovers_invalid_task_once", "--nocapture", "--test-threads=1"])
+                .output()
+                .expect("run wakeup mock in isolated proxy environment");
+            fs::remove_dir_all(data_dir).expect("remove wakeup mock data");
+            assert!(output.status.success(), "isolated wakeup mock failed: {}{}",
+                String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"), "wakeup assertion test must execute");
+            return;
+        }
         let account = agent_identity_wakeup_test_account();
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
@@ -1049,9 +1096,13 @@
             client_base_url_host: CodexLocalAccessClientBaseUrlHost::default(),
             image_generation_mode: CodexLocalAccessImageGenerationMode::default(),
             image_generation_model: DEFAULT_CODEX_IMAGE_GENERATION_MODEL.to_string(),
+        image_generation_models: crate::models::codex_local_access::default_image_generation_models(),
+        image_generation_deleted_models: Vec::new(),
+        image_generation_model_catalog_revision: 0,
             image_generation_main_model: None,
             image_generation_account_policies: HashMap::new(),
             image_generation_account_ids: Vec::new(),
+        image_generation_account_models: HashMap::new(),
             gateway_mode: CodexLocalAccessGatewayMode::default(),
             upstream_proxy_url: None,
             routing_strategy: CodexLocalAccessRoutingStrategy::default(),
@@ -1078,6 +1129,7 @@
             immediate_sse_response: false,
             max_concurrent_image_requests: 1,
             max_account_concurrency: 0,
+            account_concurrency_default_migrated: true,
             account_concurrency_wait_ms: DEFAULT_ACCOUNT_CONCURRENCY_WAIT_MS,
             bound_oauth_account_id: None,
             bound_oauth_quota_reserve: None,

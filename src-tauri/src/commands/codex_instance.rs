@@ -479,6 +479,26 @@ async fn ensure_provider_gateway_for_bind_account(
     .await
 }
 
+async fn apply_launch_speed_after_auth(
+    profile_dir: &Path,
+    bind_account_id: Option<&str>,
+    speed: CodexAppSpeed,
+) -> Result<(), String> {
+    let profile_dir = profile_dir.to_path_buf();
+    let account_id = bind_account_id.map(|id| {
+        modules::codex_instance::parse_provider_gateway_bind_account_id(id)
+            .unwrap_or_else(|| id.to_string())
+    });
+    tauri::async_runtime::spawn_blocking(move || {
+        // DeepSeek deliberately removes service_tier as an unsupported option.
+        if account_id.as_deref().and_then(modules::codex_account::load_account)
+            .is_some_and(|account| modules::codex_account::is_deepseek_account(&account)) {
+            return Ok(());
+        }
+        modules::codex_speed::write_app_speed_for_dir(&profile_dir, speed).map(|_| ())
+    }).await.map_err(|error| error.to_string())?
+}
+
 async fn restore_mixed_model_gateway_when_disabled(
     profile_dir: &Path,
     model_routing: Option<&CodexInstanceModelRouting>,
@@ -586,7 +606,17 @@ fn resolve_instance_launch_context(instance_id: &str) -> Result<CodexLaunchConte
     })
 }
 
-fn sync_codex_threads_across_idle_instances(context: &str) {
+async fn sync_codex_threads_across_idle_instances(context: &'static str) {
+    if let Err(error) = tauri::async_runtime::spawn_blocking(move || {
+        sync_codex_threads_across_idle_instances_blocking(context)
+    })
+    .await
+    {
+        modules::logger::log_warn(&format!("[Codex Thread Sync] {}: {}", context, error));
+    }
+}
+
+fn sync_codex_threads_across_idle_instances_blocking(context: &str) {
     let started = Instant::now();
     let default_settings = match modules::codex_instance::load_default_settings() {
         Ok(settings) => settings,
@@ -769,6 +799,7 @@ async fn repair_session_visibility_for_selected_instance(
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("codex_instance_test_env_ordering.rs");
 
     struct TestDataDirGuard {
         root: PathBuf,
@@ -804,6 +835,48 @@ mod tests {
                 None => std::env::remove_var("COCKPIT_TOOLS_DATA_DIR"),
             }
             let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[tokio::test]
+    async fn fast_switch_target_speed_persists_and_survives_auth_config_restore() {
+        let _lock = crate::modules::test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let env = TestDataDirGuard::new("codex-fast-switch-target");
+        let mut store = crate::models::InstanceStore::new();
+        for id in ["target", "other"] {
+            let dir = env.root.join(id);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("config.toml"), "model = 'fixture-model'\n").unwrap();
+            store.instances.push(InstanceProfile {
+                id: id.to_string(), name: id.to_string(),
+                user_data_dir: dir.to_string_lossy().to_string(),
+                working_dir: None, extra_args: String::new(), bind_account_id: None,
+                model_routing: None, launch_mode: InstanceLaunchMode::App,
+                app_speed: CodexAppSpeed::Standard, created_at: 1,
+                last_launched_at: None, last_pid: None,
+            });
+        }
+        modules::codex_instance::save_instance_store(&store).unwrap();
+        for speed in [CodexAppSpeed::Fast, CodexAppSpeed::Standard] {
+            codex_update_instance(
+                "target".to_string(), None, None, None,
+                Some(Some("fixture-account".to_string())), None, None, None,
+                Some(speed.clone()), None, Some(true),
+            ).await.unwrap();
+            let reloaded = modules::codex_instance::load_instance_store().unwrap();
+            let target = reloaded.instances.iter().find(|item| item.id == "target").unwrap();
+            assert_eq!(target.bind_account_id.as_deref(), Some("fixture-account"));
+            assert_eq!(target.app_speed, speed);
+            assert_eq!(reloaded.instances.iter().find(|item| item.id == "other").unwrap().app_speed, CodexAppSpeed::Standard);
+            let dir = env.root.join("target");
+            // Simulate a credential/provider projection restoring the old config.
+            // No auth files, real accounts, client processes or model calls are used.
+            std::fs::write(dir.join("config.toml"), "model = 'fixture-model'\nservice_tier = 'default'\n").unwrap();
+            apply_launch_speed_after_auth(&dir, None, target.app_speed.clone()).await.unwrap();
+            assert_eq!(modules::codex_speed::get_app_speed_config_for_dir(&dir).unwrap().speed, speed);
+            assert!(std::fs::read_to_string(dir.join("config.toml")).unwrap().contains("fixture-model"));
         }
     }
 
@@ -1922,7 +1995,9 @@ pub async fn codex_open_instance_config_toml(
 #[tauri::command]
 pub async fn codex_sync_threads_across_instances(
 ) -> Result<modules::codex_thread_sync::CodexInstanceThreadSyncSummary, String> {
-    modules::codex_thread_sync::sync_threads_across_instances()
+    tauri::async_runtime::spawn_blocking(modules::codex_thread_sync::sync_threads_across_instances)
+        .await
+        .map_err(thread_sync_worker_error)?
 }
 
 #[tauri::command]
@@ -1930,7 +2005,20 @@ pub async fn codex_sync_sessions_to_instance(
     session_ids: Vec<String>,
     target_instance_id: String,
 ) -> Result<modules::codex_thread_sync::CodexInstanceTargetThreadSyncSummary, String> {
-    modules::codex_thread_sync::sync_sessions_to_instance(session_ids, target_instance_id)
+    tauri::async_runtime::spawn_blocking(move || {
+        modules::codex_thread_sync::sync_sessions_to_instance(session_ids, target_instance_id)
+    })
+    .await
+    .map_err(thread_sync_worker_error)?
+}
+
+fn thread_sync_worker_error(error: impl std::fmt::Display) -> String {
+    let error = error.to_string();
+    modules::i18n::translate(
+        &modules::config::get_user_config().language,
+        "codex.instance.errors.threadSyncWorkerFailed",
+        &[("error", &error)],
+    )
 }
 
 #[tauri::command]
@@ -2811,12 +2899,8 @@ async fn codex_start_instance_internal(
         ));
         let speed_started = Instant::now();
         let _ = modules::codex_instance::update_default_pid(None)?;
-        modules::codex_speed::write_app_speed_for_dir(
-            &default_dir,
-            default_settings.app_speed.clone(),
-        )?;
         modules::logger::log_info(&format!(
-            "[Codex Start] default speed/pid reset phase finished: elapsed_ms={}, total_ms={}",
+            "[Codex Start] default pid reset phase finished: elapsed_ms={}, total_ms={}",
             speed_started.elapsed().as_millis(),
             flow_started.elapsed().as_millis()
         ));
@@ -2873,6 +2957,9 @@ async fn codex_start_instance_internal(
             inject_started.elapsed().as_millis(),
             flow_started.elapsed().as_millis()
         ));
+        // Auth/provider restoration can restore a previous service_tier. Apply
+        // the selected speed afterwards, before the gateway reads its defaults.
+        apply_launch_speed_after_auth(&default_dir, default_bind_account_id.as_deref(), default_settings.app_speed.clone()).await?;
         let refreshed_oauth_account = oauth_account_id
             .as_deref()
             .and_then(modules::codex_account::load_account);
@@ -2942,7 +3029,7 @@ async fn codex_start_instance_internal(
             );
         } else {
             let thread_sync_started = Instant::now();
-            sync_codex_threads_across_idle_instances("before-start-default");
+            sync_codex_threads_across_idle_instances("before-start-default").await;
             modules::logger::log_info(&format!(
                 "[Codex Start] default thread sync phase finished: elapsed_ms={}, total_ms={}",
                 thread_sync_started.elapsed().as_millis(),
@@ -3018,14 +3105,10 @@ async fn codex_start_instance_internal(
             modules::codex_app_injection::should_enable_cdp(default_bind_account_id.as_deref());
         let mut injection_plan =
             modules::codex_app_injection::build_launch_args(&extra_args, cdp_enabled)?;
-        let egress_proxy_url = modules::codex_instance::resolve_egress_proxy_for_bind_account(
+        let launch_proxy = modules::codex_instance::resolve_egress_proxy_for_bind_account(
             default_bind_account_id.as_deref(),
         ).await?;
-        if let Some(proxy_url) = egress_proxy_url.as_deref() {
-            modules::process::append_electron_proxy_args(&mut injection_plan.args, proxy_url);
-        } else {
-            modules::process::append_global_electron_proxy_args(&mut injection_plan.args);
-        }
+        launch_proxy.append_electron_args(&mut injection_plan.args);
         emit_codex_instance_launch_step(
             &app,
             emit_launch_progress,
@@ -3044,12 +3127,12 @@ async fn codex_start_instance_internal(
             if skip_default_bind_account_injection {
                 modules::process::start_codex_default_fast_after_close_with_egress(
                     &launch_args,
-                    egress_proxy_url.as_deref(),
+                    &launch_proxy,
                 )
             } else {
                 modules::process::start_codex_default_with_egress(
                     &launch_args,
-                    egress_proxy_url.as_deref(),
+                    &launch_proxy,
                 )
             }
         })
@@ -3144,15 +3227,6 @@ async fn codex_start_instance_internal(
         close_started.elapsed().as_millis(),
         flow_started.elapsed().as_millis()
     ));
-    let speed_started = Instant::now();
-    modules::codex_speed::write_app_speed_for_dir(instance_dir, instance.app_speed.clone())?;
-    modules::logger::log_info(&format!(
-        "[Codex Start] instance speed phase finished: instance_id={}, elapsed_ms={}, total_ms={}",
-        instance.id,
-        speed_started.elapsed().as_millis(),
-        flow_started.elapsed().as_millis()
-    ));
-
     let inject_started = Instant::now();
     emit_codex_instance_launch_step(
         &app,
@@ -3202,6 +3276,7 @@ async fn codex_start_instance_internal(
         inject_started.elapsed().as_millis(),
         flow_started.elapsed().as_millis()
     ));
+    apply_launch_speed_after_auth(instance_dir, instance.bind_account_id.as_deref(), instance.app_speed.clone()).await?;
     let refreshed_oauth_account = oauth_account_id
         .as_deref()
         .and_then(modules::codex_account::load_account);
@@ -3268,7 +3343,7 @@ async fn codex_start_instance_internal(
     );
     log_launch_credential_change("before-start-instance", &launch_credential_change);
     let thread_sync_started = Instant::now();
-    sync_codex_threads_across_idle_instances("before-start-instance");
+    sync_codex_threads_across_idle_instances("before-start-instance").await;
     modules::logger::log_info(&format!(
         "[Codex Start] instance thread sync phase finished: instance_id={}, elapsed_ms={}, total_ms={}",
         instance.id,
@@ -3344,14 +3419,10 @@ async fn codex_start_instance_internal(
         modules::codex_app_injection::should_enable_cdp(instance.bind_account_id.as_deref());
     let mut injection_plan =
         modules::codex_app_injection::build_launch_args(&extra_args, cdp_enabled)?;
-    let egress_proxy_url = modules::codex_instance::resolve_egress_proxy_for_bind_account(
+    let launch_proxy = modules::codex_instance::resolve_egress_proxy_for_bind_account(
         instance.bind_account_id.as_deref(),
     ).await?;
-    if let Some(proxy_url) = egress_proxy_url.as_deref() {
-        modules::process::append_electron_proxy_args(&mut injection_plan.args, proxy_url);
-    } else {
-        modules::process::append_global_electron_proxy_args(&mut injection_plan.args);
-    }
+    launch_proxy.append_electron_args(&mut injection_plan.args);
     emit_codex_instance_launch_step(
         &app,
         emit_launch_progress,
@@ -3370,7 +3441,7 @@ async fn codex_start_instance_internal(
             &launch_home,
             &launch_args,
             &[],
-            egress_proxy_url.as_deref(),
+            &launch_proxy,
         )
     })
     .await
@@ -3669,7 +3740,7 @@ pub async fn codex_stop_instance(instance_id: String) -> Result<CodexInstancePro
         modules::codex_local_access::stop_provider_gateways_for_profile(&default_dir).await;
         let updated = modules::codex_instance::update_default_pid(None)?;
         let default_bind_account_id = resolve_default_account_id(&updated);
-        sync_codex_threads_across_idle_instances("after-stop-default");
+        sync_codex_threads_across_idle_instances("after-stop-default").await;
         return Ok(default_instance_view(
             &default_dir,
             &updated,
@@ -3699,7 +3770,7 @@ pub async fn codex_stop_instance(instance_id: String) -> Result<CodexInstancePro
     .await;
     let updated = modules::codex_instance::update_instance_pid(&instance.id, None)?;
     let initialized = is_profile_initialized(&updated.user_data_dir);
-    sync_codex_threads_across_idle_instances("after-stop-instance");
+    sync_codex_threads_across_idle_instances("after-stop-instance").await;
     Ok(CodexInstanceProfileView::from_profile(
         updated,
         false,
@@ -3737,7 +3808,7 @@ pub async fn codex_close_all_instances() -> Result<(), String> {
         }
     }
     let _ = modules::codex_instance::clear_all_pids();
-    sync_codex_threads_across_idle_instances("after-close-all");
+    sync_codex_threads_across_idle_instances("after-close-all").await;
     Ok(())
 }
 

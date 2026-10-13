@@ -176,7 +176,7 @@ export function CodexProxyResources({ onAssign, onBindingsChanged }: {
     setDeleteImpactError('');
     setDeleteImpactLoading(true);
     void getProxyCatalogDependencies(deleting.id).then((next) => {
-      if (!cancelled && mounted.current) setDeleteImpact(next);
+      if (!cancelled && mounted.current) setDeleteImpact({ ...next, accounts: [...new Map([...next.accounts, ...(next.clientTargets ?? []).map((entry) => ({ id: entry.targetId, name: entry.name, email: '' }))].map((entry) => [entry.id, entry])).values()], accountCount: new Set([...next.accounts.map((entry) => entry.id), ...(next.clientTargets ?? []).map((entry) => entry.targetId)]).size });
     }).catch(() => {
       if (!cancelled && mounted.current) setDeleteImpactError(t('codex.proxy.catalog.deleteImpactLoadFailed'));
     }).finally(() => {
@@ -186,7 +186,7 @@ export function CodexProxyResources({ onAssign, onBindingsChanged }: {
     // 语言切换不能重读账号与来源；预览只在打开弹框或来源 revision 变化时重新请求。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deleting, deletingRevision, deleteImpactRetry]);
-  useEscCloseTopmost(!!deleting && busy !== 'remove', closeDelete);
+  useEscCloseTopmost(!!deleting && busy !== 'remove', closeDelete, deleteDialog);
 
   const run = async (action: string, job: (requestId: string) => Promise<void>, cancellable = false) => {
     if (operation.current || catalogPending) return;
@@ -390,7 +390,7 @@ export function CodexProxyResources({ onAssign, onBindingsChanged }: {
               <p className="codex-resource-delete-count">{t('codex.proxy.catalog.deleteImpactAccounts', { count: deleteImpact.accountCount })}</p>
               {deleteImpact.accounts.length === 0 ? <p className="codex-resource-delete-none">{t('codex.proxy.catalog.deleteImpactNone')}</p>
                 : <ul className="codex-resource-delete-accounts">{deleteImpact.accounts.map((entry) => <li key={entry.id}>
-                  <strong>{resolveName({ id: entry.id, account_name: entry.name })}</strong>{entry.email && entry.email !== entry.name ? <span>{resolveName({ id: entry.id, email: entry.email })}</span> : null}</li>)}</ul>}
+                  <strong>{entry.id === '__api_service__' ? t('codex.localAccess.title') : resolveName({ id: entry.id, account_name: entry.name })}</strong>{entry.email && entry.email !== entry.name ? <span>{resolveName({ id: entry.id, email: entry.email })}</span> : null}</li>)}</ul>}
               <p className="codex-resource-delete-unified">{deleteImpact.unifiedProxy ? t('codex.proxy.catalog.deleteImpactUnifiedClose') : t('codex.proxy.catalog.deleteImpactUnifiedKept')}</p>
               {deleteImpact.strategyCount > 0 && <>
                 <p className="codex-resource-delete-count">{t('codex.proxy.catalog.deleteImpactStrategies', { count: deleteImpact.strategyCount })}</p>

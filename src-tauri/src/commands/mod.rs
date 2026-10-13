@@ -53,3 +53,5 @@ pub mod zcode_instance;
 pub mod zed;
 
 pub mod codex_proxy_catalog;
+
+pub mod codex_client_proxy;

@@ -384,20 +384,17 @@ fn clash_node(m: &Map<String, Value>) -> Result<Value> {
     };
     if let Some((from, to)) = alias {
         if let Some(value) = proxy.get(from).cloned() {
-            if proxy.get(to).is_some_and(|existing| existing != &value) {
-                return Err(INVALID.into());
+            if proxy.get(to).is_none() {
+                proxy[to] = value;
             }
-            proxy[to] = value;
-            proxy.as_object_mut().ok_or(INVALID)?.remove(from);
         }
     }
-    // mport is a subscription alias. Conflicts are rejected rather than hidden.
+    // Preserve subscription aliases; an explicit native field takes precedence.
+    // Fill missing native fields for compatibility without rejecting template metadata.
     if let Some(mport) = proxy.get("mport").cloned() {
-        if proxy.get("ports").is_some_and(|ports| ports != &mport) {
-            return Err(UNSUPPORTED.into());
+        if proxy.get("ports").is_none() {
+            proxy["ports"] = mport;
         }
-        proxy["ports"] = mport;
-        proxy.as_object_mut().ok_or(INVALID)?.remove("mport");
     }
     super::codex_proxy_catalog_binding::validate_native_proxy(&proxy)?;
     Ok(json!({"type":"mihomo", "proxy":proxy}))

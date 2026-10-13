@@ -22,7 +22,11 @@ fn get_current_account_from_loaded(
     let mut account = load(&current_id)?;
 
     if account.is_api_key_auth() {
-        sync_api_key_account_from_local_state(&mut account, base_dir);
+        let original = account.clone();
+        if let Err(error) = sync_api_key_account_from_local_state(&mut account, base_dir) {
+            logger::log_warn(&format!("同步当前 API Key 账号本地状态失败，保留已有账号: {error}"));
+            account = original;
+        }
     }
     Some(account)
 }

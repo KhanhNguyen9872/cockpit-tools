@@ -118,6 +118,38 @@ fn remap_workspace_metadata(payload: &mut Value, source_cwd: &str, target_cwd: &
     changed
 }
 
+// Partial imports and workspace remaps cannot reconstruct a paginated chain's
+// projection cursors, physical rollout IDs and byte boundaries. Fail closed.
+pub(crate) fn ensure_standalone_rollout(bytes: &[u8]) -> Result<(), String> {
+    ensure_standalone_rollout_reader(BufReader::new(std::io::Cursor::new(bytes)))
+}
+
+pub(crate) fn ensure_standalone_rollout_reader(mut reader: impl BufRead) -> Result<(), String> {
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        if reader
+            .read_until(b'\n', &mut line)
+            .map_err(|e| e.to_string())?
+            == 0
+        {
+            return Ok(());
+        }
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        let record: Value =
+            serde_json::from_slice(&line).map_err(|_| "会话记录尚未完整或格式无效，请稍后重试")?;
+        if record.get("type").and_then(Value::as_str) == Some("session_meta")
+            && record["payload"]
+                .get("history_base")
+                .is_some_and(|v| !v.is_null())
+        {
+            return Err("分页会话不能单独导入、映射或同步；请复制包含完整历史链的实例".into());
+        }
+    }
+}
+
 pub(crate) fn rewrite_rollout_workspace_paths(
     source_path: &Path,
     target_path: &Path,
@@ -127,10 +159,23 @@ pub(crate) fn rewrite_rollout_workspace_paths(
     if source_path == target_path {
         return Err("映射副本不能覆盖原始会话文件".to_string());
     }
+    ensure_standalone_rollout_reader(BufReader::new(
+        File::open(source_path).map_err(|e| e.to_string())?,
+    ))?;
+    if target_path.exists() {
+        return Err("映射副本不能覆盖已有文件".into());
+    }
+    let staging = target_path.with_file_name(format!(
+        ".cockpit-workspace-map-{}.tmp",
+        uuid::Uuid::new_v4()
+    ));
     let result = (|| -> Result<(), String> {
-        let source = File::open(source_path).map_err(|error| error.to_string())?;
-        let mut reader = BufReader::new(source);
-        let target = File::create(target_path).map_err(|error| error.to_string())?;
+        let mut reader = BufReader::new(File::open(source_path).map_err(|e| e.to_string())?);
+        let target = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staging)
+            .map_err(|error| error.to_string())?;
         let mut writer = BufWriter::new(target);
         let mut line = Vec::new();
         let mut found_metadata = false;
@@ -198,8 +243,10 @@ pub(crate) fn rewrite_rollout_workspace_paths(
         }
         writer.flush().map_err(|error| error.to_string())
     })();
+    let result =
+        result.and_then(|()| fs::hard_link(&staging, target_path).map_err(|e| e.to_string()));
+    let _ = fs::remove_file(&staging);
     if let Err(error) = result {
-        let _ = fs::remove_file(target_path);
         return Err(format!(
             "映射会话工作目录失败 ({}): {}",
             source_path.display(),
@@ -280,6 +327,40 @@ mod tests {
         fs::write(&source, b"original").unwrap();
         assert!(rewrite_rollout_workspace_paths(&source, &source, "/old", "/new").is_err());
         assert_eq!(fs::read(&source).unwrap(), b"original");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn stability_mapping_never_overwrites_an_existing_target_or_source_alias() {
+        let dir = temp_dir("mapping-publish");
+        let source = dir.join("source.jsonl");
+        let target = dir.join("target.jsonl");
+        let source_bytes = b"{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/old\"}}\r\n";
+        fs::write(&source, source_bytes).unwrap();
+        fs::write(&target, b"concurrent data").unwrap();
+        assert!(rewrite_rollout_workspace_paths(&source, &target, "/old", "/new").is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"concurrent data");
+        assert_eq!(fs::read(&source).unwrap(), source_bytes);
+        #[cfg(unix)]
+        {
+            let alias = dir.join("alias.jsonl");
+            std::os::unix::fs::symlink(&source, &alias).unwrap();
+            assert!(rewrite_rollout_workspace_paths(&source, &alias, "/old", "/new").is_err());
+            assert_eq!(fs::read(&source).unwrap(), source_bytes);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn stability_mapping_rejects_paginated_history_without_output() {
+        let dir = temp_dir("lineage");
+        let source = dir.join("source.jsonl");
+        let target = dir.join("mapped.jsonl");
+        let content = "{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/old\",\"history_base\":{\"thread_id\":\"parent\",\"end_byte_offset\":178}}}\r\n";
+        fs::write(&source, content).unwrap();
+        assert!(rewrite_rollout_workspace_paths(&source, &target, "/old", "/new").is_err());
+        assert!(!target.exists());
+        assert_eq!(fs::read(&source).unwrap(), content.as_bytes());
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -390,6 +471,7 @@ mod tests {
         .unwrap();
         rewrite_rollout_workspace_paths(&source, &target, "/a", "/b").unwrap();
         assert!(!fs::read(&target).unwrap().ends_with(b"\n"));
+        fs::remove_file(&target).unwrap();
         fs::write(&source, b"{\"type\":\"event_msg\",\"payload\":{}}\n").unwrap();
         assert!(rewrite_rollout_workspace_paths(&source, &target, "/a", "/b").is_err());
         assert!(!target.exists());

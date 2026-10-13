@@ -40,13 +40,26 @@ func translateCodexRequestPair(from, to sdktranslator.Format, model string, orig
 		}
 		return sdktranslator.TranslateRequest(from, to, model, raw, stream)
 	}
+	// OAuth translation strips unsupported tiers such as default/flex. Keep
+	// their explicit presence in the defaults-checking snapshot so a configured
+	// paid Fast default cannot silently replace a client's Standard choice.
+	preserveTierSelection := func(raw, translated []byte) []byte {
+		tier := gjson.GetBytes(raw, "service_tier")
+		if tier.Exists() && !gjson.GetBytes(translated, "service_tier").Exists() {
+			protected, errSet := sjson.SetRawBytes(append([]byte(nil), translated...), "service_tier", []byte(tier.Raw))
+			if errSet == nil {
+				return protected
+			}
+		}
+		return translated
+	}
 	if bytes.Equal(originalPayload, payload) {
 		body := translate(payload)
-		return body, body
+		return preserveTierSelection(originalPayload, body), body
 	}
 	originalTranslated := translate(originalPayload)
 	body := translate(payload)
-	return originalTranslated, body
+	return preserveTierSelection(originalPayload, originalTranslated), body
 }
 
 // PrepareRequest injects Codex credentials into the outgoing HTTP request.

@@ -26,7 +26,8 @@ const BILLING_URL: &str = "https://cli-chat-proxy.grok.com/v1/billing?format=cre
 const CLI_USER_URL: &str = "https://cli-chat-proxy.grok.com/v1/user?include=subscription";
 const SUBSCRIPTIONS_URL: &str = "https://grok.com/rest/subscriptions";
 const TASK_USAGE_URL: &str = "https://grok.com/rest/tasks/usage";
-const FALLBACK_GROK_CLIENT_VERSION: &str = "0.2.93";
+// Keep aligned with the stable client version pinned by the xAI OAuth sidecar.
+const FALLBACK_GROK_CLIENT_VERSION: &str = "1.0.46";
 /// billing / user / task_usage 传输层瞬时失败（SSL EOF、断连、超时）重试次数
 const TRANSPORT_MAX_ATTEMPTS: usize = 3;
 const FILE_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -2465,10 +2466,13 @@ fn apply_refreshed_token(account: &mut GrokAccount, token: grok_oauth::GrokToken
     account.auth_raw = Some(official_auth_object(account));
 }
 
+fn quota_client_version(detected_version: Option<String>) -> String {
+    detected_version.unwrap_or_else(|| FALLBACK_GROK_CLIENT_VERSION.to_string())
+}
+
 async fn query_quota(account: &mut GrokAccount) -> Result<(), String> {
-    let client_version = crate::commands::grok::detect_grok_client_version()
-        .await
-        .unwrap_or_else(|| FALLBACK_GROK_CLIENT_VERSION.to_string());
+    let client_version =
+        quota_client_version(crate::commands::grok::detect_grok_client_version().await);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
@@ -2986,6 +2990,39 @@ mod tests {
     };
     use serde_json::{json, Value};
     use std::path::PathBuf;
+
+    #[test]
+    fn quota_client_version_prefers_detected_cli_and_uses_stable_fallback() {
+        assert_eq!(
+            super::quota_client_version(Some("1.0.47".to_string())),
+            "1.0.47"
+        );
+        assert_eq!(
+            super::quota_client_version(Some("0.2.93".to_string())),
+            "0.2.93"
+        );
+        assert_eq!(super::quota_client_version(None), "1.0.46");
+    }
+
+    #[test]
+    fn quota_headers_share_detected_or_fallback_client_version() {
+        let client = reqwest::Client::new();
+        for detected in [Some("1.0.47".to_string()), None] {
+            let version = super::quota_client_version(detected);
+            for url in [super::BILLING_URL, super::CLI_USER_URL] {
+                let request = super::cli_proxy_get(&client, url, "test-token", &version)
+                    .build()
+                    .expect("build quota request without sending");
+                let headers = request.headers();
+                assert_eq!(headers["x-grok-cli-version"], version);
+                assert_eq!(headers["x-grok-client-version"], version);
+                assert_eq!(
+                    headers[reqwest::header::USER_AGENT],
+                    format!("grok-cli/{version}")
+                );
+            }
+        }
+    }
 
     fn sample_account() -> GrokAccount {
         GrokAccount {

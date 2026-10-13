@@ -2,25 +2,25 @@
 // 通过 include! 保持原 modules::process 作用域和平台分支行为。
 /// 启动 Codex 默认桌面实例（不注入 CODEX_HOME，支持附加参数）。
 pub fn start_codex_default(extra_args: &[String]) -> Result<u32, String> {
-    start_codex_default_internal(extra_args, false, None)
+    start_codex_default_internal(extra_args, false, &CodexLaunchProxy::Inherit)
 }
 
 pub fn start_codex_default_fast_after_close(extra_args: &[String]) -> Result<u32, String> {
-    start_codex_default_internal(extra_args, true, None)
+    start_codex_default_internal(extra_args, true, &CodexLaunchProxy::Inherit)
 }
 
 pub fn start_codex_default_with_egress(
     extra_args: &[String],
-    egress_proxy_url: Option<&str>,
+    launch_proxy: &CodexLaunchProxy,
 ) -> Result<u32, String> {
-    start_codex_default_internal(extra_args, false, egress_proxy_url)
+    start_codex_default_internal(extra_args, false, launch_proxy)
 }
 
 pub fn start_codex_default_fast_after_close_with_egress(
     extra_args: &[String],
-    egress_proxy_url: Option<&str>,
+    launch_proxy: &CodexLaunchProxy,
 ) -> Result<u32, String> {
-    start_codex_default_internal(extra_args, true, egress_proxy_url)
+    start_codex_default_internal(extra_args, true, launch_proxy)
 }
 
 fn build_codex_app_launch_args(extra_args: &[String]) -> Vec<String> {
@@ -213,7 +213,7 @@ fn wait_for_codex_default_start_pid(
 fn start_codex_default_internal(
     extra_args: &[String],
     fast_after_close: bool,
-    egress_proxy_url: Option<&str>,
+    launch_proxy: &CodexLaunchProxy,
 ) -> Result<u32, String> {
     #[cfg(not(target_os = "windows"))]
     let _ = fast_after_close;
@@ -234,7 +234,7 @@ fn start_codex_default_internal(
             &args,
             true,
             &[],
-            egress_proxy_url,
+            launch_proxy,
         )
         .map_err(|e| format!("启动 Codex 失败: {}", e))?;
         crate::modules::logger::log_info("Codex 默认实例启动命令已发送（open -n -a）");
@@ -294,9 +294,8 @@ fn start_codex_default_internal(
                 app_user_model_id
             ));
             let args = build_codex_default_launch_args(extra_args);
-            let launch_env = egress_proxy_url
-                .map(account_proxy_env_pairs)
-                .unwrap_or_default()
+            let launch_env = launch_proxy
+                .env_overrides()
                 .into_iter()
                 .map(|(key, value)| (key.to_string(), value))
                 .collect::<Vec<_>>();
@@ -378,7 +377,7 @@ fn start_codex_default_internal(
             launch_path_text
         ));
         let mut cmd = Command::new(&launch_path);
-        apply_effective_proxy_env_to_command(&mut cmd, egress_proxy_url);
+        apply_effective_proxy_env_to_command(&mut cmd, launch_proxy);
         if should_detach_child() {
             cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
             cmd.stdin(Stdio::null())
@@ -441,7 +440,7 @@ fn start_codex_default_internal(
     {
         let launch_path = resolve_codex_launch_path()?;
         let mut command = Command::new(&launch_path);
-        apply_effective_proxy_env_to_command(&mut command, egress_proxy_url);
+        apply_effective_proxy_env_to_command(&mut command, launch_proxy);
         sanitize_linux_gui_launch_env(&mut command);
         for arg in build_codex_default_launch_args(extra_args) {
             command.arg(arg);
@@ -471,7 +470,7 @@ fn start_codex_default_internal(
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         let _ = extra_args;
-        let _ = egress_proxy_url;
+        let _ = launch_proxy;
         Err("当前系统不支持 Codex 桌面应用启动".to_string())
     }
 }

@@ -96,6 +96,9 @@
     "providerClear": "Clear selection"
   },
   "common": {
+    "apiKeyAccount": "API Key account",
+    "status": "Status",
+    "cliQuickLaunch": "CLI Launch",
     "requestId": "Request ID",
     "failureTime": "Failure time",
     "clearRecord": "Clear record",
@@ -251,7 +254,8 @@
           "statusRunning": "Importing...",
           "statusSkipped": "Skipped",
           "statusPending": "Pending import"
-        }
+        },
+        "invalidJson": "Invalid JSON. Check the file or pasted content."
       },
       "externalImport": {
         "bundleInvalidJson": "The import bundle is not valid JSON",
@@ -426,7 +430,24 @@
     "show": "Show",
     "configSaveTimeout": "Operation timed out. Refresh to confirm the result before retrying.",
     "clearAll": "Deselect all",
-    "clear": "Clear"
+    "clear": "Clear",
+    "outputSpeed": {
+      "label": "Speed",
+      "pageAverage": "Weighted page speed",
+      "pageSamples": "{{count}} valid samples",
+      "hint": "Approximate upstream output tokens per second, from the first response fragment to execution completion; excludes first-response waiting. Requires at least 100 output tokens and 100 ms. Reasoning tokens follow upstream output usage and are not added again; cached input is excluded.",
+      "unavailableHint": "No valid measurement: missing usage or timing, unsupported transport, historical record, short reply, brief window, failure or cancellation. Regular client sessions without gateway timing are not measured.",
+      "pageHint": "Current page only: sum of eligible output tokens divided by sum of observed windows. Concurrent requests are sampled separately; this is not a full-history average.",
+      "value": "≈ {{value}} tok/s",
+      "unavailableReasons": {
+        "canceled": "Request canceled; speed is not measured.",
+        "failed": "Request failed or incomplete; speed is not measured.",
+        "missingUsage": "No valid output usage was recorded.",
+        "shortOutput": "Fewer than 100 output tokens; speed is not measured.",
+        "missingTiming": "No valid output timing was recorded.",
+        "shortWindow": "Observed output window is shorter than 100 ms."
+      }
+    }
   },
   "floatingCard": {
     "selectPlatform": "Switch platform",
@@ -793,7 +814,7 @@
       "startAll": "Start all stopped instances?",
       "restartAll": "Restart all running instances?",
       "stopAll": "Close all instances?",
-      "syncThreads": "Scan all Codex instances and fill in missing threads automatically. Existing threads will not be written again, and target instance files will be backed up before any write occurs. Continue?"
+      "syncThreads": "Add missing sessions across all instances and append new content only when the target instance is stopped and its history matches. Existing bytes are preserved. Updates to diverged histories or running targets are rejected. Target files are backed up before writing. Continue?"
     },
     "status": {
       "running": "Running",
@@ -1062,6 +1083,8 @@
     "title": "Settings",
     "subtitle": "Customize your Cockpit Tools experience.",
     "general": {
+      "errorReporting": "Diagnostics",
+      "errorReportingDesc": "When enabled, submits startup and interface diagnostics after sanitization. Turning it off stops submissions.",
       "appearance": "Appearance",
       "language": "Language",
       "languageDesc": "Select the interface language",
@@ -1386,7 +1409,7 @@
       "backup": {
         "title": "Backup Manager",
         "desc": "Manage scheduled backups, the backup folder, and backup files in one place.",
-        "modalDesc": "Configure automatic backups, browse files stored in the project backup folder, and restore, download, or clean them up here.",
+        "modalDesc": "Manage automatic backup rules and the selected backup folder, with migration to another drive. Browse, restore, download or clean up local backups in that folder.",
         "statusEnabled": "Auto backup is on",
         "statusDisabled": "Auto backup is off",
         "lastRunLabel": "Last backup: {{time}}",
@@ -1404,8 +1427,10 @@
         "retentionDesc": "Backups older than this are removed during the next check.",
         "retentionUnit": "days",
         "directoryTitle": "Backup Folder",
-        "directoryDesc": "Scheduled backups and Cockpit behavior snapshots are saved here; you can move them to another drive.",
+        "directoryDesc": "Scheduled backups and Cockpit behavior snapshots are saved in the selected folder. You can migrate these files to another drive.",
         "changeDirectory": "Change Folder",
+        "sourceUnavailable": "Existing backups cannot be read or counted, so migration is unavailable. You can switch to a new backup folder; old files, accounts and the app data folder stay unchanged. Reason: {{error}}",
+        "loadTimeout": "Backup loading timed out. Retry or choose another folder.",
         "migrating": "Migrating...",
         "migrationConfirm": "Move existing backups from {{oldPath}} to {{newPath}}?\n\nChoosing Cancel will still switch the folder without migrating old files.",
         "migrationConfirmTitle": "Change Backup Folder",
@@ -1533,6 +1558,8 @@
         "accountsOnlyFile": "This backup only contains account data. Select \"Account Data\" to import it",
         "selectedSectionsMissing": "The selected data type is not present in this backup",
         "unsupportedLegacyFile": "This legacy account backup format is not recognized",
+        "codexTopLayoutInvalid": "The backup contains an invalid tab layout. Configuration was not imported.",
+        "codexTopLayoutImportFailed": "Other settings were imported, but the tab layout could not be saved. Retry the import.",
         "unsupportedVersion": "This app version does not support that bundle version"
       }
     },
@@ -2327,6 +2354,10 @@
       "accountsHint": "Select multiple accounts to test with.",
       "start": "Start test",
       "testing": "Testing..."
+    },
+    "confirmation": {
+      "description": "Confirm sending a wakeup for “{{name}}” to {{count}} account(s). No request is sent if you cancel, close, or let it expire.",
+      "expired": "This confirmation expired or ended. Close this dialog."
     }
   },
   "update_notification": {
@@ -2381,6 +2412,16 @@
     "other_group": "Other Models"
   },
   "codex": {
+    "instance": {
+      "errors": {
+        "threadSyncWorkerFailed": "Session sync task failed: {{error}}",
+        "threadSyncBusy": "Codex session sync is in progress. Try again shortly.",
+        "threadSyncTargetRunning": "The target Codex instance is running. Close it before updating existing sessions.",
+        "threadSyncTargetChanged": "The target session changed after preview. Sync again; new content has been preserved.",
+        "threadSyncTargetReplaced": "The target session file was replaced. Preview the sync again.",
+        "threadSyncFileBusy": "Another sync operation is using the target session. Try again shortly."
+      }
+    },
     "thresholds": {
       "shortCycle": "Short-cycle quota",
       "weekly": "Weekly quota",
@@ -2515,9 +2556,9 @@
         "autoDisabled": "Auto sync for all instance records is off",
         "autoEnabled": "Auto sync for all instance records is on",
         "autoTooltip": "Auto sync all instance records",
-        "autoDesc": "Off keeps multi-instance records isolated. When enabled, starting or closing an instance automatically merges local records only after all Codex instances are stopped.",
+        "autoDesc": "When off, instance histories remain separate. When enabled, starting or stopping an instance synchronizes missing sessions and matching history additions only while all Codex instances are stopped. Existing bytes are preserved.",
         "closeFirst": "Close all Codex instances before syncing records to prevent running instances from writing old records back.",
-        "confirmMessage": "This will fully sync local session records across all Codex instances. Sessions with the same ID are merged at the event level, and target key files plus old session files are backed up before writing. Continue?",
+        "confirmMessage": "Add missing sessions across all instances and append new content only when the target instance is stopped and its history matches. Existing bytes are preserved. Updates to diverged histories or running targets are rejected. Target files are backed up before writing. Continue?",
         "needTwo": "At least two instances are required to sync records",
         "settingsSection": "Sync Settings",
         "settingsSubtitle": "Manage Codex multi-instance record sync behavior",
@@ -2561,12 +2602,12 @@
       "accessModeDirectCons": "1: No model switching inside Codex, and no OAuth binding or image forwarding",
       "accessModeCdpPros": "1: Same speed as direct\n2: Switch Flash / Pro in the official Codex model list",
       "accessModeCdpCons": "1: Requires injecting the official client, and supports neither OAuth binding nor image forwarding",
-      "imageGenPickerDesc": "When an image request comes in, the request is forwarded: the base model handles it first, then the image model generates the picture, which consumes part of the selected accounts' quota.",
+      "imageGenPickerDesc": "OAuth sources use a base model and image tool; API Key sources use image endpoints. The selected upstream bills usage or quota.",
       "imageGenSwitchTitle": "Gateway mode only",
       "imageGenSwitchDescription": "Enabling GPT image generation requires the gateway-list mode. Switch to it and enable the option?",
       "imageGenSwitchYes": "Yes",
       "imageGenSwitchNo": "No",
-      "imageGenTitle": "Enable GPT image generation",
+      "imageGenTitle": "Enable images",
       "oauthBindingHint": "After binding, launching is identical to a normal account and all OAuth capabilities are available (remote compaction, browser control, plugins, and more); conversations still run on the current API Key provider.",
       "oauthBindingChange": "Change",
       "title": "Codex Launch Preview",
@@ -2601,6 +2642,7 @@
     "switched": "Switched to {{email}}",
     "switchFailed": "Switch failed: {{error}}",
     "authError": {
+      "refreshFailed": "Token refresh failed: {{error}}",
       "badge": "Auth Issue",
       "refreshTokenReused": "Codex authorization is invalid: the refresh_token was already used by another client or instance. Sign in again, and avoid refreshing the same account from official Codex, other instances, or external tools at the same time.",
       "refreshTokenExpired": "Codex login authorization has expired and cannot be refreshed automatically. Sign in to the Codex account again.",
@@ -2854,8 +2896,8 @@
       "imageGenerationLabel": "image_generation",
       "imageGenerationDesc": "Controls whether chat requests declare the image tool and whether image endpoints are available.",
       "imageGenerationSaveSuccess": "image_generation setting updated",
-      "imageForwardLabel": "Enable GPT image generation",
-      "imageForwardHint": "After enabling, choose GPT accounts: image generation and image editing requests run on the selected accounts and consume their quota, while chat requests keep using the account pool.",
+      "imageForwardLabel": "Enable images",
+      "imageForwardHint": "API Key sources require Images API compatibility and an actual model selected in the account row; OAuth supports native GPT models only.",
       "imageGenerationMode": {
         "enabled": "Enabled",
         "imagesOnly": "Images Only",
@@ -2866,7 +2908,20 @@
       "modelId": "Model ID",
       "modelIdViewOnly": "View only, no switching",
       "modelIdPlaceholder": "Select model ID",
+      "imageAccounts": {
+        "upstreamModel": "Upstream model",
+        "chooseModel": "Select model",
+        "modelRequired": "Choose a supported actual model.",
+        "sourceUnavailable": "The selected source does not support the current image model, or has no usable API credentials or request URL.",
+        "loadFailed": "Could not load image settings. Please retry.",
+        "missingModels": "Choose a model for {{count}} selected sources.",
+        "locateModel": "Find source"
+      },
       "imageGenerationModel": {
+        "manage": "Manage models",
+        "deleteSelected": "Model in use. Replace it and save first.",
+        "invalid": "Model IDs cannot contain whitespace or control characters and must be at most 200 characters.",
+        "syncFailed": "Image model discovery failed. Please retry.",
         "label": "Image model",
         "custom": "Custom",
         "save": "Save model",
@@ -2932,7 +2987,8 @@
         "audioTooLarge": "Audio requests must not exceed 26 MiB.",
         "audioNotSupported": "This OAuth account supports transcription only. Use an API Key provider for other audio operations.",
         "audioUnavailable": "Audio forwarding is unavailable.",
-        "audioUpstreamFailed": "The audio upstream request failed."
+        "audioUpstreamFailed": "The audio upstream request failed.",
+        "modelNotAvailable": "Model {{model}} is not available for this API key."
       },
       "testRateLimited": "Service is reachable, but upstream is rate limited or quota is exhausted: {{detail}}.",
       "testHttpFailed": "Service is reachable, but the request returned HTTP {{status}}: {{detail}}.",
@@ -2974,10 +3030,10 @@
       "killPortSuccess": "Port cleared (closed {{count}} process(es))",
       "killPortSuccessNone": "Port checked. No external process was using it.",
       "killPortSuccessUnknown": "API service port cleared",
-      "restartAction": "Restart Sidecar",
-      "restartTitle": "Restart API Service",
-      "restartConfirmMessage": "Only the API service Sidecar will restart. Accounts, tokens, API keys, and account-pool settings will not change. In-flight requests may be interrupted. Continue?",
-      "restartSuccess": "API service Sidecar restarted",
+      "restartAction": "Restart API service only",
+      "restartTitle": "Restart API service only",
+      "restartConfirmMessage": "Restart only the API service, keeping Codex windows and account pool/API Key settings. API requests in progress may be interrupted. Continue?",
+      "restartSuccess": "API service restarted",
       "refreshStats": "Refresh Stats",
       "refreshStatsSuccess": "API service stats have been refreshed",
       "accountStatsTitle": "By Account",
@@ -3231,7 +3287,8 @@
       "testChatEmptyResponse": "Empty response",
       "imageGenerationMainModel": {
         "label": "Image main model",
-        "hint": "Leave blank to keep gpt-5.5. This model calls the image tool; the selected OAuth accounts must support image_generation on it.",
+        "notice": "Do not change the image main model during normal use.",
+        "hint": "Used only for the official image relay, not to select the image model. Update only if the official main model changes. Leave blank for gpt-5.5.",
         "invalid": "Enter a model ID without whitespace, up to 200 characters."
       },
       "requestDetail": {
@@ -3404,14 +3461,14 @@
         "confirm": "Start",
         "chooseAtStart": "Chosen at start",
         "context": "Supported context",
-        "imageGen": "GPT image generation",
-        "imageGenHint": "Gateway mode only. Chat still runs on this supplier's models; image generation uses the original gpt-image pipeline, executed by the selected GPT accounts and consuming their quota.",
-        "imageGenPick": "Choose GPT accounts",
+        "imageGen": "Image generation",
+        "imageGenHint": "API Key sources require Images API compatibility and an actual model selected in the account row; OAuth supports native GPT models only.",
+        "imageGenPick": "Image sources",
         "imageGenSelected": "{{count}} account(s) selected",
         "imageGenEmpty": "No accounts selected",
         "imageGenLocked": "Select the checkbox to choose accounts",
         "pickerTitle": "Choose image accounts",
-        "pickerEmpty": "No OAuth account can generate images (free and API key accounts are not supported).",
+        "pickerEmpty": "No eligible sources. API Key must support the selected model or GPT family; OAuth supports native GPT models on non-Free accounts only.",
         "pickerSelectAll": "Select all",
         "pickerClear": "Clear",
         "protocol": "Protocol",
@@ -4143,7 +4200,7 @@
       "confirm": {
         "title": "Move to Trash",
         "message": "Selected sessions will be moved to Trash from their instances so they can be restored later. Running instances may need a restart before the change appears. Continue?",
-        "syncMessage": "Missing rollout files, session_index entries, and session file times will be synced to all instances, then official Codex will rebuild the session index. Existing content will not be written again, and target files are backed up before writing. Continue?",
+        "syncMessage": "Add missing sessions across all instances and append new content only when the target instance is stopped and its history matches. Existing bytes are preserved. Updates to diverged histories or running targets are rejected. Target files are backed up before writing. Continue?",
         "repairVisibilityMessage": "Updates the official Codex state DB records that control sidebar session visibility. The state DB files are backed up before writing."
       },
       "empty": {
@@ -4235,7 +4292,7 @@
       },
       "repairModal": {
         "title": "Repair History",
-        "description": "Migrate historical sessions to the target instance's current provider and repair session files, SQLite indexes, the local session catalog, and workspace state. A local backup is created first.",
+        "description": "Normalize historical sessions to the target instance's current provider by repairing SQLite indexes, the local session catalog, and workspace state only. Rollout log files stay byte-for-byte intact; only their timestamps are corrected. A local backup is created first.",
         "stopInstanceHint": "Quit the selected Codex App/ChatGPT instance before a full repair. You can still preview the changes first.",
         "encryptedContentWarning": "Some history was encrypted by another provider or account. Metadata can be migrated, but continuing or compacting those sessions may still fail. Switch back to the original provider/account or start a new session for reliable use.",
         "running": "Repairing...",
@@ -4250,7 +4307,7 @@
           "pruneBackups": "Cleaning old backups...",
           "done": "Repair complete",
           "writeSqliteProvider": "Writing SQLite visibility for {{instance}}...",
-          "writeRolloutFiles": "Writing legacy session files...",
+          "writeRolloutFiles": "Correcting session file timestamps for {{instance}}...",
           "writeSqliteTimestamps": "Fixing SQLite timestamps for {{instance}}...",
           "writeSessionIndex": "Writing session_index..."
         },
@@ -4261,9 +4318,9 @@
         "providerLoadFailed": "Failed to load provider candidates: {{error}}",
         "modeTitle": "Repair mode",
         "modeQuick": "Quick repair",
-        "modeQuickDesc": "Fixes the official state DB and the first session metadata line. Best after routine account switches.",
+        "modeQuickDesc": "Normalizes providers in the official state DB and session indexes only. Rollout log files stay untouched. Best after routine account switches.",
         "modeDeep": "Full repair",
-        "modeDeepDesc": "Migrates all historical provider data and repairs catalogs, workspaces, and sub-agent indexes. Quit the target instance first.",
+        "modeDeepDesc": "Normalizes all historical providers and repairs catalogs, workspaces, and sub-agent indexes. Rollout log files stay untouched. Quit the target instance first.",
         "scopeTitle": "Session scope",
         "scopeAll": "All sessions",
         "scopeAllDesc": "Repair {{count}} session(s) in the current management list.",
@@ -4456,9 +4513,13 @@
       "standard": "Standard",
       "standardDesc": "Default speed, regular usage",
       "fast": "Fast",
-      "fastDesc": "1.5x speed, higher usage",
+      "fastDesc": "Faster, higher usage/cost",
       "saveSuccess": "Speed updated",
-      "saveFailed": "Failed to save speed: {{error}}"
+      "saveFailed": "Failed to save speed: {{error}}",
+      "loadFailed": "Failed to load speed: {{error}}",
+      "apiHint": "After saving, applies to subsequent API requests without a restart. In-flight requests stay unchanged; explicit client tiers take precedence. Fast may increase usage or cost; acceleration depends on the model and provider.",
+      "apiSyncFailed": "Preference saved, but the running API service has not confirmed the update. Try again.",
+      "launchHint": "Written to client config on account switch and Cockpit launch. Restart a running client. New chats use the default; adjust existing chats with independent speed settings in the client."
     },
     "apiService": {
       "inspection": {
@@ -4723,7 +4784,35 @@
         "reasoningEffortValue": "Think {{effort}}",
         "serviceTier": "Service tier",
         "serviceTierValue": "Tier {{tier}}",
-        "upstreamModel": "Sent model"
+        "requestedTier": "Request: {{tier}}",
+        "responseTier": "Reported: {{tier}}",
+        "legacyTier": "Legacy: {{tier}}",
+        "serviceTierHint": "The requested tier is the service_tier sent upstream, not confirmation of the actual processing tier. For Codex OAuth, a reported default does not confirm a downgrade from Fast. Auto means no specific tier was requested (the field was omitted or set to auto).",
+        "legacyTierHint": "This old record mixes request and response tiers. Its source and actual processing tier are unknown.",
+        "upstreamModel": "Sent model",
+        "columns": {
+          "time": "Time",
+          "model": "Model ID",
+          "result": "Result",
+          "source": "Source",
+          "account": "Account",
+          "tokens": "Token usage",
+          "cost": "Est. value",
+          "performance": "Performance",
+          "proxy": "Proxy route",
+          "requestId": "Request ID",
+          "actions": "Actions"
+        },
+        "columnSettings": "Columns",
+        "tokenInput": "In",
+        "tokenOutput": "Out",
+        "tokenCache": "Cached",
+        "tokenTotal": "Total tokens"
+      },
+      "recovery": {
+        "progress": "Recovering account configuration ({{attempt}}/{{total}})",
+        "partialUnavailable": "Some accounts are unavailable. Other accounts can still serve requests. Check account and Key bindings.",
+        "unavailable": "Account configuration needs recovery. Check account and Key bindings, then retry."
       }
     },
     "apiKey": {
@@ -4939,6 +5028,12 @@
       "restartFailed": "Failed to start the gateway: {{error}}"
     },
     "proxy": {
+      "legacyBoundHint": "The previous bound-account proxy remains active. Saving again applies the selected mode.",
+      "boundAccountUnavailable": "The bound account is unavailable. Choose a proxy again.",
+      "boundProxyUnavailable": "The bound account has no available proxy. Choose one again.",
+      "sourceUnavailable": "The proxy source or node is unavailable. Choose it again.",
+      "operationTimeout": "The proxy operation timed out. Please retry.",
+      "cardScopeHint": "This card’s proxy is used by the launched Codex desktop client. Model gateway upstreams keep their own routes.",
       "display": {
         "title": "Proxy display",
         "compact": "Compact",
@@ -5054,7 +5149,7 @@
         "followYes": "Yes",
         "followNo": "No",
         "empty": "No accounts can use an egress proxy",
-        "emptyHint": "Add a standard OAuth account first, then configure its exit here.",
+        "emptyHint": "Add an OAuth or API account, or enable the API service card, then configure its route here.",
         "loadFailed": "Could not load exit data",
         "loadFailedHint": "Reading local proxy resources failed; retry when ready. Independent account bindings keep working."
       },
@@ -5180,7 +5275,7 @@
       "disableAction": "Remove proxy",
       "setIndependent": "Set own proxy",
       "disabledHint": "Skip individual and shared proxies; try direct connections.",
-      "disabledWarning": "Direct access may fail. New connections from desktops using the local relay take effect immediately; other running clients need a restart. Existing connections may keep the previous route.",
+      "disabledWarning": "Direct connections may not reach the service. Restart Codex desktop to connect directly without Cockpit’s local relay. Until then, relayed clients try direct access for new connections; existing connections may keep their previous route.",
       "exitIp": "Exit IP",
       "sessionHistory": "Runtime activity",
       "sessionHistoryHint": "Checks status every 5 seconds. Keeps the initial state and up to 20 recent snapshots from this preview only; cleared on close, not a full historical log.",
@@ -5239,16 +5334,16 @@
       "modeDefaultHint": "This account uses no proxy and keeps its previous default exit.",
       "modeStaleHint": "The bound source or node is no longer available. Choose it again.",
       "management": "Proxy management",
-      "managementHint": "Independent egress for OAuth accounts. System proxy settings stay unchanged.",
+      "managementHint": "Set proxies for OAuth, API account and API service cards without changing the system proxy. API cards apply the proxy to the launched desktop client; model gateway upstreams keep their own routes.",
       "emptyTitle": "A dedicated route for your account",
-      "emptyDescription": "No eligible OAuth accounts yet. Add one from the account overview, then return here to bind a proxy and check its egress.",
+      "emptyDescription": "No eligible account cards are available. Add an OAuth or API account, or enable the API service card, then choose a proxy here.",
       "search": "Search accounts",
       "filter": "Binding status",
       "filter_all": "All",
       "filter_bound": "Bound",
       "filter_unbound": "Unbound",
       "noMatches": "No matching accounts",
-      "oauthOnly": "OAuth account",
+      "oauthOnly": "Account card",
       "saved": "Saved",
       "hiddenSummary": "Credentials hidden",
       "inputMode": "Input method",
@@ -5279,7 +5374,7 @@
       "action": "Proxy",
       "boundHint": "Bound; connectivity has not been verified",
       "unboundHint": "No account proxy configured",
-      "unsupportedAccount": "Only ordinary OAuth accounts support this setting",
+      "unsupportedAccount": "This setting supports ordinary OAuth, API account and API service cards.",
       "invalidUrl": "Invalid proxy address",
       "unsupportedProtocol": "This proxy protocol is not supported yet",
       "saveFailed": "Could not save the proxy",
@@ -5390,14 +5485,17 @@
         "chooseMember": "Choose a group member",
         "chooseAccount": "Choose an account",
         "bind": "Bind account",
-        "noAccounts": "Add a standard OAuth account to bind. You can test the exit now.",
+        "noAccounts": "Add an OAuth or API account, or enable the API service card to assign a proxy. You can test a route now.",
         "autoGroupHint": "Use the whole group without pinning a node. It selects by latency; the exit may change.",
         "policyGroupHint": "Use the whole group without pinning a node. Its policy selects the exit, which may change.",
         "selectGroupHint": "Choose the member this group should use, or select a node directly to keep that node.",
         "chooseResource": "Choose from resources",
         "unsupported": "Unsupported",
         "invalidInput": "Enter a name and a valid subscription URL, node link, or proxy configuration.",
-        "downloadFailed": "Could not fetch the subscription. Check the address and connection; cross-origin redirects are unsupported.",
+        "downloadFailed": "Subscription download failed. Check your network and proxy settings, then retry.",
+        "downloadRedirect": "Subscription download stopped due to a cross-origin redirect or too many redirects.",
+        "downloadDenied": "The subscription server denied access (HTTP 401/403). Check the link and its expiration.",
+        "downloadTls": "The subscription connection failed TLS handshake or certificate verification. Check your network and proxy settings.",
         "timeout": "Operation timed out. Refresh to confirm the result before retrying.",
         "tooLarge": "Content or resource count exceeds the limit. Use a smaller subscription.",
         "busy": "A task is running or saving. Refresh shortly.",
@@ -5535,7 +5633,7 @@
         "assign": "Assign proxy",
         "specific": "Selected accounts",
         "shared": "Shared proxy",
-        "sharedHint": "Codex OAuth accounts without their own proxy use this one, including eligible accounts added later. Existing individual settings stay in effect. Accounts explicitly set to No proxy are excluded.",
+        "sharedHint": "Eligible cards without an individual proxy follow this proxy, including newly added cards. Individual settings and No proxy take priority. API cards use it for the desktop client; model gateway upstreams keep their own routes.",
         "apply": "Assign"
       },
       "managerResources": {
@@ -5562,7 +5660,7 @@
         "follow": "Use default",
         "followHint": "Use the shared proxy, or the client’s default network when it is off.",
         "independentHint": "Override the shared proxy for this account only.",
-        "scope": "Available for eligible Codex OAuth accounts. API keys and custom providers are not supported.",
+        "scope": "OAuth, API accounts and API service",
         "followConfirm": "Remove individual proxies from {{count}} accounts. They will use the shared proxy when enabled, or the client’s default network otherwise."
       },
       "managerUnified": {
@@ -5608,6 +5706,8 @@
       "noChanges": "No unsaved changes",
       "topLayoutTitle": "Top layout",
       "topLayoutDesc": "Drag items or use the arrows to reorder. The first five appear at the top; the rest appear in More in the same order.",
+      "topLayoutSaveFailed": "Tab layout could not be saved. Your order is active for now. Retry; restarting may restore the previous order.",
+      "topLayoutReadFailed": "Could not read the saved tab layout. The current order remains available. Retry loading or change the layout to save it.",
       "locationTop": "Top",
       "locationMore": "More",
       "topLayoutHint": "The More button stays fixed on the right and cannot be reordered or hidden.",
@@ -5678,7 +5778,15 @@
       },
       "failurePhase": "Failure stage",
       "applying": "Applying to running gateways…",
-      "applyFailed": "Settings were saved, but running gateways could not apply them. Retry. Reason: {{error}}"
+      "applyFailed": "Settings were saved, but running gateways could not apply them. Retry. Reason: {{error}}",
+      "timeout": {
+        "open": "Timed out waiting for the upstream to establish a stream. Adjust Timeouts & Retries → {{setting}} (1–600 seconds, default 60).",
+        "idle": "The stream opened, but waiting for more data timed out. Adjust the corresponding stream idle timeout in Timeouts & Retries.",
+        "canceled": "The client canceled this request; this is not a stream open timeout.",
+        "gateway": "HTTP 504 indicates a gateway timeout. This record does not establish its cause; check the upstream error and request phase.",
+        "threshold": "Effective threshold for this request: {{seconds}} seconds.",
+        "settings": "Adjust timeout"
+      }
     },
     "experimentalModels": {
       "defaultReasoning": "Default effort",

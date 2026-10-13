@@ -162,14 +162,20 @@ fn unsupported_nodes_and_groups_remain_visible_but_cannot_bind() {
     assert_eq!(c.groups[1].members, vec!["Alpha"]);
 }
 #[test]
-fn unknown_security_and_transport_fields_are_not_dropped() {
+fn native_parameters_are_preserved_and_runtime_boundaries_are_rejected() {
     for extra in [
         "    dialer-proxy: Evil\n",
         "    certificate: /private/certificate.pem\n",
-        "    unknown-option: secret\n",
+        "    unknown-option: {config-path: /private/key}\n",
     ] {
         assert!(parse(&fixture(extra)).unwrap().nodes[0].outbound.is_none());
     }
+    let catalog = parse(&fixture("    unknown-option: {template-version: 1}\n")).unwrap();
+    assert!(catalog.nodes[0].error.is_none());
+    assert_eq!(
+        catalog.nodes[0].outbound.as_ref().unwrap()["proxy"]["unknown-option"],
+        json!({"template-version": 1})
+    );
 }
 #[test]
 fn cycles_missing_refs_and_remote_providers_disable_groups() {
@@ -308,6 +314,70 @@ fn all_supported_yaml_protocols_map_and_reject_unknown_options() {
 }
 
 #[test]
+fn vless_subscription_metadata_survives_binding_and_runtime_without_changing_protocol() {
+    use super::super::codex_proxy_catalog_binding as binding;
+    let input = fixture("    alterId: 0\n    cipher: auto\n    encryption: none\n    flow: xtls-rprx-vision\n    network: tcp\n    client-fingerprint: qq\nproxy-groups:\n  - {name: Auto, type: url-test, proxies: [Alpha], url: https://example.com/check, interval: 300}\n");
+    let mut catalog = parse(&input).unwrap();
+    revalidate_retained_nodes(&mut catalog);
+    validate(&mut catalog).unwrap();
+    assert!(catalog.nodes[0].error.is_none());
+    assert!(catalog.groups[0].error.is_none());
+    let raw = binding::encode(
+        "source",
+        "source",
+        &catalog.groups[0].id,
+        &catalog,
+        &Default::default(),
+    )
+    .unwrap();
+    let (proxies, groups) =
+        binding::runtime_parts(json!(binding::outbounds(&raw).unwrap())).unwrap();
+    assert_eq!(proxies[0]["type"], "vless");
+    assert_eq!(proxies[0]["alterId"], 0);
+    assert_eq!(proxies[0]["cipher"], "auto");
+    assert_eq!(proxies[0]["encryption"], "none");
+    assert_eq!(proxies[0]["flow"], "xtls-rprx-vision");
+    assert_eq!(proxies[0]["client-fingerprint"], "qq");
+    assert_eq!(groups[0]["type"], "url-test");
+
+    for extra in [
+        "    dialer-proxy: DIRECT\n",
+        "    private-key: /private/key\n",
+        "    unknown-option: {routing-mark: 1}\n",
+    ] {
+        let rejected =
+            parse(&input.replace("    alterId: 0\n", &format!("    alterId: 0\n{extra}"))).unwrap();
+        assert_eq!(rejected.nodes[0].error.as_deref(), Some(UNSUPPORTED));
+        assert!(binding::encode(
+            "s",
+            "s",
+            &rejected.groups[0].id,
+            &rejected,
+            &Default::default()
+        )
+        .is_err());
+    }
+    let insecure = parse(&input.replace(
+        "    tls: true\n",
+        "    tls: true\n    skip-cert-verify: true\n",
+    ))
+    .unwrap();
+    assert_eq!(
+        insecure.nodes[0].error.as_deref(),
+        Some("PROXY_TLS_INSECURE")
+    );
+    assert!(insecure.nodes[0].outbound.is_some());
+    assert!(binding::encode(
+        "s",
+        "s",
+        &insecure.groups[0].id,
+        &insecure,
+        &Default::default()
+    )
+    .is_err());
+}
+
+#[test]
 fn hysteria2_bandwidth_and_duplicate_port_hopping_fields_are_preserved() {
     let input = "proxies:\n  - {name: HY, type: hysteria2, server: example.com, port: 443, password: secret, up: 50, down: 100, ports: '20000-20002', mport: '20000-20002', hop-interval: 30}";
     let catalog = parse(input).unwrap();
@@ -332,22 +402,31 @@ fn hysteria2_bandwidth_and_duplicate_port_hopping_fields_are_preserved() {
     );
 
     let different = input.replace("mport: '20000-20002'", "mport: '30000-30002'");
+    let catalog = parse(&different).unwrap();
+    assert!(catalog.nodes[0].error.is_none());
     assert_eq!(
-        parse(&different).unwrap().nodes[0].error.as_deref(),
-        Some(UNSUPPORTED)
+        catalog.nodes[0].outbound.as_ref().unwrap()["proxy"]["ports"],
+        "20000-20002"
+    );
+    assert_eq!(
+        catalog.nodes[0].outbound.as_ref().unwrap()["proxy"]["mport"],
+        "30000-30002"
     );
     let invalid = input.replace(
         "ports: '20000-20002', mport: '20000-20002'",
         "ports: '70000-80000'",
     );
+    // Port hopping semantics are now the native engine's responsibility.
+    let catalog = parse(&invalid).unwrap();
+    assert!(catalog.nodes[0].error.is_none());
     assert_eq!(
-        parse(&invalid).unwrap().nodes[0].error.as_deref(),
-        Some(UNSUPPORTED)
+        catalog.nodes[0].outbound.as_ref().unwrap()["proxy"]["ports"],
+        "70000-80000"
     );
 }
 
 #[test]
-fn hysteria2_udp_subscription_flag_keeps_security_checks_and_requires_native_semantics() {
+fn hysteria2_ignored_udp_metadata_keeps_native_parameters_and_tls_permissions() {
     use super::super::codex_proxy_catalog_binding as binding;
     let input = "proxies:\n  - {name: HY, type: hysteria2, server: localhost, port: 443, password: secret, sni: example.test, up: 50, down: 100, ports: '20000-20002', mport: '20000-20002', udp: true, skip-cert-verify: true}\nproxy-groups:\n  - {name: Auto, type: url-test, proxies: [REJECT, HY]}\n";
     let mut catalog = parse(input).unwrap();
@@ -383,16 +462,88 @@ fn hysteria2_udp_subscription_flag_keeps_security_checks_and_requires_native_sem
     assert_eq!(proxies[0]["up"], 50);
     assert_eq!(proxies[0]["down"], 100);
     assert_eq!(proxies[0]["ports"], "20000-20002");
-    assert!(proxies[0].get("mport").is_none());
+    assert_eq!(proxies[0]["mport"], "20000-20002");
     assert_eq!(groups[0]["proxies"][0], "REJECT");
-    for unsupported in ["false", "'true'", "1", "null"] {
-        let catalog = parse(&input.replace("udp: true", &format!("udp: {unsupported}"))).unwrap();
+    for ignored in ["false", "'true'", "1", "null"] {
+        let catalog = parse(&input.replace("udp: true", &format!("udp: {ignored}"))).unwrap();
         assert_eq!(
             catalog.nodes[0].error.as_deref(),
-            Some("PROXY_UNSUPPORTED_OPTION")
+            Some("PROXY_TLS_INSECURE")
         );
-        assert!(catalog.nodes[0].outbound.is_none());
+        let expected: Value = serde_yaml::from_str(ignored).unwrap();
+        assert_eq!(
+            catalog.nodes[0].outbound.as_ref().unwrap()["proxy"]["udp"],
+            expected
+        );
         assert!(catalog.groups[0].error.is_some());
+    }
+}
+
+#[test]
+fn native_protocol_matrix_keeps_all_parameters_through_node_and_group_bindings() {
+    use super::super::codex_proxy_catalog_binding as binding;
+    let input = include_str!("../../tests/fixtures/native-proxy-compatibility.json");
+    let originals: Value = serde_json::from_str(input).unwrap();
+    let mut catalog = parse(input).unwrap();
+    assert_eq!(catalog.nodes.len(), 15);
+    assert!(catalog
+        .nodes
+        .iter()
+        .all(|n| n.error.is_none() && n.outbound.is_some()));
+    assert!(catalog.groups.iter().all(|g| g.error.is_none()));
+    revalidate_retained_nodes(&mut catalog);
+    validate(&mut catalog).unwrap();
+    for (node, original) in catalog
+        .nodes
+        .iter()
+        .zip(originals["proxies"].as_array().unwrap())
+    {
+        let encoded =
+            binding::encode("matrix", "matrix", &node.id, &catalog, &Default::default()).unwrap();
+        let (proxies, groups) =
+            binding::runtime_parts(json!(binding::outbounds(&encoded).unwrap())).unwrap();
+        assert!(groups.is_empty());
+        let mut expected = original.clone();
+        expected["name"] = json!("account-node");
+        assert_eq!(proxies, vec![expected]);
+    }
+    let encoded = binding::encode(
+        "matrix",
+        "matrix",
+        &catalog.groups[0].id,
+        &catalog,
+        &Default::default(),
+    )
+    .unwrap();
+    let (proxies, groups) =
+        binding::runtime_parts(json!(binding::outbounds(&encoded).unwrap())).unwrap();
+    assert_eq!(proxies.len(), 15);
+    assert_eq!(groups[0]["proxies"].as_array().unwrap().len(), 15);
+    assert!(proxies
+        .iter()
+        .all(|p| p["template-metadata"] == originals["proxies"][0]["template-metadata"]));
+}
+
+#[test]
+fn native_protocol_matrix_cannot_hide_files_or_routes_in_extra_parameters() {
+    let input: Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/native-proxy-compatibility.json"
+    ))
+    .unwrap();
+    for original in input["proxies"].as_array().unwrap() {
+        for (key, value) in [
+            ("dialer-proxy", json!("DIRECT")),
+            ("interface-name", json!("en0")),
+            ("routing-mark", json!(1)),
+            ("config-path", json!("/private/key")),
+            ("certificate", json!("/private/certificate.pem")),
+        ] {
+            let mut proxy = original.clone();
+            proxy["template-metadata"] = json!({key: value});
+            let catalog = parse(&json!({"proxies":[proxy]}).to_string()).unwrap();
+            assert!(catalog.nodes[0].error.is_some());
+            assert!(catalog.nodes[0].outbound.is_none());
+        }
     }
 }
 
@@ -675,5 +826,13 @@ fn native_ssh_requires_host_identity_and_tls_aliases_preserve_sni() {
         "    sni: tls.example.org\n    servername: other.example.org\n",
     ))
     .unwrap();
-    assert!(conflict.nodes[0].outbound.is_none());
+    assert!(conflict.nodes[0].error.is_none());
+    assert_eq!(
+        conflict.nodes[0].outbound.as_ref().unwrap()["proxy"]["servername"],
+        "other.example.org"
+    );
+    assert_eq!(
+        conflict.nodes[0].outbound.as_ref().unwrap()["proxy"]["sni"],
+        "tls.example.org"
+    );
 }

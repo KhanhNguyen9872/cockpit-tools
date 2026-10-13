@@ -64,6 +64,8 @@ async fn disable_reports_port_that_never_releases_with_bounded_wait() {
 
 #[tokio::test]
 async fn disable_times_out_while_another_lifecycle_operation_holds_lock() {
+    let _env_lock = crate::modules::test_support::env_lock()
+        .lock().unwrap_or_else(|error| error.into_inner());
     let _lock = super::gateway_lifecycle_lock().lock().await;
     let result = tokio::time::timeout(
         Duration::from_secs(4),
@@ -78,6 +80,8 @@ async fn disable_times_out_while_another_lifecycle_operation_holds_lock() {
 
 #[test]
 fn cancelled_disable_restoration_does_not_read_or_modify_profiles() {
+    let _lock = crate::modules::test_support::env_lock()
+        .lock().unwrap_or_else(|error| error.into_inner());
     let _env = LocalAccessTestDataGuard::new("cancelled-disable-restore");
     let collection = test_local_access_collection(Vec::new());
     let result = super::restore_takeover_profiles_after_disable_checked(&collection, || {
@@ -88,6 +92,8 @@ fn cancelled_disable_restoration_does_not_read_or_modify_profiles() {
 
 #[tokio::test]
 async fn disable_rejects_duplicate_transition_without_waiting_on_profile_io() {
+    let _env_lock = crate::modules::test_support::env_lock()
+        .lock().unwrap_or_else(|error| error.into_inner());
     let _guard = super::local_access_enable_transition_lock().lock().await;
     let result = tokio::time::timeout(
         Duration::from_millis(200),

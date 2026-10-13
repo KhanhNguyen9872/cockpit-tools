@@ -47,7 +47,7 @@ export const CODEX_SPEED_DESCRIPTION: Record<
     key: "codex.speed.standardDesc",
     fallback: "默认速度，常规用量",
   },
-  fast: { key: "codex.speed.fastDesc", fallback: "1.5 倍速，用量增加" },
+  fast: { key: "codex.speed.fastDesc", fallback: "加速，用量／费用更高" },
 };
 
 function resolveSpeedMenuPosition(
@@ -119,7 +119,7 @@ export function CodexSpeedSelect({
       {
         value: "fast" as CodexAppSpeed,
         label: t("codex.speed.fast", "快速"),
-        desc: t("codex.speed.fastDesc", "1.5 倍速，用量增加"),
+        desc: t("codex.speed.fastDesc", "加速，用量／费用更高"),
       },
     ],
     [t],

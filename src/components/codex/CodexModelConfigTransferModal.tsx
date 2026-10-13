@@ -41,7 +41,7 @@ export function CodexModelConfigTransferModal({ instanceId, onClose, onImported 
   const mutationInFlight = useRef(false);
   const applyWatch = useRef<{ revision: string; instanceId: string; generation: number } | null>(null);
   const applyErrorRevision = useRef<string | null>(null);
-  useEscCloseTopmost(true, onClose);
+  useEscCloseTopmost(true, onClose, dialogRef);
   useModalFocusTrap(dialogRef, true);
   useModalScrollLock(true);
   useEffect(() => {

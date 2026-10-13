@@ -804,16 +804,20 @@ fn legacy_missing_definitions_request_explicit_refresh_but_current_rejections_do
     let mut current = legacy.clone();
     current.parser_version = PARSER_VERSION;
     current.id = "current".into();
+    let mut previous = legacy.clone();
+    previous.parser_version = 1;
+    previous.id = "previous".into();
     let mut serialized = serde_json::to_value(&legacy).unwrap();
     serialized.as_object_mut().unwrap().remove("parser_version");
     let legacy: Source = serde_json::from_value(serialized).unwrap();
     let store = Store {
-        sources: vec![legacy, current],
+        sources: vec![legacy, current, previous],
         ..Store::default()
     };
     let public = view(&store);
     assert!(public.sources[0].needs_refresh);
     assert!(!public.sources[1].needs_refresh);
+    assert!(public.sources[2].needs_refresh);
     assert!(!public.sources[0].nodes[3].supported);
     let json = serde_json::to_string(&public).unwrap();
     assert!(!json.contains("private-"));
@@ -1277,6 +1281,86 @@ async fn real_subscription_download_reports_only_counts() {
     );
     assert!(supported_nodes > 0, "no supported nodes");
     assert!(supported_groups > 0, "no supported groups");
+}
+
+#[tokio::test]
+async fn subscription_download_distinguishes_http_denial_server_error_and_redirect() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    for (status, headers, expected) in [
+        (401, "", "CATALOG_DOWNLOAD_DENIED"),
+        (403, "", "CATALOG_DOWNLOAD_DENIED"),
+        (503, "", "CATALOG_DOWNLOAD"),
+        (
+            302,
+            "Location: https://other.example/secret-token\r\n",
+            "CATALOG_REDIRECT",
+        ),
+    ] {
+        let server = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = server.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            let (mut socket, _) = server.accept().await.unwrap();
+            let mut request = [0; 4096];
+            socket.read(&mut request).await.unwrap();
+            let body = "private response with secret-token";
+            socket.write_all(format!(
+                "HTTP/1.1 {status} Test\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()
+            ).as_bytes()).await.unwrap();
+        });
+        let client = subscription_client_builder()
+            .https_only(false)
+            .no_proxy()
+            .build()
+            .unwrap();
+        let url = url::Url::parse(&format!("http://{address}/secret-token")).unwrap();
+        let error = fetch_with_client(client, url.clone(), url.origin())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error, expected, "only fixed error codes may escape");
+        task.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn subscription_download_classifies_tls_connection_closed_and_timeout() {
+    use tokio::io::AsyncReadExt;
+    for (tls, expected) in [(true, "CATALOG_DOWNLOAD_TLS"), (false, "CATALOG_TIMEOUT")] {
+        let server = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = server.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            let (mut socket, _) = server.accept().await.unwrap();
+            let mut request = [0; 4096];
+            socket.read(&mut request).await.unwrap();
+            if !tls {
+                std::future::pending::<()>().await;
+            }
+            // EOF during ClientHello is a typed TLS error, even when Display
+            // contains only a platform-specific connection-closed message.
+        });
+        let client = subscription_client_builder()
+            .https_only(tls)
+            .no_proxy()
+            .timeout(Duration::from_millis(if tls { 2000 } else { 100 }))
+            .build()
+            .unwrap();
+        let scheme = if tls { "https" } else { "http" };
+        let url = url::Url::parse(&format!("{scheme}://{address}/private-token")).unwrap();
+        let error = fetch_with_client(client, url.clone(), url.origin())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error, expected);
+        task.abort();
+    }
+}
+
+#[test]
+fn subscription_download_dns_and_unknown_causes_remain_fixed_codes() {
+    let dns = std::io::Error::other("dns error: failed to lookup address private-token");
+    assert_eq!(download_cause_code(Some(&dns)), "CATALOG_DOWNLOAD_DNS");
+    let other = std::io::Error::other("connection reset private-token");
+    assert_eq!(download_cause_code(Some(&other)), "CATALOG_DOWNLOAD");
 }
 
 #[test]
@@ -2883,3 +2967,6 @@ fn usage_is_exposed_only_for_subscription_sources() {
     assert!(public.contains("\"usage\":{"), "{public}");
     assert!(!public.contains("subscription-userinfo"), "{public}");
 }
+
+#[path = "codex_proxy_subscription_tls_tests.rs"]
+mod tls_subscription;

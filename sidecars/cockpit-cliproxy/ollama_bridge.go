@@ -422,7 +422,7 @@ func (s *relayServer) handleOllamaProviderGatewayChat(c *gin.Context, gateway *p
 	}
 	upstreamModel := s.providerGatewayUpstreamModel(gateway, model)
 	if strings.TrimSpace(upstreamModel) == "" {
-		writeAPIError(c, http.StatusNotFound, fmt.Sprintf("model %s is not available for this provider gateway", model), "model_not_available")
+		writeAPIError(c, http.StatusNotFound, s.manifest.modelUnavailableMessage(model), "model_not_available")
 		return
 	}
 	if providerGatewayRequestHasVisionInput(body) && !providerGatewayModelSupportsVision(gateway, upstreamModel) {

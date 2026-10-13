@@ -139,6 +139,9 @@ func buildCodexWebsocketRequestBody(body []byte) []byte {
 
 func readCodexWebsocketMessage(ctx context.Context, sess *codexWebsocketSession, conn *websocket.Conn, readCh chan codexWebsocketRead) (int, []byte, error) {
 	if sess == nil {
+		if ctx != nil && ctx.Err() != nil {
+			return 0, nil, ctx.Err()
+		}
 		if conn == nil {
 			return 0, nil, fmt.Errorf("codex websockets executor: websocket conn is nil")
 		}
@@ -153,21 +156,32 @@ func readCodexWebsocketMessage(ctx context.Context, sess *codexWebsocketSession,
 		return 0, nil, fmt.Errorf("codex websockets executor: session read channel is nil")
 	}
 	for {
+		var ev codexWebsocketRead
+		var ok bool
+		// A frame already received from this socket takes precedence over a
+		// cancellation caused by the reader's following EOF notification.
 		select {
-		case <-ctx.Done():
-			return 0, nil, ctx.Err()
-		case ev, ok := <-readCh:
-			if !ok {
-				return 0, nil, fmt.Errorf("codex websockets executor: session read channel closed")
+		case ev, ok = <-readCh:
+		default:
+			select {
+			case <-ctx.Done():
+				return 0, nil, ctx.Err()
+			case ev, ok = <-readCh:
 			}
-			if ev.conn != conn {
-				continue
-			}
-			if ev.err != nil {
-				return 0, nil, ev.err
-			}
-			return ev.msgType, ev.payload, nil
 		}
+		if !ok {
+			if ctx.Err() != nil {
+				return 0, nil, ctx.Err()
+			}
+			return 0, nil, fmt.Errorf("codex websockets executor: session read channel closed")
+		}
+		if ev.conn != conn {
+			continue
+		}
+		if ev.err != nil {
+			return 0, nil, ev.err
+		}
+		return ev.msgType, ev.payload, nil
 	}
 }
 

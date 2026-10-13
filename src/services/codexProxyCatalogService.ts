@@ -28,6 +28,8 @@ export interface ProxyCatalogDependencyAccount { id: string; name: string; email
 export interface ProxyCatalogDependencies {
   sourceId: string; revision: string; accounts: ProxyCatalogDependencyAccount[]; accountCount: number; unifiedProxy: boolean;
   strategies: string[]; strategyCount: number;
+  clientTargets?: { targetId: string; name: string }[];
+  clientTargetCount?: number;
 }
 function timed<T>(pending: Promise<T>, command: string, args?: Record<string, unknown>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -145,7 +147,9 @@ export function catalogErrorKey(error: unknown): string {
   if (code === 'UNIFIED_PROXY_TIMEOUT') return 'codex.proxy.unified.errorTimeout';
   const keys: Record<string, string> = {
     IMPORT_INVALID: 'invalidInput', IMPORT_AMBIGUOUS: 'ambiguous', IMPORT_EMPTY: 'noNewNodes', CATALOG_URL: 'invalidInput', CATALOG_NAME: 'invalidInput', CATALOG_FORMAT: 'invalidInput',
-    CATALOG_INVALID: 'invalidInput', CATALOG_DOWNLOAD: 'downloadFailed', CATALOG_REDIRECT: 'downloadFailed',
+    CATALOG_INVALID: 'invalidInput', CATALOG_DOWNLOAD: 'downloadFailed', CATALOG_REDIRECT: 'downloadRedirect',
+    CATALOG_DOWNLOAD_DENIED: 'downloadDenied', CATALOG_DOWNLOAD_TLS: 'downloadTls',
+    CATALOG_DOWNLOAD_DNS: 'errorDns',
     CATALOG_TIMEOUT: 'timeout', CATALOG_LIMIT: 'tooLarge', CATALOG_BUSY: 'busy', CATALOG_FINISHING: 'busy',
     CATALOG_CHANGED: 'changed', CATALOG_NOT_FOUND: 'changed', CATALOG_EXISTS: 'exists',
     CATALOG_PARTIAL_UNBIND: 'partialDelete',
@@ -164,6 +168,8 @@ export function catalogErrorKey(error: unknown): string {
   };
   if (code === 'CATALOG_CANCELLED' || code === 'PROXY_PROBE_CANCELLED') return 'common.cancelled';
   if (code === 'PROXY_ENGINE_MISSING') return 'codex.proxy.engineMissing';
+  if (code === 'PROXY_UNSUPPORTED_PROTOCOL') return 'codex.proxy.unsupportedProtocol';
+  if (code === 'PROXY_ENGINE_CONFIG_INVALID') return 'codex.proxy.catalog.reasonInvalid';
   if (code === 'PROXY_PROBE_TIMEOUT' || code === 'PROXY_ENGINE_TIMEOUT') return 'codex.proxy.probeTimeout';
   if (code === 'PROXY_PROBE_FAILED') return 'codex.proxy.probeFailed';
   return `codex.proxy.catalog.${keys[code] ?? 'failed'}`;

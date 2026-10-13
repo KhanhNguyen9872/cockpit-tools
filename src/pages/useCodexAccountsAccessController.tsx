@@ -1,3 +1,4 @@
+import { resolveCodexAccountDisplayName } from "../utils/codexAccountDisplayName";
 import { listenSafely as listen } from "../utils/tauriEventListener";
 import { useState, useEffect, useMemo, useCallback, useRef, type ReactElement } from "react";
 import { RefreshCw, CircleAlert, Eye, EyeOff, Link2 } from "lucide-react";
@@ -46,6 +47,7 @@ import { CODEX_BATCH_IMPORT_SESSION_STORAGE_KEY, DEFAULT_CODEX_API_BASE_URL, DEF
 import { useCodexApiKeyUsageFormatting } from "./codexApiKeyUsageFormatting";
 import { renderCodexApiKeyUsagePanel } from "./codexApiKeyUsagePanel";
 import type { CodexAccountsAccessControllerContext } from "./codexAccountsAccessControllerContract";
+import { DEFAULT_OAUTH_QUOTA_RESERVE_PERCENT, resolveOAuthBindingQuotaReserve } from "./codexAccountsControllerModel";
 
 /** 封装 useCodexAccountsPageController 的 useCodexAccountsAccessController 业务域状态与动作。 */
 export function useCodexAccountsAccessController(context: CodexAccountsAccessControllerContext) {
@@ -319,22 +321,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
   
     const openLocalAccessOAuthBindingModal = useCallback(
       (options?: { autoSwitch?: boolean }) => {
-        const persistedQuotaReserve =
-          localAccessCollection?.boundOauthQuotaReserve ?? null;
-        const hourlyPercent = persistedQuotaReserve
-          ? parseOAuthQuotaReservePercent(
-              String(persistedQuotaReserve.hourlyPercent),
-            )
-          : null;
-        const weeklyPercent = persistedQuotaReserve
-          ? parseOAuthQuotaReservePercent(
-              String(persistedQuotaReserve.weeklyPercent),
-            )
-          : null;
-        const quotaReserve =
-          hourlyPercent !== null && weeklyPercent !== null
-            ? { hourlyPercent, weeklyPercent }
-            : null;
+        const quotaReserve = resolveOAuthBindingQuotaReserve(localAccessCollection);
         setOauthBindingTargetKind("local_access");
         setOauthBindingAccountId(null);
         setOauthBindingSelectedAccountId(
@@ -353,6 +340,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
       },
       [
         boundLocalAccessOAuthAccount,
+        localAccessCollection?.boundOauthAccountId,
         localAccessCollection?.boundOauthQuotaReserve,
         setOauthBindingError,
       ],
@@ -362,12 +350,12 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
       setOauthBindingHourlyReserveDraft(
         oauthBindingQuotaReserve
           ? String(oauthBindingQuotaReserve.hourlyPercent)
-          : "",
+          : String(DEFAULT_OAUTH_QUOTA_RESERVE_PERCENT),
       );
       setOauthBindingWeeklyReserveDraft(
         oauthBindingQuotaReserve
           ? String(oauthBindingQuotaReserve.weeklyPercent)
-          : "",
+          : String(DEFAULT_OAUTH_QUOTA_RESERVE_PERCENT),
       );
       setOauthBindingQuotaReserveFieldErrors({});
       setOauthBindingQuotaReserveEditorOpen(true);
@@ -524,7 +512,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
           if (showSuccessMessage) {
             setMessage({
               text: t("codex.switched", {
-                email: maskAccountText(account.email),
+                email: maskAccountText(resolveCodexAccountDisplayName(account, t("common.apiKeyAccount"))),
               }),
             });
           }
@@ -737,6 +725,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
             launchOptions.deepSeekAccessMode,
             null,
             launchOptions.imageGenerationAccountIds ?? [],
+            launchOptions.imageGenerationAccountModels ?? {},
           );
         }
         if (launchPreviewCliIntent) {
@@ -763,6 +752,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
           await codexInstanceStore.updateInstance({
             instanceId: launchPreviewInstanceId,
             bindAccountId,
+            appSpeed: launchAccount.app_speed ?? "standard",
             deferBindAccountApplication: true,
           });
           if (launchAfterSwitch) {
@@ -1547,7 +1537,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
       page.setAddMessage(
         t("codex.import.successMsg", "导入成功: {{email}}").replace(
           "{{email}}",
-          maskAccountText(account.email),
+          maskAccountText(resolveCodexAccountDisplayName(account, t("common.apiKeyAccount"))),
         ),
       );
       setTimeout(() => {
@@ -2785,7 +2775,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
         page.setAddMessage(
           `${t("codex.import.successMsg", "导入成功: {{email}}").replace(
             "{{email}}",
-            maskAccountText(account.email),
+            maskAccountText(resolveCodexAccountDisplayName(account, t("common.apiKeyAccount"))),
           )}${
             Object.keys(parsedWindows.windows).length > 0 ||
             apiSyncModelCatalogToCodex
@@ -2797,7 +2787,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
           }`,
         );
         setApiKeyInput("");
-        setApiBaseUrlInput(DEFAULT_CODEX_API_BASE_URL);
+        setApiBaseUrlInput("");
         setApiProviderPresetId(defaultApiProviderPresetId);
         setManagedProviderId("");
         setManagedProviderApiKeyId("");
@@ -2975,9 +2965,9 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
       inlineRenameDiscardRef.current = false;
       setEditingApiKeyNameId(account.id);
       setEditingApiKeyNameValue(
-        (account.account_name || account.email || "").trim(),
+        resolveCodexAccountDisplayName(account, t("common.apiKeyAccount")),
       );
-    }, []);
+    }, [t]);
   
     const handleSubmitInlineRename = useCallback(
       async (account: CodexAccount) => {
@@ -2990,9 +2980,9 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
   
         const nextName = editingApiKeyNameValue.trim();
         const currentName = (account.account_name || "").trim();
-        const fallbackName = (account.email || "").trim();
+        const fallbackName = resolveCodexAccountDisplayName(account, t("common.apiKeyAccount"));
         const unchanged =
-          nextName === currentName || (!currentName && nextName === fallbackName);
+          nextName === currentName || nextName === fallbackName;
         if (unchanged) {
           clearInlineRename();
           return;

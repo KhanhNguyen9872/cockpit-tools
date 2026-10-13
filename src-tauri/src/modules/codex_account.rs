@@ -30,6 +30,7 @@ mod tests {
     include!("codex_account_tests_identity_isolation.rs");
     include!("codex_account_tests_portable_import_metadata.rs");
     include!("codex_account_tests_storage_provider.rs");
+    include!("codex_account_tests_storage_status.rs");
     include!("codex_account_tests_api_key_edit_concurrency.rs");
     include!("codex_account_tests_model_catalog.rs");
     include!("codex_account_tests_quick_config.rs");
@@ -40,3 +41,7 @@ mod tests {
 }
 
 include!("codex_account_mutations_quota.rs");
+
+#[cfg(test)]
+#[path = "codex_account_tests_quota_proxy_persistence.rs"]
+mod quota_proxy_persistence_tests;
