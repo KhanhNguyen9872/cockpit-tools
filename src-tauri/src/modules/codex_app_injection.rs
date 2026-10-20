@@ -1,8 +1,9 @@
-//! Codex/ChatGPT renderer 的 Cockpit Tools 额度显示注入。
+//! Codex/ChatGPT renderer 的 Cockpit Tools 额度显示与语音创建接入。
 //!
-//! 两种注入共用同一套 loopback CDP 通道：
+//! 以下注入共用同一套 loopback CDP 通道：
 //! - API 服务绑定：账号数、周额度、5h 额度；
 //! - DeepSeek 账号绑定（网关列出 / CDP 注入 / 直连官方）：该账号的余额。
+//! - API 服务及混合模型路由：前端语音创建请求转入实例网关。
 //!
 //! 该模块只连接实例自己的 loopback CDP 端口，不修改官方 app.asar，
 //! 也不修改官方额度或速度逻辑。额度以独立的小字段显示在 composer 操作栏下方。
@@ -52,6 +53,7 @@ const MODEL_RESYNC_INTERVAL: Duration = Duration::from_secs(10);
 const QUOTA_SCRIPT_KIND: &str = "api-service-quota";
 const DEEPSEEK_MODEL_SCRIPT_KIND: &str = "deepseek-model-picker";
 const DEEPSEEK_BALANCE_SCRIPT_KIND: &str = "deepseek-balance";
+const VOICE_SCRIPT_KIND: &str = "voice-create";
 const AUTH_DIAGNOSTIC_INTERVAL: Duration = Duration::from_secs(5);
 const AUTH_IDENTITY_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 const AUTH_NETWORK_DIAGNOSTIC_INTERVAL: Duration = Duration::from_secs(30);
@@ -248,7 +250,9 @@ pub fn should_enable_injection(bind_account_id: Option<&str>) -> bool {
 
 /// 额度注入、DeepSeek 余额、认证页面观察和 DeepSeek 模型适配都依赖实例自己的 loopback CDP。
 pub fn should_enable_cdp(bind_account_id: Option<&str>) -> bool {
-    auth_observation_enabled(bind_account_id) || should_enable_injection(bind_account_id)
+    auth_observation_enabled(bind_account_id)
+        || should_enable_injection(bind_account_id)
+        || crate::modules::codex_app_enhancements::enabled()
 }
 
 fn observed_oauth_account_id(bind_account_id: Option<&str>) -> Option<String> {
@@ -521,7 +525,8 @@ pub fn restore_running_profiles(app: AppHandle) -> Result<usize, String> {
             }
             continue;
         };
-        let injection_enabled = should_enable_injection(bind_account_id.as_deref());
+        let injection_enabled =
+            should_enable_profile_injection(&profile_dir, bind_account_id.as_deref());
         start_for_profile(
             app.clone(),
             instance_id.clone(),
@@ -544,6 +549,7 @@ pub fn restore_running_profiles(app: AppHandle) -> Result<usize, String> {
 }
 
 pub fn stop_for_profile(profile_dir: &Path) {
+    crate::modules::codex_app_enhancements::stop_for_profile(profile_dir);
     stop_auth_diagnostics_for_profile(profile_dir);
     stop_injection_for_profile(profile_dir);
 }
@@ -567,6 +573,7 @@ fn stop_auth_diagnostics_for_profile(profile_dir: &Path) {
 }
 
 pub fn stop_all() {
+    crate::modules::codex_app_enhancements::stop_all();
     if let Ok(mut items) = runtimes().lock() {
         for (_, runtime) in items.drain() {
             runtime.task.abort();
@@ -622,7 +629,35 @@ pub fn start_for_profile(
     port: Option<u16>,
     bind_account_id: Option<String>,
 ) {
+    start_profile(app, instance_id, profile_dir, port, bind_account_id, false);
+}
+
+/// Only the unified launch transaction grants one clean startup reload.
+pub fn start_for_launched_profile(
+    app: AppHandle,
+    instance_id: String,
+    profile_dir: PathBuf,
+    port: Option<u16>,
+    bind_account_id: Option<String>,
+) {
+    start_profile(app, instance_id, profile_dir, port, bind_account_id, true);
+}
+
+fn start_profile(
+    app: AppHandle,
+    instance_id: String,
+    profile_dir: PathBuf,
+    port: Option<u16>,
+    bind_account_id: Option<String>,
+    fresh_launch: bool,
+) {
     let Some(port) = port else { return };
+    crate::modules::codex_app_enhancements::start_for_profile(
+        profile_dir.clone(),
+        instance_id.clone(),
+        port,
+        fresh_launch,
+    );
     if auth_observation_enabled(bind_account_id.as_deref()) {
         start_auth_diagnostics_for_profile(
             app.clone(),
@@ -632,7 +667,7 @@ pub fn start_for_profile(
             bind_account_id.as_deref(),
         );
     }
-    if !should_enable_injection(bind_account_id.as_deref()) {
+    if !should_enable_profile_injection(&profile_dir, bind_account_id.as_deref()) {
         return;
     }
     stop_injection_for_profile(&profile_dir);
@@ -652,6 +687,7 @@ struct ProfileGatewayConfig {
     base_url: String,
     api_key: String,
     provider_name: String,
+    managed_voice: bool,
 }
 
 fn read_profile_gateway_config(profile_dir: &Path) -> Option<ProfileGatewayConfig> {
@@ -691,8 +727,106 @@ fn read_profile_gateway_config(profile_dir: &Path) -> Option<ProfileGatewayConfi
         base_url,
         api_key,
         provider_name,
+        managed_voice: codex_local_access::has_managed_voice_gateway_config(&config_text),
     })
 }
+
+fn should_enable_profile_injection(profile_dir: &Path, bind_account_id: Option<&str>) -> bool {
+    if should_enable_injection(bind_account_id) {
+        return true;
+    }
+    if !enabled_for_app() {
+        return false;
+    }
+    match codex_local_access::profile_uses_mixed_model_gateway(profile_dir) {
+        Ok(enabled) => enabled,
+        Err(_) => {
+            logger::log_warn("[Codex Voice] 无法读取实例的混合模型路由状态，未启动语音接入");
+            false
+        }
+    }
+}
+
+fn voice_injection_script(
+    profile_dir: &Path,
+    bind_account_id: Option<&str>,
+) -> Result<Option<String>, String> {
+    if !enabled_for_app() {
+        return Ok(None);
+    }
+    if !supports_bind_account(bind_account_id)
+        && !codex_local_access::profile_uses_mixed_model_gateway(profile_dir)
+            .map_err(|_| "无法读取实例的混合模型路由状态".to_string())?
+    {
+        return Ok(None);
+    }
+    let gateway = read_profile_gateway_config(profile_dir)
+        .ok_or_else(|| "无法读取实例网关配置".to_string())?;
+    if !gateway.managed_voice {
+        return Ok(None);
+    }
+    let mut endpoint =
+        reqwest::Url::parse(&gateway.base_url).map_err(|_| "实例网关地址无效".to_string())?;
+    if !matches!(endpoint.scheme(), "http" | "https")
+        || !endpoint.username().is_empty()
+        || endpoint.password().is_some()
+        || endpoint.query().is_some()
+        || endpoint.fragment().is_some()
+        || endpoint.path().trim_end_matches('/') != "/v1"
+    {
+        return Ok(None);
+    }
+    endpoint.set_path("/v1/live");
+    let config_json =
+        json!({ "endpoint": endpoint.as_str(), "apiKey": gateway.api_key }).to_string();
+    Ok(Some(
+        VOICE_INSTALL_SCRIPT.replace("__COCKPIT_VOICE_CONFIG__", &config_json),
+    ))
+}
+
+const VOICE_INSTALL_SCRIPT: &str = r#"(() => {
+  if (location.protocol !== "app:" || location.host !== "-" || typeof MessagePort === "undefined") return false;
+  const key = Symbol.for("cockpit.voice.transport");
+  if (globalThis[key]) return MessagePort.prototype.postMessage === globalThis[key];
+  const config = __COCKPIT_VOICE_CONFIG__;
+  const original = MessagePort.prototype.postMessage;
+  const wrapper = function(...args) {
+    const forward = () => Reflect.apply(original, this, args);
+    const message = args[0];
+    if (!Array.isArray(message) || message[0] !== "push") return forward();
+    const operation = message[1];
+    if (!Array.isArray(operation) || operation[0] !== "pipeline") return forward();
+    const path = operation[2], params = operation[3];
+    if (!Array.isArray(path) || path[path.length - 1] !== "fetch" || !Array.isArray(params)) return forward();
+    const request = params[1];
+    if (!request || typeof request !== "object" || String(request.method).toUpperCase() !== "POST" || typeof request.body !== "string") return forward();
+    let headers;
+    try { headers = new Headers(request.headers); } catch { return forward(); }
+    const alpha = headers.get("OpenAI-Alpha") || "";
+    if (!alpha.split(/[;,\s]+/).some(value => /^quicksilver=.+$/.test(value))) return forward();
+    let body;
+    try { body = JSON.parse(request.body); } catch { return forward(); }
+    if (!body || typeof body.sdp !== "string" || !body.sdp.trim() || !body.session || typeof body.session !== "object" || Array.isArray(body.session)) return forward();
+    const target = request.url;
+    const validTarget = typeof target === "string" && target.startsWith("/") && !target.startsWith("//") && !/[\\#\u0000-\u0020\u007f]/.test(target);
+    const allowed = new Set(["content-type", "openai-alpha", "thread-id", "session-id", "x-session-id", "x-codex-turn-metadata", "originator"]);
+    const nextHeaders = {};
+    headers.forEach((value, name) => { if (allowed.has(name.toLowerCase())) nextHeaders[name] = value; });
+    nextHeaders.Authorization = "Bearer " + config.apiKey;
+    // Let the gateway reject an invalid target without aborting the shared RPC connection.
+    nextHeaders["X-Cockpit-Voice-Target"] = validTarget ? target : "";
+    const nextRequest = { ...request, url: config.endpoint, headers: nextHeaders };
+    delete nextRequest.expectedIdentity;
+    const nextParams = params.slice(); nextParams[1] = nextRequest;
+    const nextOperation = operation.slice(); nextOperation[3] = nextParams;
+    const nextMessage = message.slice(); nextMessage[1] = nextOperation;
+    const nextArgs = args.slice(); nextArgs[0] = nextMessage;
+    return Reflect.apply(original, this, nextArgs);
+  };
+  MessagePort.prototype.postMessage = wrapper;
+  globalThis[key] = wrapper;
+  return true;
+})()"#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InjectionBadgeKind {
@@ -799,6 +933,8 @@ fn local_quota_url(base_url: &str) -> Option<String> {
 #[serde(rename_all = "camelCase")]
 struct QuotaPlanSummary {
     plan: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    official: bool,
     count: i64,
     weekly_remaining_percent: Option<i64>,
     five_hour_remaining_percent: Option<i64>,
@@ -812,7 +948,7 @@ struct InjectionBalanceLine {
     total_balance: f64,
 }
 
-/// API 服务账号池里的 Grok 平台账号额度（只含 GrokBuild），按产品合并成一行。
+/// API 服务账号池里的 Grok 共享额度或旧 GrokBuild 额度。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InjectionGrokQuotaLine {
@@ -901,11 +1037,14 @@ async fn fetch_deepseek_balance(
     }
 }
 
-/// API 服务账号池里的 Grok 账号额度汇总：只取 GrokBuild，多账号取最优剩余额度。
+/// API 服务账号池里的 Grok 额度汇总：共享池或旧 GrokBuild，多账号取最优剩余额度。
 ///
 /// 数据来自 Cockpit 本地保存的 Grok 平台账号额度（账号保活会定期刷新），
 /// 因此这里不发额外网络请求；池里没有 Grok 账号时返回空列表，弹框不显示该行。
-async fn api_service_grok_quota_lines() -> Vec<InjectionGrokQuotaLine> {
+#[path = "codex_app_injection_grok_quota.rs"]
+mod grok_quota;
+
+async fn api_service_grok_quota_lines(locale: &str) -> Vec<InjectionGrokQuotaLine> {
     let Ok(state) = codex_local_access::get_local_access_state().await else {
         return Vec::new();
     };
@@ -914,6 +1053,7 @@ async fn api_service_grok_quota_lines() -> Vec<InjectionGrokQuotaLine> {
     };
     let mut grouped: std::collections::BTreeMap<String, (i64, i64)> =
         std::collections::BTreeMap::new();
+    let shared_label = i18n::translate(locale, "grok.quota.sharedPool", &[]);
     for account_id in collection.account_ids {
         let Some(account) = codex_account::load_account(&account_id) else {
             continue;
@@ -935,45 +1075,21 @@ async fn api_service_grok_quota_lines() -> Vec<InjectionGrokQuotaLine> {
         let Some(quota) = grok_account.quota else {
             continue;
         };
-        for product in quota.products {
-            let normalized = product
-                .product
-                .chars()
-                .filter(|ch| ch.is_ascii_alphanumeric())
-                .collect::<String>()
-                .to_ascii_lowercase();
-            // 卡片只展示 GrokBuild（其余产品额度太杂，会把弹框撑长）。
-            if normalized != "grokbuild" {
-                continue;
-            }
-            let used = product.used;
-            let total = product.total;
-            let remaining = product.remaining;
-            let used_percent = product.usage_percent.or_else(|| {
-                match (used, total, remaining) {
-                    (Some(used), Some(total), _) if total > 0.0 => Some(used / total * 100.0),
-                    (_, Some(total), Some(remaining)) if total > 0.0 => {
-                        Some((total - remaining) / total * 100.0)
-                    }
-                    _ => None,
-                }
-            });
-            let Some(used_percent) = used_percent.filter(|value| value.is_finite()) else {
-                continue;
-            };
-            let remaining_percent = (100.0 - used_percent).round().clamp(0.0, 100.0) as i64;
-            let entry = grouped.entry(product.product).or_insert((0, remaining_percent));
+        for (product, remaining_percent) in grok_quota::quota_lines(&quota, &shared_label) {
+            let entry = grouped.entry(product).or_insert((0, remaining_percent));
             entry.0 += 1;
             entry.1 = entry.1.max(remaining_percent);
         }
     }
     grouped
         .into_iter()
-        .map(|(product, (count, remaining_percent))| InjectionGrokQuotaLine {
-            product,
-            count,
-            remaining_percent,
-        })
+        .map(
+            |(product, (count, remaining_percent))| InjectionGrokQuotaLine {
+                product,
+                count,
+                remaining_percent,
+            },
+        )
         .collect()
 }
 
@@ -1155,8 +1271,7 @@ fn deepseek_model_injection_script(
     payload: &serde_json::Value,
     handled_selected_model: Option<&str>,
 ) -> String {
-    let payload =
-        serde_json::to_string(payload).unwrap_or_else(|_| "{\"models\":[]}".to_string());
+    let payload = serde_json::to_string(payload).unwrap_or_else(|_| "{\"models\":[]}".to_string());
     let handled =
         serde_json::to_string(&handled_selected_model).unwrap_or_else(|_| "null".to_string());
     format!(
@@ -1579,13 +1694,23 @@ fn injection_script(
     ))
     .unwrap_or_else(|_| "\"Total balance\"".to_string());
     // Grok 弹框只讲 Grok 额度：标题复用额度概览，空态复用 Grok 平台的空数据文案。
-    let quota_overview_label =
-        serde_json::to_string(&i18n::translate(locale, "codex.modelProviders.usage.title", &[]))
-            .unwrap_or_else(|_| "\"Quota Overview\"".to_string());
+    let quota_overview_label = serde_json::to_string(&i18n::translate(
+        locale,
+        "codex.modelProviders.usage.title",
+        &[],
+    ))
+    .unwrap_or_else(|_| "\"Quota Overview\"".to_string());
     let grok_empty_label =
         serde_json::to_string(&i18n::translate(locale, "grok.quotaQuery.empty", &[]))
             .unwrap_or_else(|_| "\"No quota\"".to_string());
     let balance_lines = serde_json::to_string(balance_lines).unwrap_or_else(|_| "[]".to_string());
+    let official_label = serde_json::to_string(&i18n::translate(
+        locale,
+        "chatgptPlan.officialFlow.badge",
+        &[],
+    ))
+    .unwrap_or_default();
+    let badge_layout = include_str!("codex_app_injection_layout.js");
     format!(
         r#"(() => {{
       const providerName = {provider};
@@ -1596,6 +1721,7 @@ fn injection_script(
       const abnormalAccountCount = {abnormal_account_count_value};
       const cooldownAccountCount = {cooldown_account_count_value};
       const plans = {plans};
+      const officialLabel = {official_label};
       const grokLines = {grok_lines_value};
       const grokBadgePercent = {grok_badge_percent};
       const grokBadgeProduct = {grok_badge_product};
@@ -1620,6 +1746,7 @@ fn injection_script(
       const refreshInProgress = {refresh_in_progress};
       const handledRefreshToken = {handled_refresh_token};
       const hostHeartbeatTimeoutMs = 8000;
+      const badgeLayout = {badge_layout};
       const root = window.__cockpitCodexInjection || (window.__cockpitCodexInjection = {{}});
       root.hostHeartbeatAt = Date.now();
       root.hostAvailable = true;
@@ -1635,6 +1762,8 @@ fn injection_script(
         if (staleBalanceRoot.watchdogTimer) window.clearInterval(staleBalanceRoot.watchdogTimer);
         if (staleBalanceRoot.observer) staleBalanceRoot.observer.disconnect();
         if (staleBalanceRoot.resizeHandler) window.removeEventListener('resize', staleBalanceRoot.resizeHandler);
+        if (staleBalanceRoot.scrollHandler) window.removeEventListener('scroll', staleBalanceRoot.scrollHandler, true);
+        badgeLayout.disconnect(staleBalanceRoot);
         delete window.__cockpitDeepSeekBalance;
       }}
       document.querySelectorAll('[data-cockpit-deepseek-balance], [data-cockpit-deepseek-balance-details]').forEach((node) => node.remove());
@@ -1653,9 +1782,7 @@ fn injection_script(
           const details = document.querySelector('[data-cockpit-quota-details]');
           if (details) details.style.display = 'none';
           root.quotaDetailsOpen = false;
-          if (root.layoutObserver) root.layoutObserver.disconnect();
-          root.layoutFooter = null;
-          root.layoutPermissions = null;
+          badgeLayout.disconnect(root);
           root.visibleModelFooter = null;
           return;
         }}
@@ -1664,39 +1791,9 @@ fn injection_script(
           host.setAttribute('data-cockpit-quota-footer', 'true');
         }}
         if (host.parentElement !== document.body) document.body.appendChild(host);
-        if ('ResizeObserver' in window) {{
-          if (!root.layoutObserver) root.layoutObserver = new ResizeObserver(() => root.scheduleRender());
-          if (root.layoutFooter !== footer || root.layoutPermissions !== permissions) {{
-            root.layoutObserver.disconnect();
-            root.layoutObserver.observe(footer);
-            if (permissions !== footer) root.layoutObserver.observe(permissions);
-            root.layoutFooter = footer;
-            root.layoutPermissions = permissions;
-          }}
-        }}
-        const footerRect = footer.getBoundingClientRect();
         const permissionsRect = permissions.getBoundingClientRect();
-        // 底部徽章水平居中在当前聊天框的权限按钮和它右侧的「背景信息 / 模型」之间：
-        // 先找背景信息（上下文用量）元素，找不到就用模型选择器，取两个元素之间空档的中点。
-        const contextUsageRect = () => {{
-          const nodes = footer.querySelectorAll('[aria-label*="上下文用量"], [aria-label*="背景信息"], [aria-label*="context usage" i], [aria-label*="context window" i]');
-          for (const node of nodes) {{
-            const rect = node.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) return rect;
-          }}
-          return null;
-        }};
-        const contextRect = contextUsageRect();
         const modelTrigger = [...footer.querySelectorAll('[data-composer-navigation-target="reasoning"]')].find((node) => node.getClientRects().length > 0);
-        const modelAnchorNode = contextRect ? null : modelTrigger;
-        const rightAnchorRect = contextRect || (modelAnchorNode ? modelAnchorNode.getBoundingClientRect() : null);
-        const permissionsRight = permissionsRect.left + permissionsRect.width;
-        const badgeAnchorLeft = rightAnchorRect && rightAnchorRect.left > permissionsRight
-          ? Math.round((permissionsRight + rightAnchorRect.left) / 2)
-          : Math.round(footerRect.left + footerRect.width / 2);
-        host.style.cssText = 'position:fixed;transform:translate(-50%,-50%);z-index:2;display:flex;align-items:center;justify-content:center;gap:6px;color:var(--color-token-text-secondary,#737373);font-size:12px;line-height:1;white-space:nowrap;pointer-events:none;';
-        host.style.left = badgeAnchorLeft + 'px';
-        host.style.top = Math.round(permissionsRect.top + permissionsRect.height / 2) + 'px';
+        host.style.cssText = 'position:fixed;transform:translate(-50%,-50%);z-index:2;display:flex;align-items:center;justify-content:center;gap:6px;width:max-content;color:var(--color-token-text-secondary,#737373);font-size:12px;line-height:1;white-space:nowrap;pointer-events:none;';
         const badgeStyle = 'display:inline-flex;align-items:center;gap:6px;height:24px;border:1px solid var(--color-token-border-subtle,rgba(127,127,127,.20));border-radius:999px;padding:0 9px;background:var(--color-token-main-surface-primary,rgba(127,127,127,.10));color:inherit;font:inherit;box-shadow:0 1px 2px rgba(0,0,0,.08);backdrop-filter:blur(8px);font-weight:500;cursor:pointer;pointer-events:auto;';
         const escapeHtml = (value) => String(value ?? '').replace(/[&<>\"']/g, (char) => ({{'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}}[char]));
         const formatPercent = (value) => Number.isFinite(value) ? Math.round(value) + '%' : '—';
@@ -1704,12 +1801,13 @@ fn injection_script(
           const weekly = formatPercent(plan.weeklyRemainingPercent);
           const fiveHour = formatPercent(plan.fiveHourRemainingPercent);
           const planKey = String(plan.plan || '').toUpperCase();
+          const planLabel = plan.official ? String(plan.plan || '') + ' ' + officialLabel : plan.plan;
           const planColor = planKey.includes('PLUS') ? '#8b5cf6' : (planKey.includes('TEAM') || planKey.includes('BUSINESS')) ? '#3b82f6' : planKey.includes('API_KEY') ? '#a3a3a3' : '#10b981';
           const metrics = [];
           if (Number.isFinite(plan.weeklyRemainingPercent)) metrics.push('<span style="display:inline-flex;align-items:center;gap:4px;"><i style="width:5px;height:5px;border-radius:999px;background:#10b981;"></i>' + escapeHtml(weeklyLabel) + ' ' + escapeHtml(weekly) + '</span>');
           if (Number.isFinite(plan.fiveHourRemainingPercent)) metrics.push('<span style="display:inline-flex;align-items:center;gap:4px;"><i style="width:5px;height:5px;border-radius:999px;background:#3b82f6;"></i>' + escapeHtml(fiveHourLabel) + ' ' + escapeHtml(fiveHour) + '</span>');
           const quotaHtml = metrics.length ? metrics.join('<span style="opacity:.35;">·</span>') : '<span style="opacity:.72;">' + escapeHtml(quotaEmptyLabel) + '</span>';
-          return '<div style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding:6px 0;border-bottom:1px solid var(--color-token-border-subtle,rgba(127,127,127,.10));"><span style="display:inline-flex;align-items:center;gap:6px;color:var(--color-token-text-secondary,#737373);font-weight:500;white-space:nowrap;"><i style="width:6px;height:6px;border-radius:999px;background:' + planColor + ';box-shadow:0 0 0 2px rgba(127,127,127,.10);"></i>' + escapeHtml(plan.plan) + ' <small style="font:inherit;opacity:.62;">' + Math.max(0, Math.round(plan.count || 0)) + '</small></span><span style="display:inline-flex;align-items:center;gap:5px;color:var(--color-token-text-secondary,#737373);text-align:right;white-space:nowrap;">' + quotaHtml + '</span></div>';
+          return '<div style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding:6px 0;border-bottom:1px solid var(--color-token-border-subtle,rgba(127,127,127,.10));"><span style="display:inline-flex;align-items:center;gap:6px;color:var(--color-token-text-secondary,#737373);font-weight:500;white-space:nowrap;"><i style="width:6px;height:6px;border-radius:999px;background:' + planColor + ';box-shadow:0 0 0 2px rgba(127,127,127,.10);"></i>' + escapeHtml(planLabel) + ' <small style="font:inherit;opacity:.62;">' + Math.max(0, Math.round(plan.count || 0)) + '</small></span><span style="display:inline-flex;align-items:center;gap:5px;color:var(--color-token-text-secondary,#737373);text-align:right;white-space:nowrap;">' + quotaHtml + '</span></div>';
         }};
         const detailCardStyle = 'position:fixed;z-index:4;width:min(260px,calc(100vw - 24px));box-sizing:border-box;padding:9px 11px;border:1px solid var(--color-token-border-subtle,rgba(127,127,127,.16));border-radius:10px;background:var(--color-token-main-surface-primary,#fff);color:var(--color-token-text-secondary,#737373);box-shadow:0 4px 14px rgba(0,0,0,.09);font-family:inherit;font-size:12px;line-height:1.3;letter-spacing:normal;pointer-events:auto;';
         const currencySymbol = (code) => {{
@@ -1820,7 +1918,12 @@ fn injection_script(
         if (fields.length) fields.push('<button type="button" data-cockpit-quota-refresh style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:1px solid var(--color-token-border-subtle,rgba(127,127,127,.20));border-radius:999px;padding:0;background:var(--color-token-main-surface-primary,rgba(127,127,127,.10));color:inherit;box-shadow:0 1px 2px rgba(0,0,0,.08);backdrop-filter:blur(8px);cursor:pointer;pointer-events:auto;transition:color .15s ease,border-color .15s ease,background .15s ease,opacity .15s ease"><svg data-cockpit-quota-refresh-icon viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6v5h-5"></path><path d="M4 18v-5h5"></path><path d="M6.1 9a7 7 0 0 1 11.6-2.6L20 11"></path><path d="M4 13l2.3 4.6A7 7 0 0 0 17.9 15"></path></svg></button>');
         const nextHtml = fields.join('');
         if (host.innerHTML !== nextHtml) host.innerHTML = nextHtml;
-        host.style.display = fields.length ? 'flex' : 'none';
+        const placement = fields.length ? badgeLayout.place(root, host, footer, permissions) : null;
+        if (!placement) {{
+          host.style.display = 'none';
+          root.quotaDetailsOpen = false;
+        }}
+        const badgeAnchorLeft = placement ? placement.left : 0;
         let details = document.querySelector('[data-cockpit-quota-details]');
         if (!details) {{
           details = document.createElement('div');
@@ -1828,7 +1931,7 @@ fn injection_script(
           document.body.appendChild(details);
         }}
         details.style.cssText = detailCardStyle;
-        // 弹框与徽章共用同一个锚点（访问权限与背景信息/模型之间的中点）。
+        // 弹框跟随实际可用空档中的徽章；空间不足时关闭，避免挡住原生录音控件。
         details.style.left = badgeAnchorLeft + 'px';
         details.style.top = Math.max(12, Math.round(permissionsRect.top - 2)) + 'px';
         details.style.transform = 'translate(-50%,-100%)';
@@ -1892,6 +1995,10 @@ fn injection_script(
         root.resizeHandler = () => root.scheduleRender();
         window.addEventListener('resize', root.resizeHandler, {{passive:true}});
       }}
+      if (!root.scrollHandler) {{
+        root.scrollHandler = () => root.scheduleRender();
+        window.addEventListener('scroll', root.scrollHandler, {{passive:true,capture:true}});
+      }}
       if (!root.observer) {{
         root.observer = new MutationObserver((mutations) => {{
           const host = document.querySelector('[data-cockpit-quota-footer]');
@@ -1899,7 +2006,7 @@ fn injection_script(
           if (host && mutations.every((mutation) => mutation.target === host || host.contains(mutation.target) || (details && (mutation.target === details || details.contains(mutation.target))))) return;
           root.scheduleRender();
         }});
-        root.observer.observe(document.documentElement, {{childList:true,subtree:true}});
+        root.observer.observe(document.documentElement, {{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['class','style','hidden','aria-hidden','data-state','data-dictation-view']}});
       }}
       if (!document.querySelector('[data-cockpit-quota-style]')) {{
         const style = document.createElement('style');
@@ -1986,6 +2093,7 @@ fn deepseek_balance_injection_script(
     let refresh_in_progress = if refresh_in_progress { "true" } else { "false" };
     let handled_refresh_token =
         serde_json::to_string(&handled_refresh_token).unwrap_or_else(|_| "null".to_string());
+    let badge_layout = include_str!("codex_app_injection_layout.js");
     format!(
         r#"(() => {{
       const balance = {balance};
@@ -2001,6 +2109,7 @@ fn deepseek_balance_injection_script(
       const refreshInProgress = {refresh_in_progress};
       const handledRefreshToken = {handled_refresh_token};
       const hostHeartbeatTimeoutMs = 8000;
+      const badgeLayout = {badge_layout};
       const root = window.__cockpitDeepSeekBalance || (window.__cockpitDeepSeekBalance = {{}});
       root.hostHeartbeatAt = Date.now();
       root.hostAvailable = true;
@@ -2012,11 +2121,14 @@ fn deepseek_balance_injection_script(
         if (staleQuotaRoot.watchdogTimer) window.clearInterval(staleQuotaRoot.watchdogTimer);
         if (staleQuotaRoot.observer) staleQuotaRoot.observer.disconnect();
         if (staleQuotaRoot.resizeHandler) window.removeEventListener('resize', staleQuotaRoot.resizeHandler);
-        if (staleQuotaRoot.layoutObserver) staleQuotaRoot.layoutObserver.disconnect();
+        if (staleQuotaRoot.scrollHandler) window.removeEventListener('scroll', staleQuotaRoot.scrollHandler, true);
+        badgeLayout.disconnect(staleQuotaRoot);
         delete staleQuotaRoot.watchdogTimer;
         delete staleQuotaRoot.observer;
         delete staleQuotaRoot.resizeHandler;
         delete staleQuotaRoot.layoutObserver;
+        delete staleQuotaRoot.layoutNodes;
+        delete staleQuotaRoot.scrollHandler;
         delete staleQuotaRoot.render;
         delete staleQuotaRoot.scheduleRender;
         delete staleQuotaRoot.renderScheduled;
@@ -2059,6 +2171,7 @@ fn deepseek_balance_injection_script(
           if (host) host.style.display = 'none';
           if (details) details.style.display = 'none';
           root.detailsOpen = false;
+          badgeLayout.disconnect(root);
           return;
         }}
         if (!host) {{
@@ -2071,35 +2184,17 @@ fn deepseek_balance_injection_script(
           details.setAttribute('data-cockpit-deepseek-balance-details', 'true');
           document.body.appendChild(details);
         }}
-        const footerRect = footer.getBoundingClientRect();
         const permissionsRect = permissions.getBoundingClientRect();
-        // 与 API 服务额度注入同一套锚点：居中在「访问权限」和右侧「背景信息 / 模型」之间。
-        const contextUsageRect = () => {{
-          const nodes = footer.querySelectorAll('[aria-label*="上下文用量"], [aria-label*="背景信息"], [aria-label*="context usage" i], [aria-label*="context window" i]');
-          for (const node of nodes) {{
-            const rect = node.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) return rect;
-          }}
-          return null;
-        }};
-        const contextRect = contextUsageRect();
-        const modelTrigger = [...footer.querySelectorAll('[data-composer-navigation-target="reasoning"]')].find((node) => node.getClientRects().length > 0);
-        const modelAnchorNode = contextRect ? null : modelTrigger;
-        const rightAnchorRect = contextRect || (modelAnchorNode ? modelAnchorNode.getBoundingClientRect() : null);
-        const permissionsRight = permissionsRect.left + permissionsRect.width;
-        const badgeAnchorLeft = rightAnchorRect && rightAnchorRect.left > permissionsRight
-          ? Math.round((permissionsRight + rightAnchorRect.left) / 2)
-          : Math.round(footerRect.left + footerRect.width / 2);
-        host.style.cssText = 'position:fixed;transform:translate(-50%,-50%);z-index:2;display:flex;align-items:center;justify-content:center;gap:6px;color:var(--color-token-text-secondary,#737373);font-size:12px;line-height:1;white-space:nowrap;pointer-events:none;';
-        host.style.left = badgeAnchorLeft + 'px';
-        host.style.top = Math.round(permissionsRect.top + permissionsRect.height / 2) + 'px';
+        host.style.cssText = 'position:fixed;transform:translate(-50%,-50%);z-index:2;display:flex;align-items:center;justify-content:center;gap:6px;width:max-content;color:var(--color-token-text-secondary,#737373);font-size:12px;line-height:1;white-space:nowrap;pointer-events:none;';
         const badgeStyle = 'display:inline-flex;align-items:center;gap:6px;height:24px;border:1px solid var(--color-token-border-subtle,rgba(127,127,127,.20));border-radius:999px;padding:0 9px;background:var(--color-token-main-surface-primary,rgba(127,127,127,.10));color:inherit;font:inherit;box-shadow:0 1px 2px rgba(0,0,0,.08);backdrop-filter:blur(8px);font-weight:500;cursor:pointer;pointer-events:auto;';
         const currency = balance.currency || null;
         const totalText = formatMoney(balance.totalBalance, currency);
         const badgeHtml = '<button type="button" data-cockpit-deepseek-balance-open style="' + badgeStyle + '"><span style="width:6px;height:6px;border-radius:999px;background:#3b82f6"></span>' + escapeHtml(balanceLabel) + ' ' + escapeHtml(totalText) + '</button>'
           + '<button type="button" data-cockpit-deepseek-balance-refresh title="' + escapeHtml(refreshLabel) + '" aria-label="' + escapeHtml(refreshLabel) + '" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:1px solid var(--color-token-border-subtle,rgba(127,127,127,.20));border-radius:999px;padding:0;background:var(--color-token-main-surface-primary,rgba(127,127,127,.10));color:inherit;box-shadow:0 1px 2px rgba(0,0,0,.08);backdrop-filter:blur(8px);cursor:pointer;pointer-events:auto;"><svg data-cockpit-deepseek-balance-refresh-icon viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6v5h-5"></path><path d="M4 18v-5h5"></path><path d="M6.1 9a7 7 0 0 1 11.6-2.6L20 11"></path><path d="M4 13l2.3 4.6A7 7 0 0 0 17.9 15"></path></svg></button>';
         if (host.innerHTML !== badgeHtml) host.innerHTML = badgeHtml;
-        host.style.display = 'flex';
+        const placement = badgeLayout.place(root, host, footer, permissions);
+        if (!placement) root.detailsOpen = false;
+        const badgeAnchorLeft = placement ? placement.left : 0;
         const row = (label, value) => '<div style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding:6px 0;border-bottom:1px solid var(--color-token-border-subtle,rgba(127,127,127,.10));"><span style="color:var(--color-token-text-secondary,#737373);font-weight:500;white-space:nowrap;">' + escapeHtml(label) + '</span><span style="color:var(--color-token-text-secondary,#737373);text-align:right;white-space:nowrap;">' + escapeHtml(value) + '</span></div>';
         details.style.cssText = 'position:fixed;z-index:4;width:min(240px,calc(100vw - 24px));box-sizing:border-box;padding:9px 11px;border:1px solid var(--color-token-border-subtle,rgba(127,127,127,.16));border-radius:10px;background:var(--color-token-main-surface-primary,#fff);color:var(--color-token-text-secondary,#737373);box-shadow:0 4px 14px rgba(0,0,0,.09);font-family:inherit;font-size:12px;line-height:1.3;letter-spacing:normal;pointer-events:auto;';
         details.style.left = badgeAnchorLeft + 'px';
@@ -2146,6 +2241,10 @@ fn deepseek_balance_injection_script(
         root.resizeHandler = () => root.scheduleRender();
         window.addEventListener('resize', root.resizeHandler, {{passive:true}});
       }}
+      if (!root.scrollHandler) {{
+        root.scrollHandler = () => root.scheduleRender();
+        window.addEventListener('scroll', root.scrollHandler, {{passive:true,capture:true}});
+      }}
       if (!root.observer) {{
         root.observer = new MutationObserver((mutations) => {{
           const host = document.querySelector('[data-cockpit-deepseek-balance]');
@@ -2153,7 +2252,7 @@ fn deepseek_balance_injection_script(
           if (host && mutations.every((mutation) => mutation.target === host || host.contains(mutation.target) || (details && (mutation.target === details || details.contains(mutation.target))))) return;
           root.scheduleRender();
         }});
-        root.observer.observe(document.documentElement, {{childList:true,subtree:true}});
+        root.observer.observe(document.documentElement, {{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['class','style','hidden','aria-hidden','data-state','data-dictation-view']}});
       }}
       if (!document.querySelector('[data-cockpit-quota-style]')) {{
         const style = document.createElement('style');
@@ -2249,6 +2348,32 @@ async fn evaluate_target(
         if !install {
             return None;
         }
+        if script_kind == VOICE_SCRIPT_KIND {
+            timeout(CDP_CONNECT_TIMEOUT, async {
+                while let Some(message) = socket.next().await {
+                    let Ok(Message::Text(text)) = message else {
+                        continue;
+                    };
+                    let Ok(value) = serde_json::from_str::<Value>(&text) else {
+                        continue;
+                    };
+                    if value.get("error").is_some() {
+                        return None;
+                    }
+                    if value.get("id").and_then(Value::as_u64) == Some(1) {
+                        value
+                            .pointer("/result/identifier")
+                            .and_then(Value::as_str)
+                            .filter(|identifier| !identifier.is_empty())?;
+                        return Some(());
+                    }
+                }
+                None
+            })
+            .await
+            .ok()
+            .flatten()?;
+        }
         mark_new_document_script_installed(&install_key);
     }
     if !socket
@@ -2275,6 +2400,16 @@ async fn evaluate_target(
                 continue;
             };
             if value.get("id").and_then(Value::as_i64) == Some(2) {
+                if script_kind == VOICE_SCRIPT_KIND
+                    && (value.get("error").is_some()
+                        || value.pointer("/result/exceptionDetails").is_some()
+                        || value
+                            .pointer("/result/result/value")
+                            .and_then(Value::as_bool)
+                            != Some(true))
+                {
+                    return None;
+                }
                 return Some(InjectionEvalResult {
                     refresh_request_token: refresh_request_token_from_cdp_response(&value),
                     selected_model: selected_model_from_cdp_response(&value),
@@ -3518,11 +3653,22 @@ include!("codex_app_injection_quota.rs");
 
 async fn run_injection_loop(
     app: AppHandle,
-    _instance_id: String,
+    instance_id: String,
     profile_dir: PathBuf,
     port: u16,
     bind_account_id: Option<String>,
 ) {
+    // 语音配置只在注入任务启动时读取一次。
+    let voice_script = match voice_injection_script(&profile_dir, bind_account_id.as_deref()) {
+        Ok(script) => script,
+        Err(error) => {
+            logger::log_warn(&format!(
+                "[Codex Voice] 读取启动配置失败: instance_id={}, error={}",
+                instance_id, error
+            ));
+            None
+        }
+    };
     let client = Client::new();
     // 余额接口是上游网络请求，必须自带超时，不能让注入循环被拖住。
     let balance_client = Client::builder()
@@ -3543,10 +3689,24 @@ async fn run_injection_loop(
     let mut observed_model = read_profile_selected_model(&profile_dir);
     let mut last_model_resync_at = Instant::now() - MODEL_RESYNC_INTERVAL;
     let mut refresh_tasks = JoinSet::new();
+    let mut voice_failure_logged = false;
     loop {
         if app_lifecycle::is_shutdown_started() {
             tokio::time::sleep(Duration::from_millis(50)).await;
             continue;
+        }
+        if let Some(script) = &voice_script {
+            let targets = query_targets(&client, port).await;
+            let mut failed = false;
+            for target in targets.iter().filter(|target| is_codex_app_target(target)) {
+                failed |= evaluate_target(target, script, VOICE_SCRIPT_KIND)
+                    .await
+                    .is_none();
+            }
+            if failed && !voice_failure_logged {
+                logger::log_warn(&format!("[Codex Voice] 页面接入失败: instance_id={}, reason=cdp_install_or_evaluation_failed", instance_id));
+            }
+            voice_failure_logged = failed;
         }
         let mut refresh_finished = false;
         let mut refreshed_empty_pool = false;
@@ -3603,10 +3763,9 @@ async fn run_injection_loop(
                 crate::modules::codex_account::account_uses_cdp_model_injection(deepseek_account);
             if deepseek_cdp {
                 let account_id = Some(deepseek_account.id.clone());
-                let payload =
-                    crate::modules::codex_account::provider_injection_model_payload(
-                        deepseek_account,
-                    );
+                let payload = crate::modules::codex_account::provider_injection_model_payload(
+                    deepseek_account,
+                );
                 let script = deepseek_model_injection_script(
                     &locale,
                     &payload,
@@ -3712,6 +3871,10 @@ async fn run_injection_loop(
             tokio::time::sleep(INJECTION_INTERVAL).await;
             continue;
         }
+        if !supports_bind_account(bind_account_id.as_deref()) {
+            tokio::time::sleep(INJECTION_INTERVAL).await;
+            continue;
+        }
         if refresh_finished || last_quota_at.elapsed() >= QUOTA_REFRESH_INTERVAL {
             let gateway = read_profile_gateway_config(&profile_dir);
             if let Some(value) = fetch_quota(&client, gateway.as_ref()).await {
@@ -3742,7 +3905,7 @@ async fn run_injection_loop(
                 api_service_balance_lines = lines;
             }
             // Grok 额度取自本地账号快照，无网络请求，随余额刷新节拍一起更新。
-            api_service_grok_lines = api_service_grok_quota_lines().await;
+            api_service_grok_lines = api_service_grok_quota_lines(&locale).await;
             last_api_service_balance_at = Instant::now();
         }
         let gateway = read_profile_gateway_config(&profile_dir);

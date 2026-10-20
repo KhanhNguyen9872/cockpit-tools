@@ -4,7 +4,8 @@ mod request_diagnostics_tests {
     #[test]
     fn request_payload_choice_survives_inflight_collection_flush_and_reload() {
         let directory = std::env::temp_dir().join(format!(
-            "cockpit-request-payload-setting-{}", uuid::Uuid::new_v4()
+            "cockpit-request-payload-setting-{}",
+            uuid::Uuid::new_v4()
         ));
         fs::create_dir_all(&directory).unwrap();
         let path = directory.join("collection.json");
@@ -32,7 +33,10 @@ mod request_diagnostics_tests {
             let reloaded: CodexLocalAccessCollection =
                 serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
             assert_eq!(reloaded.request_payload_logging, enabled);
-            assert!(!reloaded.debug_logs, "unrelated settings must still be saved");
+            assert!(
+                !reloaded.debug_logs,
+                "unrelated settings must still be saved"
+            );
             // The same stale writer may publish its snapshot back into the runtime.
             preserve_runtime_collection_fields(&mut late_snapshot, &reloaded);
             assert_eq!(late_snapshot.request_payload_logging, enabled);
@@ -43,7 +47,8 @@ mod request_diagnostics_tests {
     #[test]
     fn request_payload_choice_merges_latest_configuration_and_preserves_failed_writes() {
         let directory = std::env::temp_dir().join(format!(
-            "cockpit-request-payload-merge-{}", uuid::Uuid::new_v4()
+            "cockpit-request-payload-merge-{}",
+            uuid::Uuid::new_v4()
         ));
         fs::create_dir_all(&directory).unwrap();
         let path = directory.join("collection.json");
@@ -69,7 +74,10 @@ mod request_diagnostics_tests {
         assert_eq!(restored.request_payload_logging, published_choice);
         let missing = directory.join("missing.json");
         assert!(persist_request_payload_logging_at_path(&missing, true).is_err());
-        assert!(!missing.exists(), "a failed toggle must not create a collection");
+        assert!(
+            !missing.exists(),
+            "a failed toggle must not create a collection"
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -106,6 +114,128 @@ mod request_diagnostics_tests {
         create_request_logs_table(&conn, true).unwrap();
         create_request_diagnostics_table(&conn).unwrap();
         conn
+    }
+
+    fn capability_trace(
+    ) -> crate::models::codex_local_access::CodexLocalAccessCapabilityFallbackTrace {
+        crate::models::codex_local_access::CodexLocalAccessCapabilityFallbackTrace {
+            reason: "preflight".into(),
+            capabilities: vec!["file_search".into()],
+            from_account_id: "plan-primary".into(),
+            from_model: "gpt-5.5".into(),
+            to_account_id: "account-a".into(),
+            to_model: "gpt-5.5".into(),
+        }
+    }
+
+    #[test]
+    fn capability_fallback_trace_persists_without_bodies_and_survives_late_completion() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("request-logs.sqlite");
+        let mut detail = diagnostic("capability-route", 10);
+        detail.payloads.clear();
+        detail.attempts[0].capability_fallback = Some(capability_trace());
+        {
+            let conn = Connection::open(&path).unwrap();
+            create_request_logs_table(&conn, true).unwrap();
+            create_request_diagnostics_table(&conn).unwrap();
+            insert_request_diagnostic(&conn, detail.clone()).unwrap();
+            let mut late = detail;
+            late.captured_at_ms += 10;
+            late.attempts[0].capability_fallback = None;
+            insert_request_diagnostic(&conn, late).unwrap();
+        }
+        let conn = Connection::open(&path).unwrap();
+        let stored = read_request_diagnostic(&conn, "capability-route")
+            .unwrap()
+            .unwrap();
+        assert!(stored.payloads.is_empty());
+        assert_eq!(
+            stored.attempts.len(),
+            1,
+            "preflight does not invent a network attempt"
+        );
+        assert_eq!(
+            stored.attempts[0].capability_fallback,
+            Some(capability_trace())
+        );
+        let serialized = serde_json::to_value(&stored).unwrap();
+        assert_eq!(
+            serialized["attempts"][0]["capabilityFallback"]["fromAccountId"],
+            "plan-primary"
+        );
+        assert_eq!(
+            serialized["attempts"][0]["capabilityFallback"]["toModel"],
+            "gpt-5.5"
+        );
+    }
+
+    #[test]
+    fn tls_recovery_evidence_survives_storage_without_request_bodies() {
+        let conn = memory_logs();
+        let mut detail = diagnostic("tls-recovery", 10);
+        detail.payloads.clear();
+        detail.attempts[0].transport_error = Some("tls_decrypt".into());
+        detail.attempts[0].transport_pool_retired = Some(true);
+        detail.attempts[0].upstream_http_version = Some("HTTP/2.0".into());
+        insert_request_diagnostic(&conn, detail.clone()).unwrap();
+        detail.captured_at_ms += 1;
+        detail.attempts[0].transport_error = None;
+        detail.attempts[0].transport_pool_retired = None;
+        detail.attempts[0].upstream_http_version = None;
+        insert_request_diagnostic(&conn, detail.clone()).unwrap();
+        let stored = read_request_diagnostic(&conn, "tls-recovery").unwrap().unwrap();
+        assert!(stored.payloads.is_empty());
+        assert_eq!(stored.attempts[0].transport_error.as_deref(), Some("tls_decrypt"));
+        assert_eq!(stored.attempts[0].transport_pool_retired, Some(true));
+        assert_eq!(stored.attempts[0].upstream_http_version.as_deref(), Some("HTTP/2.0"));
+        detail.captured_at_ms += 1;
+        detail.attempts[0].account_id = "different-account".into();
+        insert_request_diagnostic(&conn, detail).unwrap();
+        let stored = read_request_diagnostic(&conn, "tls-recovery").unwrap().unwrap();
+        assert!(stored.attempts[0].transport_error.is_none());
+        assert!(stored.attempts[0].transport_pool_retired.is_none());
+        assert!(stored.attempts[0].upstream_http_version.is_none());
+    }
+
+    #[test]
+    fn capability_fallback_trace_never_labels_legacy_or_unrelated_attempts() {
+        let legacy: CodexLocalAccessRequestAttempt =
+            serde_json::from_str(r#"{"sequence":1}"#).unwrap();
+        assert!(legacy.capability_fallback.is_none());
+        assert!(serde_json::to_value(legacy)
+            .unwrap()
+            .get("capabilityFallback")
+            .is_none());
+
+        let mut original = diagnostic("capability-route", 10);
+        original.attempts[0].capability_fallback = Some(capability_trace());
+        let mut replaced = original.clone();
+        replaced.captured_at_ms += 1;
+        replaced.attempts[0].account_id = "another-target".into();
+        replaced.attempts[0].capability_fallback = None;
+        assert!(merge_request_diagnostics(original, replaced).attempts[0]
+            .capability_fallback
+            .is_none());
+
+        for invalid in ["reason", "account", "model", "url", "capability"] {
+            let mut detail = diagnostic("invalid-trace", 1);
+            let mut trace = capability_trace();
+            match invalid {
+                "reason" => trace.reason = "arbitrary upstream text".into(),
+                "account" => trace.to_account_id = "another-target".into(),
+                "model" => trace.to_model = "another-model".into(),
+                "url" => trace.from_model = "https://example.invalid/secret".into(),
+                _ => trace.capabilities = vec!["schema or arguments must never be logged".into()],
+            }
+            detail.attempts[0].capability_fallback = Some(trace);
+            let normalized = normalize_request_diagnostics(detail);
+            assert!(
+                normalized.attempts[0].capability_fallback.is_none(),
+                "{invalid}"
+            );
+            assert!(normalized.truncated);
+        }
     }
 
     #[test]

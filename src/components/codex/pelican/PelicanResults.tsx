@@ -1,14 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { ExternalLink, LoaderCircle } from 'lucide-react';
+import { ExternalLink, LoaderCircle, Tag } from 'lucide-react';
 import { useCodexPelicanStore } from '../../../stores/useCodexPelicanStore';
 import { useCodexAccountStore } from '../../../stores/useCodexAccountStore';
 import { PelicanPlanBadge } from './PelicanAccountSummary';
 import { artifactPelican, browserPelican, retryPelican } from '../../../services/codexPelicanService';
 import { isPelicanRunning, type CodexPelicanArtifact, type CodexPelicanBatch, type CodexPelicanItem } from '../../../types/codexPelican';
 import { ModalErrorMessage, useModalErrorState } from '../../ModalErrorMessage';
+import { TagEditModal } from '../../TagEditModal';
 import { pelicanError } from './pelicanUtils';
 import { pelicanPreviewDocument } from './pelicanPreviewDocument';
 
@@ -161,6 +162,12 @@ function PelicanItem({ batch, item, mask }: { batch: CodexPelicanBatch; item: Co
 export function PelicanResults({ batch, mask }: { batch: CodexPelicanBatch; mask: (value: string) => string }) {
   const { t } = useTranslation();
   const accounts = useCodexAccountStore((state) => state.accounts);
+  const updateAccountTags = useCodexAccountStore((state) => state.updateAccountTags);
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  const editingAccount = accounts.find((account) => account.id === editingAccountId);
+  const availableTags = useMemo(() => [...new Set(accounts.flatMap((account) =>
+    (account.tags ?? []).map((tag) => tag.trim().toLowerCase()).filter(Boolean),
+  ))].sort((a, b) => a.localeCompare(b)), [accounts]);
   const [, tick] = useState(0);
   useEffect(() => {
     if (!isPelicanRunning(batch)) return;
@@ -171,12 +178,26 @@ export function PelicanResults({ batch, mask }: { batch: CodexPelicanBatch; mask
     <ModalErrorMessage message={batch.error ? pelicanError(batch.error, t) : undefined} />
     <div className="pelican-table-scroll" tabIndex={0} role="region" aria-label={t('pelican.results')}>
       <div className="pelican-canvas-table" aria-label={t('pelican.results')}>
-        {batch.items.map((item) => <article className="pelican-account-tile" key={item.id}>
-          <h3><span className="pelican-account-email">{mask(item.accountEmail || item.accountId)}</span>{accounts.find((entry) => entry.id === item.accountId) && <span className="pelican-account-plan"><PelicanPlanBadge account={accounts.find((entry) => entry.id === item.accountId)!} /></span>}</h3>
-          {item.provider && <div className="pelican-provider-attribution"><span>{t('codex.modelProviders.selectSavedApiKey')}: {mask(item.provider.apiKeyName || item.provider.apiKeyId)}</span><span>{item.provider.model}</span></div>}
-          <PelicanItem batch={batch} item={item} mask={mask} />
-        </article>)}
+        {batch.items.map((item) => {
+          const account = accounts.find((entry) => entry.id === item.accountId);
+          return <article className="pelican-account-tile" key={item.id}>
+            <h3><span className="pelican-account-email">{mask(item.accountEmail || item.accountId)}</span>{account && <span className="pelican-account-plan"><PelicanPlanBadge account={account} /></span>}</h3>
+            {item.provider && <div className="pelican-provider-attribution"><span>{t('codex.modelProviders.selectSavedApiKey')}: {mask(item.provider.apiKeyName || item.provider.apiKeyId)}</span><span>{item.provider.model}</span></div>}
+            <PelicanItem batch={batch} item={item} mask={mask} />
+            {account && <footer className="pelican-result-tags">
+              <div className="pelican-result-tag-list" aria-label={t('accounts.tagModal.title')}>
+                {(account.tags ?? []).map((tag) => <span key={tag} className="tag-pill" title={tag}>{tag}</span>)}
+              </div>
+              <button type="button" className="card-action-btn" title={t('accounts.editTags')} aria-label={t('accounts.editTags')}
+                onClick={() => setEditingAccountId(account.id)}><Tag size={14} /></button>
+            </footer>}
+          </article>;
+        })}
       </div>
     </div>
+    {editingAccount && createPortal(<div className="pelican-tag-editor">
+      <TagEditModal isOpen resetKey={editingAccount.id} initialTags={editingAccount.tags ?? []} availableTags={availableTags}
+        onClose={() => setEditingAccountId(null)} onSave={async (tags) => { await updateAccountTags(editingAccount.id, tags); }} />
+    </div>, window.document.body)}
   </>;
 }

@@ -20,6 +20,10 @@ import { withoutCachedProxySecret } from '../utils/codexProxyCache';
 import { createSerialAccountRefreshQueue } from '../utils/serialAccountRefreshQueue';
 import { createCoalescedWriter } from '../utils/coalescedWriter';
 import { mergeCodexProfileResult } from '../utils/codexProfileRefresh';
+import { mergeCodexQuotaUpdate, type CodexQuotaUpdate } from '../utils/codexQuotaSync';
+
+const quotaUpdates = new Map<string, CodexQuotaUpdate>();
+const reconcileQuotaUpdate = (account: CodexAccount) => mergeCodexQuotaUpdate(account, quotaUpdates.get(account.id));
 
 const APP_PROFILE = (import.meta.env.VITE_COCKPIT_TOOLS_PROFILE || '').trim();
 const STORAGE_PROFILE_SUFFIX = APP_PROFILE && APP_PROFILE !== 'prod' ? `.${APP_PROFILE}` : '';
@@ -143,6 +147,7 @@ interface CodexAccountState {
   fetchCurrentAccount: (options?: FetchCodexCurrentAccountOptions) => Promise<void>;
   restoreActiveTakeoverIfNeeded: () => Promise<void>;
   applyAccountSnapshot: (account: CodexAccount) => void;
+  applyQuotaUpdate: (update: CodexQuotaUpdate) => void;
   switchAccount: (accountId: string, options?: SwitchCodexAccountOptions) => Promise<CodexAccount>;
   deleteAccount: (accountId: string) => Promise<void>;
   deleteAccounts: (accountIds: string[]) => Promise<void>;
@@ -206,7 +211,7 @@ export const useCodexAccountStore = create<CodexAccountState>((set, get) => ({
     const requestId = ++fetchCodexAccountsSeq;
     set({ loading: true, error: null });
     try {
-      const accounts = await codexService.listCodexAccounts();
+      const accounts = (await codexService.listCodexAccounts()).map(reconcileQuotaUpdate);
       if (requestId !== fetchCodexAccountsSeq) {
         return;
       }
@@ -227,7 +232,8 @@ export const useCodexAccountStore = create<CodexAccountState>((set, get) => ({
     void options;
     const requestId = ++fetchCodexCurrentAccountSeq;
     try {
-      const currentAccount = await codexService.getCurrentCodexAccount();
+      const fetched = await codexService.getCurrentCodexAccount();
+      const currentAccount = fetched ? reconcileQuotaUpdate(fetched) : null;
       if (requestId !== fetchCodexCurrentAccountSeq) {
         return;
       }
@@ -253,6 +259,7 @@ export const useCodexAccountStore = create<CodexAccountState>((set, get) => ({
 
   applyAccountSnapshot: (account: CodexAccount) => {
     if (!account?.id) return;
+    account = reconcileQuotaUpdate(account);
 
     // 授权/切号返回的账号是后端刚落盘的权威快照，先写入内存和 localStorage，
     // 同时使旧的异步回读失效，避免旧结果把刚更新的状态覆盖回去。
@@ -268,6 +275,24 @@ export const useCodexAccountStore = create<CodexAccountState>((set, get) => ({
         currentAccount: nextCurrentAccount,
         error: null,
       };
+    });
+  },
+
+  applyQuotaUpdate: (update) => {
+    if (!update?.account_id || !update.quota || !Number.isFinite(update.sequence)) return;
+    const previous = quotaUpdates.get(update.account_id);
+    if (previous && previous.sequence >= update.sequence) return;
+    quotaUpdates.set(update.account_id, update);
+    // Bound retained updates, including accounts deleted in another window.
+    if (quotaUpdates.size > 1024) quotaUpdates.delete(quotaUpdates.keys().next().value!);
+    set((state) => {
+      const accounts = state.accounts.map((account) => account.id === update.account_id ? mergeCodexQuotaUpdate(account, update) : account);
+      const currentAccount = state.currentAccount ? mergeCodexQuotaUpdate(state.currentAccount, update) : null;
+      persistCodexAccountsCache(accounts);
+      if (currentAccount !== state.currentAccount) persistCodexCurrentAccountCache(currentAccount);
+      // Keep list/current fetches alive; their results merge these newer quota
+      // fields instead of discarding unrelated additions or leaving loading set.
+      return { accounts, currentAccount };
     });
   },
 

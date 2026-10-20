@@ -238,8 +238,11 @@ export function CodexLaunchPreviewModal({
   const [contextOverrideEnabled, setContextOverrideEnabled] = useState(false);
   const [contextWindowInput, setContextWindowInput] = useState("");
   const [compactLimitInput, setCompactLimitInput] = useState("");
-  const [contextConfigError, setContextConfigError] = useState<string | null>(null);
+  const { message: contextConfigError, scrollKey: contextErrorScrollKey, set: setContextConfigError } = useModalErrorState();
   const [contextConfigSaving, setContextConfigSaving] = useState(false);
+  const [contextConfigReloading, setContextConfigReloading] = useState(false);
+  const contextReloadRequest = useRef(0);
+  const contextReloadPending = useRef(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [configLoadError, setConfigLoadError] = useState<string | null>(null);
@@ -396,7 +399,7 @@ export function CodexLaunchPreviewModal({
     runningActionId !== null ||
     forceRefreshing ||
     executing !== null;
-  const configBusy = busy || checkingConfig || !configReady;
+  const configBusy = busy || checkingConfig || contextConfigReloading || !configReady;
   const imageModelConfig = useCodexImageModelConfig(configBusy, imageGenPickerOpen || imageGenEnabled);
   const requestClose = useCallback(() => {
     // 只把本弹框自己的子弹框（codex-launch-preview-* 系列）视为“还叠着一层”：
@@ -459,6 +462,9 @@ export function CodexLaunchPreviewModal({
   useEffect(() => {
     let active = true;
     const session = ++configSession.current;
+    contextReloadRequest.current += 1;
+    contextReloadPending.current = false;
+    setContextConfigReloading(false);
     configWritePending.current = false;
     setCheckingConfig(false);
     setLoading(true);
@@ -1286,6 +1292,9 @@ export function CodexLaunchPreviewModal({
 
   const closeContextConfig = useCallback(
     (apply: boolean) => {
+      contextReloadRequest.current += 1;
+      contextReloadPending.current = false;
+      setContextConfigReloading(false);
       if (!apply && contextConfigSnapshot) {
         setContextOverrideEnabled(contextConfigSnapshot.enabled);
         setContextWindowInput(contextConfigSnapshot.contextWindowInput);
@@ -1296,6 +1305,51 @@ export function CodexLaunchPreviewModal({
     },
     [contextConfigSnapshot],
   );
+
+  // A conflict blocks writes, not recovery. Only this explicit action replaces
+  // the draft, and closing/replacing the dialog invalidates a pending read.
+  const reloadContextConfig = useCallback(async () => {
+    if (busy || loading || checkingConfig || contextConfigSaving || contextReloadPending.current) return;
+    const request = ++contextReloadRequest.current;
+    const session = configSession.current;
+    contextReloadPending.current = true;
+    setContextConfigReloading(true);
+    setContextConfigError(null);
+    try {
+      const config = await loadCodexLaunchPreviewConfig(instanceId, mode === "apiService");
+      if (session !== configSession.current || request !== contextReloadRequest.current) return;
+      const latest = configLoadInputs.current;
+      const routing = latest.selectedInstance?.modelRouting;
+      const routes = normalizeCodexModelRoutingRoutes(routing?.routes ?? [], latest.accounts);
+      applyLoadedConfig(config);
+      setLoadedTarget(previewTargetKey);
+      setLoadedInstanceKey(latest.selectedInstance ? codexLaunchPreviewInstanceConfigKey(latest.selectedInstance) : null);
+      setRoutingEnabled(Boolean(routing?.enabled));
+      setRoutingRoutes(routes);
+      if (routing?.enabled && routes.length) {
+        setModels(syncExperimentalModelsWithRouting(config.experimental_model_catalog_models, routes, latest.accounts, true));
+      }
+      setContextConfigSnapshot({
+        enabled: config.detected_model_context_window !== undefined || config.detected_auto_compact_token_limit !== undefined,
+        contextWindowInput: config.detected_model_context_window?.toString() ?? "",
+        compactLimitInput: resolveStoredCompactLimitInput(config.detected_model_context_window, config.detected_auto_compact_token_limit),
+      });
+      setConfigLoadError(null);
+      setError(null);
+      setNotice(null);
+    } catch (loadError) {
+      if (session !== configSession.current || request !== contextReloadRequest.current) return;
+      const code = String(loadError).replace(/^Error:\s*/, "");
+      setContextConfigError(code === CODEX_LAUNCH_PREVIEW_CONFIG_TIMEOUT
+        ? t("codex.launchPreview.configLoadTimeout")
+        : t("instances.form.codexQuickConfig.loadFailed", { error: code }));
+    } finally {
+      if (session === configSession.current && request === contextReloadRequest.current) {
+        contextReloadPending.current = false;
+        setContextConfigReloading(false);
+      }
+    }
+  }, [applyLoadedConfig, busy, checkingConfig, contextConfigSaving, instanceId, loading, mode, previewTargetKey, setError, t]);
 
   /** 「应用上下文」直接落盘：立即写入 model_context_window / 自动压缩阈值，
    *  失败时保留弹框并在弹框内提示，避免用户以为已保存但 config.toml 没有变化。 */
@@ -1582,7 +1636,7 @@ export function CodexLaunchPreviewModal({
           </div>
 
           <div className="modal-body">
-            <ModalErrorMessage message={configErrorMessage || error} scrollKey={errorScrollKey} />
+            <ModalErrorMessage message={contextConfigOpen ? null : configErrorMessage || error} scrollKey={errorScrollKey} />
             {(loading || checkingConfig) && (
               <div className="codex-launch-preview-config-status" role="status">
                 <RefreshCw size={14} className="spin" />
@@ -2672,7 +2726,7 @@ export function CodexLaunchPreviewModal({
 
       {contextConfigOpen && (
         <div className="modal-overlay codex-launch-preview-model-config-overlay">
-          <div ref={contextDialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("codex.contextOverride.title")} className="modal codex-launch-preview-model-config-modal codex-launch-preview-context-config-modal">
+          <div ref={contextDialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("codex.contextOverride.title")} className="modal codex-launch-preview-context-config-modal">
             <div className="modal-header">
               <div>
                 <h2>{t("codex.contextOverride.title", "上下文管理")}</h2>
@@ -2695,14 +2749,27 @@ export function CodexLaunchPreviewModal({
                 compactLimit={compactLimitInput}
                 disabled={configBusy}
                 onChange={(value) => {
+                  setContextConfigError(null);
                   setContextOverrideEnabled(value.enabled);
                   setContextWindowInput(value.contextWindow);
                   setCompactLimitInput(value.compactLimit);
                 }}
               />
-              {contextConfigError && (
-                <div className="codex-launch-preview-context-error">
-                  {contextConfigError}
+              <ModalErrorMessage message={contextConfigError || configErrorMessage} scrollKey={contextErrorScrollKey} />
+              {configErrorMessage && (
+                <div className="codex-launch-preview-config-status">
+                  <span>{t("codex.launchPreview.contextReloadHint")}</span>
+                  <button type="button" className="btn btn-secondary btn-sm"
+                    disabled={busy || loading || checkingConfig || contextConfigSaving || contextConfigReloading}
+                    onClick={() => void reloadContextConfig()}>
+                    <RefreshCw size={14} className={contextConfigReloading ? "spin" : undefined} />
+                    {t("codex.launchPreview.reloadConfig")}
+                  </button>
+                </div>
+              )}
+              {contextConfigReloading && (
+                <div className="codex-launch-preview-config-status" role="status">
+                  {t("codex.launchPreview.configRefreshing")}
                 </div>
               )}
             </div>

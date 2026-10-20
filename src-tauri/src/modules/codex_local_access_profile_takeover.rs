@@ -401,6 +401,17 @@ fn has_managed_realtime_sideband_override(doc: &Document) -> bool {
     }
 }
 
+pub(crate) fn has_managed_voice_gateway_config(config_text: &str) -> bool {
+    if !is_cockpit_managed_local_access_config(config_text) {
+        return false;
+    }
+    let Ok(doc) = crate::modules::codex_config_format::read_codex_config_doc_from_str(config_text) else {
+        return false;
+    };
+    doc.get("experimental_realtime_webrtc_call_base_url").is_none()
+        && has_managed_realtime_sideband_override(&doc)
+}
+
 fn remove_codex_local_access_config(config_text: &str) -> Result<String, String> {
     if config_text.trim().is_empty() {
         return Ok(String::new());

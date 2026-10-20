@@ -15,10 +15,10 @@ function text(value: any): string {
   return typeof value === "object" ? text(value.props?.children) : String(value);
 }
 
-test("new OAuth bindings start with both reserves at 10%", () => {
+test("new OAuth bindings reserve 30% of the five-hour quota and 10% of the weekly quota", () => {
   for (const collection of [undefined, null, {}, { boundOauthAccountId: null, boundOauthQuotaReserve: null }]) {
     assert.deepEqual(resolveOAuthBindingQuotaReserve(collection), {
-      hourlyPercent: 10, weeklyPercent: 10,
+      hourlyPercent: 30, weeklyPercent: 10,
     });
   }
 });
@@ -45,6 +45,13 @@ test("invalid saved reserves are not displayed as an enabled valid policy", () =
     boundOauthAccountId: "oauth-1",
     boundOauthQuotaReserve: { hourlyPercent: 10, weeklyPercent: 0 },
   }), null);
+});
+
+test("saved strict protection and its safety margin survive reopening", () => {
+  assert.deepEqual(resolveOAuthBindingQuotaReserve({
+    boundOauthAccountId: "oauth-1",
+    boundOauthQuotaReserve: { hourlyPercent: 10, weeklyPercent: 10, strict: true, safetyMarginPercent: 5 },
+  }), { hourlyPercent: 10, weeklyPercent: 10, strict: true, safetyMarginPercent: 5 });
 });
 
 function modalHarness(focusCalls: any[] = [], escapeCalls: any[] = []) {
@@ -143,5 +150,46 @@ test("binding and reserve dialogs keep focus and Escape with only the active lay
   props.oauthBindingSaving = true;
   dialogs();
   assert.equal(escapeCalls.filter((entry) => entry.open).length, 0);
+  h.unmount();
+});
+
+test("quota protection is built in and validates its margin for both engines", () => {
+  const h = modalHarness();
+  const saved: unknown[] = [];
+  const props: any = {
+    t: (key: string, fallback: any) => typeof fallback === "string" ? fallback : key,
+    oauthBindingTargetActive: false, isLocalAccessOAuthBinding: true,
+    oauthBindingQuotaReserveEditorOpen: true,
+    oauthBindingQuotaReserve: { hourlyPercent: 10, weeklyPercent: 10 },
+    oauthBindingQuotaReserveFieldErrors: {}, oauthBindingHourlyReserveDraft: "10",
+    oauthBindingWeeklyReserveDraft: "10", oauthBindingHourlyReserveInputRef: { current: null },
+    oauthBindingWeeklyReserveInputRef: { current: null },
+    confirmOAuthBindingQuotaReserveEditor: (value: unknown) => saved.push(value),
+    setOauthBindingQuotaReserveFieldErrors: () => {},
+    localAccessState: { collection: { gatewayMode: "native" } },
+  };
+  h.render(() => h.exports.CodexOAuthBindingModal(props));
+  let tree = nodes(h.flush());
+  const confirm = () => nodes(h.flush()).find((node) => node.type === "button" && text(node) === "确认")!;
+  assert.equal(tree.some((node) => node.props?.type === "checkbox"), false);
+  const margin = tree.find((node) => node.type === "input" && node.props.maxLength === 2)!;
+  let focused = 0;
+  margin.props.ref.current = { scrollIntoView() {}, focus() { focused++; } };
+  margin.props.onChange({ target: { value: "0" } });
+  confirm().props.onClick();
+  assert.equal(saved.length, 0);
+  assert.equal(focused, 1);
+  assert.match(text(h.flush()), /safetyMarginInvalid/);
+  nodes(h.flush()).find((node) => node.type === "input" && node.props.maxLength === 2)!.props.onChange({ target: { value: "5" } });
+  confirm().props.onClick();
+  assert.equal(saved.length, 1);
+  assert.equal((saved[0] as any).strict, undefined);
+  assert.equal((saved[0] as any).safetyMarginPercent, 5);
+  assert.doesNotMatch(text(h.flush()), /safetyMarginInvalid/);
+  props.localAccessState = { collection: { gatewayMode: "sidecar" } };
+  tree = nodes(h.flush());
+  assert.equal(tree.some((node) => node.props?.type === "checkbox"), false);
+  assert.equal(tree.some((node) => node.type === "input" && node.props.maxLength === 2), true);
+  assert.doesNotMatch(text(h.flush()), /strictNativeOnly/);
   h.unmount();
 });

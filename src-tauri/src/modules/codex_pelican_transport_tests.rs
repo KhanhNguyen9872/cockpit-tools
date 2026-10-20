@@ -11,11 +11,7 @@ fn pelican_request_carries_codex_client_metadata_and_prompt_cache() {
         .get("client_metadata")
         .and_then(Value::as_object)
         .expect("client metadata");
-    for key in [
-        "x-codex-installation-id",
-        "x-codex-window-id",
-        "x-codex-turn-metadata",
-    ] {
+    for key in ["x-codex-window-id", "x-codex-turn-metadata"] {
         assert!(
             metadata
                 .get(key)
@@ -28,12 +24,13 @@ fn pelican_request_carries_codex_client_metadata_and_prompt_cache() {
         .get("prompt_cache_key")
         .and_then(Value::as_str)
         .expect("prompt cache key");
-    for header in ["session-id", "conversation_id", "x-client-request-id"] {
+    for header in ["session-id", "thread-id", "conversation_id"] {
         assert_eq!(headers.get(header).map(String::as_str), Some(cache_key));
     }
-    // 同一账号必须稳定，prompt cache 命中依赖这一点。
+    // Independent benchmark runs must not share a conversation.
     let (again, _) = build_pelican_request("gpt-5.5", "high", "hi", "acct-1").expect("build again");
-    assert_eq!(body, again);
+    assert_ne!(body, again);
+    assert_ne!(headers["session-id"], headers["x-client-request-id"]);
 }
 
 #[test]

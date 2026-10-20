@@ -10,6 +10,69 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.3.71] - 2026-10-20
+
+### Added
+
+- **Official third-party ChatGPT access for API Service**: Link access to an existing Codex account and choose official access or the local gateway while retaining account details and quota displays. Includes access management, automatic renewal and reminder opt-out. Removing a service member retains access; Pelican and wakeups prefer linked official access. Official model and tool restrictions apply; image generation is unavailable.
+- **Automatic Codex quota sync**: Active local OAuth accounts refresh quota every 5–30 seconds without API Service, respecting disabled accounts, plan filters and group settings.
+- **OAuth quota protection**: Apply safety margins, near-reserve concurrency limits and quota confirmation before and after requests, with quota freshness and protection status visible.
+- **Automatic capability fallback in API Service**: Find a compatible account within the current key’s authorized scope when needed, switching only after definite pre-execution rejection with safely replayable history.
+- **Codex speed**: Restore Standard, Fast and Ultrafast, preserving defaults and saving user selections. Ultrafast cost estimates use 6× Standard rates.
+- **Codex desktop enhancements, enabled by default**: Pure API-key sessions can use the native speed menu and microphone recording, cancel and retry controls without ChatGPT OAuth. Speed tiers follow model support; dictation uses the current instance’s transcription API and inserts text into the draft unless you explicitly choose to send. Native controls load automatically on a clean startup; startup loading, menu interaction and temporary busy states defer loading and are retried within the safe startup window, preserving windows already in use and unsent drafts. Mixed-mode local API conversations can continue when the bound ChatGPT subscription is exhausted. Quota badges make room during recording and in narrow windows. General Settings and Codex quick settings share configuration and aligned descriptions; explicit opt-outs are retained. Provider support and pricing still apply.
+- Edit and view account tags directly on Pelican result cards.
+
+### Changed
+
+- Improve build caches and reduce duplicate compilation for macOS Universal packages.
+- New API Service OAuth bindings reserve 30% of the five-hour quota and 10% of the weekly quota by default, preserving existing settings. Quota confirmation accelerates near the reserve.
+- Proxy subscriptions update automatically with on-demand health checks. Existing node certificate exceptions remain in effect; ordinary TLS nodes retain certificate validation.
+- OAuth account switches automatically preserve active external bridges verified against local integration records.
+- Improve tool protocols, streaming responses and subagent history compatibility, with automatic adaptation and no extra switches or compatibility-model lists.
+
+### Fixed
+
+- Automatically unmount temporary DMG volumes after packaging and verification; retain temporary files and report errors when unmounting fails.
+- Fix continuation failures involving host messages and legacy tool history after quota-triggered account switches, restarts or engine changes.
+- Preserve TLS failure details and rebuild affected connection pools without forcing reauthorization or replaying partially delivered tool calls.
+- Fix lingering Windows proxy processes holding ports, and startup blank screens caused by duplicate React runtimes in builds from SUBST drives or linked directories.
+- Fix model-setting persistence and dialog menu layouts. Align GPT-6 Astra, Sol and Luna context defaults to 272,000 tokens with an 872,000-token maximum while retaining user settings.
+- Preserve native Responses routes and independent API-key settings when only image capabilities change.
+- Route frontend voice calls through Cockpit for managed Codex instances with client injection enabled.
+- Fix duplicate update downloads and progress moving backward.
+
+## [1.3.70] - 2026-10-16
+
+### Fixed
+
+- Fix some API service follow-up and sub-agent continuation failures, improving conversation continuity across restarts, engine and account changes.
+- Remove fixed conversation request-size limits from the API service, improving large-history continuation and interrupted-read diagnostics.
+- Fix Rust API service requests sometimes returning 503 after a restart before proxy settings are ready.
+
+## [1.3.69] - 2026-10-16
+
+### Added
+
+- **Rust native API service**: Added Rust as the default API engine for new installations and the first upgrade, with Go still available as an option.
+- **Grok and Cursor**: Display server-provided subscription values. Grok supports 4.7 model capabilities and pricing, and both API engines support client tool discovery, follow-up conversations and sub-agents, normalize search and reasoning responses, and refresh compatible request versions in the background. Grok recognizes The X Subscription shared allowance and actual reset period while retaining legacy plans; purchased credits and product usage shares are not treated as separate allowances. New authorizations include workspace permissions supported by the official CLI.
+- **Antigravity desktop switching**: WebSocket requests can explicitly target desktop credentials without launching the client, or request a restart. Requests without a target retain the existing IDE behavior.
+
+### Changed
+
+- Platforms appear independently by default in the top navigation, except that Codex API Service remains grouped with Codex. Other untouched built-in groups are expanded while customized groups and layout choices are retained; grouping remains available in Top Layout.
+- Removed the reverse-proxy risk warning and its confirmation step from API service actions.
+
+- **Go API service**: Improved stability, account switching, conversation continuation and error handling.
+- Updated built-in Codex models and defaults, removing GPT-5.5.
+
+### Fixed
+
+- Windows default-instance launches use the same custom `CODEX_HOME` as account switching, preventing startup with another directory's account.
+- Grok device authorization uses the issuer's verification URL when no complete link is returned. Missing data-sharing preferences default to opting out, matching the official CLI, while explicit preferences remain unchanged. Usage below 100% no longer appears exhausted after rounding.
+- Codex context settings show configuration conflicts and a reload action inside the active dialog. Failures retain the draft; successful reloads update the cancellation baseline.
+- Codex launch-preview Model Management keeps the dialog and action buttons stable when menus open, with scrolling inside the model list.
+- Codex desktop proxy entries try dispersed candidates when consecutive ports are unavailable, preserve account port ownership, and explain recovery failures without silently changing a running client's port.
+
 ## [1.3.68] - 2026-10-13
 
 ### Added

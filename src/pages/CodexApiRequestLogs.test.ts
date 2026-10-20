@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { loadHookModule } from '../../tests/helpers/reactHookHarness';
 import { resolveCodexApiServiceLogModelPair } from '../utils/codexApiServiceLogModel';
-import { hasRequestFirstResponse, requestServiceTierPresentation, requestedServiceTierLabelKey } from '../utils/codexRequestDiagnostics';
+import { hasRequestFirstResponse, requestAuthorizationRouteKey, requestServiceTierPresentation, requestedServiceTierLabelKey } from '../utils/codexRequestDiagnostics';
 
 type Element = { type: unknown; props: Record<string, any> };
 function nodes(value: any): Element[] {
@@ -46,7 +46,7 @@ function harness(localStorage: any) {
     '../components/PaginationControls': { PaginationControls: 'PaginationControls' },
     '../components/codex/CodexRequestProxyLabel': { CodexRequestProxyLabel: 'CodexRequestProxyLabel' },
     '../components/codex/CodexRequestDetailModal': { CodexRequestDetailModal: 'CodexRequestDetailModal' },
-    '../utils/codexRequestDiagnostics': { hasRequestFirstResponse, requestServiceTierPresentation, requestedServiceTierLabelKey },
+    '../utils/codexRequestDiagnostics': { hasRequestFirstResponse, requestAuthorizationRouteKey, requestServiceTierPresentation, requestedServiceTierLabelKey },
     '../utils/codexApiServiceLogModel': { resolveCodexApiServiceLogModelPair },
   }, { localStorage });
 }
@@ -60,6 +60,21 @@ function openColumns(hook: ReturnType<typeof harness>) {
   return nodes(hook.flush()).filter((n) => n.type === 'button' && 'aria-pressed' in n.props);
 }
 
+test('log rows distinguish recorded local and official access without consulting current account bindings', () => {
+  const hook = harness(storage());
+  hook.render(() => hook.exports.CodexApiRequestLogs(props([
+    { ...sample, requestId: 'official', accountId: 'chatgpt_plan_saved' },
+    { ...sample, requestId: 'local', accountId: 'source' },
+    { ...sample, requestId: 'legacy', accountId: undefined },
+  ])));
+  const rows = nodes(hook.flush()).filter((node) => node.type === 'tr').slice(1);
+  assert.match(text(rows[0]), /codex.requestDiagnostics.routeOfficial/);
+  assert.match(text(rows[1]), /codex.requestDiagnostics.routeLocal/);
+  assert.match(text(rows[2]), /common.unknown/);
+  assert.ok(rows.every((row) => text(row).includes('codex.requestDiagnostics.authorizationRoute')));
+  hook.unmount();
+});
+
 test('speed badges use short labels and retain raw tier evidence only in details', () => {
   const hook = harness(storage());
   hook.render(() => hook.exports.CodexApiRequestLogs(props([
@@ -69,11 +84,12 @@ test('speed badges use short labels and retain raw tier evidence only in details
     { ...sample, requestId: 'standard', requestedServiceTier: 'default', responseServiceTier: 'default' },
     { ...sample, requestId: 'fast-alias', requestedServiceTier: 'FAST', responseServiceTier: 'default' },
     { ...sample, requestId: 'response-only', responseServiceTier: 'priority' },
+    { ...sample, requestId: 'ultrafast', requestedServiceTier: 'ultrafast', responseServiceTier: 'default' },
   ])));
   const rows = nodes(hook.flush()).filter((n) => n.type === 'tr').slice(1);
   const badges = rows.map((row) => nodes(row).filter((n) => n.props.className?.startsWith('codex-request-log-speed')));
   assert.deepEqual(badges.map((items) => items.map(text)), [
-    ['codex.speed.fast'], [], [], ['codex.speed.standard'], ['codex.speed.fast'], [],
+    ['codex.speed.fast'], [], [], ['codex.speed.standard'], ['codex.speed.fast'], [], ['codex.speed.ultrafast'],
   ]);
   for (const row of rows) assert.doesNotMatch(text(row), /requestedTier|responseTier|legacyTier|default/);
   for (const index of [0, 4]) {

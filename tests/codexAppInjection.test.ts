@@ -9,6 +9,7 @@ const values: Record<string, unknown> = {
   provider: 'Provider', weekly: 50, five_hour: 75, account_count_value: 2,
   available_account_count_value: 2, abnormal_account_count_value: 0, cooldown_account_count_value: 0,
   plans: [], grok_lines_value: [], grok_badge_percent: 90, grok_badge_product: 'GrokBuild',
+  official_label: '官',
   badge_kind_value: 'codex', fallback_model_value: 'gpt-5.4',
   account_pool_label: 'Accounts', weekly_label: 'Week', five_hour_label: '5h',
   account_pool_title: 'Account pool', quota_empty_label: 'No quota', available_text: 'Available',
@@ -22,6 +23,8 @@ const values: Record<string, unknown> = {
   available_label: 'Available', unavailable_label: 'Unavailable',
 };
 
+const layoutSource = readFileSync(new URL('../src-tauri/src/modules/codex_app_injection_layout.js', import.meta.url), 'utf8');
+
 // Execute the shipped raw JS template, including Rust format! brace escaping.
 // No duplicate implementation of model detection or badge rendering lives in this test.
 function script(kind: ScriptKind) {
@@ -34,6 +37,7 @@ function script(kind: ScriptKind) {
   return source.slice(start + 3, end).replace(/\{\{|\}\}|\{([a-z_]+)\}/g, (token, key: string | undefined) => {
     if (token === '{{') return '{';
     if (token === '}}') return '}';
+    if (key === 'badge_layout') return layoutSource;
     assert.ok(key && Object.hasOwn(values, key), `unhandled template argument ${key}`);
     return JSON.stringify(values[key!]);
   });
@@ -50,6 +54,9 @@ class Element {
   rect = { left: 100, top: 900, width: 80, height: 24 };
 
   setAttribute(key: string, value: string) { this.attributes[key] = value; }
+  getAttribute(key: string) { return this.attributes[key] ?? null; }
+  hasAttribute(key: string) { return key in this.attributes; }
+  removeAttribute(key: string) { delete this.attributes[key]; }
   appendChild(node: Element) {
     node.remove();
     node.parentElement = this;
@@ -62,8 +69,10 @@ class Element {
   contains(node: Element): boolean { return node === this || this.children.some((child) => child.contains(node)); }
   matches(selector: string) {
     return selector.split(',').some((part) => {
-      const match = /^\[([^=*\]]+)(?:(\*?=)"([^"]*)"( i)?)?\]$/.exec(part.trim());
-      assert.ok(match, `unsupported mock selector ${part}`);
+      const trimmed = part.trim();
+      if (trimmed === '*') return true;
+      const match = /^\[([^=*\]]+)(?:(\*?=)"([^"]*)"( i)?)?\]$/.exec(trimmed);
+      if (!match) return false;
       let value = this.attributes[match[1]];
       if (!match[2]) return value !== undefined;
       if (value === undefined) return false;
@@ -84,7 +93,12 @@ class Element {
     return [this.rect];
   }
   getBoundingClientRect() {
-    return this.getClientRects().length ? this.rect : { left: 0, top: 0, width: 0, height: 0 };
+    if (!this.getClientRects().length) return { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0 };
+    return {
+      ...this.rect,
+      right: this.rect.left + this.rect.width,
+      bottom: this.rect.top + this.rect.height,
+    };
   }
 }
 
@@ -134,12 +148,20 @@ function harness(kind: ScriptKind, composers: ReturnType<typeof composer>[]) {
     disconnect() { this.targets = []; }
   }
   class MutationObserver { observe() {} disconnect() {} }
+  const getComputedStyle = (node: Element) => ({
+    display: node.style.display || 'block',
+    visibility: node.style.visibility || 'visible',
+    ...node.style,
+  });
   const window: Record<string, any> = {
+    innerWidth: 1200,
+    innerHeight: 1000,
+    getComputedStyle,
     ResizeObserver, setInterval: () => 1, clearInterval() {}, addEventListener() {}, removeEventListener() {},
   };
   let now = Date.now();
   class Clock extends Date { static now() { return now; } }
-  const context = { document, window, Date: Clock, ResizeObserver, MutationObserver, requestAnimationFrame: (fn: () => void) => fn() };
+  const context = { document, window, Date: Clock, ResizeObserver, MutationObserver, getComputedStyle, requestAnimationFrame: (fn: () => void) => fn() };
   const namespace = kind === 'injection_script' ? '__cockpitCodexInjection' : '__cockpitDeepSeekBalance';
   const marker = kind === 'injection_script' ? 'quota-footer' : 'deepseek-balance';
   return {
@@ -159,7 +181,7 @@ test('quota badge reads the visible GPT composer rather than a retained hidden D
   assert.equal(h.host().style.left, '515px');
   assert.match(h.host().innerHTML, /5h 75%/);
   assert.doesNotMatch(h.host().innerHTML, /Balance/);
-  assert.deepEqual(h.root().layoutObserver.targets, [active.footer, active.permissions]);
+  assert.deepEqual(h.root().layoutObserver.targets, [active.footer, active.permissions, active.trigger]);
 });
 
 test('quota badge reads visible DeepSeek and updates the model, badge, and observers on conversation change', () => {
@@ -174,7 +196,7 @@ test('quota badge reads visible DeepSeek and updates the model, badge, and obser
   assert.match(h.host().innerHTML, /Build 90%/);
   assert.doesNotMatch(h.host().innerHTML, /Balance/);
   assert.equal(h.host().style.top, '512px');
-  assert.deepEqual(h.root().layoutObserver.targets, [next.footer, next.permissions]);
+  assert.deepEqual(h.root().layoutObserver.targets, [next.footer, next.permissions, next.trigger]);
 });
 
 test('only a visible picker dropdown can supply a model when the current trigger is a placeholder', () => {
@@ -242,3 +264,21 @@ for (const kind of ['injection_script', 'deepseek_balance_injection_script'] as 
     }
   });
 }
+
+
+test('composer account status keeps uppercase plan rows and distinguishes official access without a quota', () => {
+  const previous = { plans: values.plans, account_count_value: values.account_count_value };
+  values.plans = [{ plan: 'TEAM', count: 2, fiveHourRemainingPercent: 200, weeklyRemainingPercent: 200 }, { plan: 'PLUS', official: true, count: 1 }];
+  values.account_count_value = 3;
+  try {
+    const h = harness('injection_script', [composer('gpt-6-luna')]);
+    h.evaluate();
+    assert.match(h.host().innerHTML, /Accounts 3/);
+    h.root().quotaDetailsOpen = true; h.root().render();
+    const details = h.body.querySelector('[data-cockpit-quota-details]')!;
+    assert.match(details.innerHTML, /TEAM/);
+    assert.match(details.innerHTML, /PLUS 官/);
+    assert.match(details.innerHTML, /No quota/);
+    assert.doesNotMatch(details.innerHTML, /API_KEY/);
+  } finally { Object.assign(values, previous); }
+});

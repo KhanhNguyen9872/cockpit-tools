@@ -48,7 +48,7 @@
             slots,
             vec![
                 super::ProviderGatewayModelSlot {
-                    client_model: "gpt-5.5".to_string(),
+                    client_model: "gpt-5.6-luna".to_string(),
                     upstream_model: "deepseek-v4-flash".to_string(),
                 },
                 super::ProviderGatewayModelSlot {
@@ -1101,9 +1101,19 @@
         image_generation_model_catalog_revision: 0,
             image_generation_main_model: None,
             image_generation_account_policies: HashMap::new(),
+            chatgpt_plan_codex_image_policies: HashMap::new(),
+            chatgpt_plan_service_revision: 0,
+            paused_account_ids: Vec::new(),
+            official_account_source_ids: HashMap::new(),
+            official_account_bindings: HashMap::new(),
+        service_account_identity_fingerprints: HashMap::new(),
             image_generation_account_ids: Vec::new(),
         image_generation_account_models: HashMap::new(),
-            gateway_mode: CodexLocalAccessGatewayMode::default(),
+            // These fixtures exercise the explicitly selected Go engine.
+            gateway_mode: CodexLocalAccessGatewayMode::Sidecar,
+            capability_fallback: Default::default(),
+        multi_agent: Default::default(),
+            native_gateway_default_migrated: true,
             upstream_proxy_url: None,
             routing_strategy: CodexLocalAccessRoutingStrategy::default(),
             custom_routing_rules: Vec::new(),
@@ -1772,7 +1782,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
                 .map(|slot| (slot.client_model.as_str(), slot.upstream_model.as_str()))
                 .collect::<Vec<_>>(),
             vec![
-                ("gpt-5.5", "deepseek-v4-flash"),
+                ("gpt-5.6-luna", "deepseek-v4-flash"),
                 ("gpt-5.6-sol", "deepseek-v4-pro"),
             ]
         );
@@ -1955,7 +1965,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
             .expect("models");
         assert_eq!(
             models[0].get("slug").and_then(Value::as_str),
-            Some("gpt-5.5")
+            Some("gpt-5.6-luna")
         );
         assert_eq!(
             models[0].get("display_name").and_then(Value::as_str),
@@ -2111,6 +2121,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
                 .map(|slot| (slot.client_model.as_str(), slot.upstream_model.as_str()))
                 .collect::<Vec<_>>(),
             vec![
+                // Explicit API-key models retain identity ahead of assigned shells.
                 ("gpt-5.5", "gpt-5.5"),
                 ("gpt-5.6-sol", "deepseek-v4-pro"),
                 ("gpt-5.6-terra", "deepseek-v4-flash"),
@@ -2132,7 +2143,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
     fn provider_gateway_model_slots_keep_identity_for_official_shells() {
         let slots = provider_gateway_model_slots(&[
             "gpt-5.6-sol".to_string(),
-            "gpt-5.5".to_string(),
+            "gpt-5.6-luna".to_string(),
             "grok-4.5".to_string(),
         ]);
         assert_eq!(
@@ -2142,7 +2153,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
                 .collect::<Vec<_>>(),
             vec![
                 ("gpt-5.6-sol", "gpt-5.6-sol"),
-                ("gpt-5.5", "gpt-5.5"),
+                ("gpt-5.6-luna", "gpt-5.6-luna"),
                 ("gpt-5.6-terra", "grok-4.5"),
             ]
         );
@@ -2222,7 +2233,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
             Some("https://api.apikey.fun/v1".to_string()),
             Some("apikey_fun".to_string()),
             Some("APIKEY.FUN".to_string()),
-            vec!["gpt-5.5".to_string(), "gpt-5.6-sol".to_string()],
+            vec!["gpt-5.6-luna".to_string(), "gpt-5.6-sol".to_string()],
         );
         account.api_wire_api = Some("responses".to_string());
         account.api_sync_model_catalog_to_codex = true;
@@ -2248,7 +2259,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
             .collect::<Vec<_>>();
         backup_current_profile_model_before_provider_gateway(&profile_dir, &client_models)
             .expect("track provider models");
-        write_local_access_profile_model_override(&profile_dir, "gpt-5.5")
+        write_local_access_profile_model_override(&profile_dir, "gpt-5.6-luna")
             .expect("write model override");
         write_provider_gateway_model_catalog(&profile_dir, &slots)
             .expect("write provider model catalog");
@@ -2263,7 +2274,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
             .and_then(Value::as_array)
             .expect("models should be an array");
         for (model_id, display_name) in [
-            ("gpt-5.5", "deepseek-v4-flash"),
+            ("gpt-5.6-luna", "deepseek-v4-flash"),
             ("gpt-5.6-sol", "deepseek-v4-pro"),
         ] {
             assert!(models.iter().any(|model| {
@@ -2278,7 +2289,7 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
             "model_catalog_json = \"{}\"",
             CODEX_PROVIDER_MODEL_CATALOG_FILE
         )));
-        assert!(config.contains("model = \"gpt-5.5\""));
+        assert!(config.contains("model = \"gpt-5.6-luna\""));
 
         cleanup_provider_gateway_profile_model_overrides(&profile_dir).expect("cleanup overrides");
 
@@ -2364,7 +2375,8 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
             fs::read_to_string(profile_dir.join(CODEX_PROFILE_CONFIG_FILE)).expect("read config");
         assert!(!config.contains("model_catalog_json"));
         assert!(!config.contains("model = \"deepseek-v4-pro\""));
-        assert!(config.contains("model = \"gpt-5.5\""));
+        assert!(config.contains("model = \"gpt-5.6-sol\""));
+        assert!(!config.contains("gpt-5.5"));
 
         let _ = fs::remove_dir_all(&profile_dir);
     }
@@ -2404,7 +2416,8 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
             fs::read_to_string(profile_dir.join(CODEX_PROFILE_CONFIG_FILE)).expect("read config");
         assert!(!config.contains("model_catalog_json"));
         assert!(!config.contains("model = \"deepseek-v4-pro\""));
-        assert!(config.contains("model = \"gpt-5.5\""));
+        assert!(config.contains("model = \"gpt-5.6-sol\""));
+        assert!(!config.contains("gpt-5.5"));
 
         let _ = fs::remove_dir_all(&profile_dir);
     }
@@ -2437,7 +2450,8 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
 
         let config =
             fs::read_to_string(profile_dir.join(CODEX_PROFILE_CONFIG_FILE)).expect("read config");
-        assert!(config.contains("model = \"gpt-5.5\""));
+        assert!(config.contains("model = \"gpt-5.6-sol\""));
+        assert!(!config.contains("gpt-5.5"));
         assert!(!config.contains("model_catalog_json"));
 
         let _ = fs::remove_dir_all(&profile_dir);
@@ -2662,7 +2676,8 @@ http_headers = { "x-cockpit-instance-id" = "default" }
         collection.bound_oauth_quota_reserve = Some(CodexLocalAccessQuotaReserve {
             hourly_percent: 20,
             weekly_percent: 30,
-        });
+            strict: false, safety_margin_percent: 3,
+});
 
         let changed = remove_account_refs_from_collection(
             &mut collection,
@@ -3098,7 +3113,8 @@ http_headers = { "x-cockpit-instance-id" = "default" }
         let reserve = CodexLocalAccessQuotaReserve {
             hourly_percent: 20,
             weekly_percent: 10,
-        };
+            strict: false, safety_margin_percent: 3,
+};
         let blocked =
             test_oauth_account_with_quota("account-bound", 20, 90, Some(true), Some(true));
         assert!(bound_oauth_quota_reserve_blocks_account(
@@ -3107,18 +3123,17 @@ http_headers = { "x-cockpit-instance-id" = "default" }
         ));
 
         let available =
-            test_oauth_account_with_quota("account-bound", 21, 11, Some(true), Some(true));
-        assert!(!bound_oauth_quota_reserve_blocks_account(
-            &reserve,
-            Some(&available)
-        ));
+            test_oauth_account_with_quota("reserve-confirmed-bound", 24, 14, Some(true), Some(true));
+        {
+            super::quota_reserve_coordinator().lock().unwrap().accounts.entry(available.id.clone()).or_default();
+        }
+        super::confirm_gateway_quota_refresh(&available.id, available.quota.as_ref().unwrap(), std::time::Instant::now());
+        assert!(!bound_oauth_quota_reserve_blocks_account(&reserve, Some(&available)));
 
         let ignored_hourly =
-            test_oauth_account_with_quota("account-bound", 0, 11, Some(false), Some(true));
-        assert!(!bound_oauth_quota_reserve_blocks_account(
-            &reserve,
-            Some(&ignored_hourly)
-        ));
+            test_oauth_account_with_quota("reserve-confirmed-bound", 0, 14, Some(false), Some(true));
+        super::confirm_gateway_quota_refresh(&ignored_hourly.id, ignored_hourly.quota.as_ref().unwrap(), std::time::Instant::now());
+        assert!(!bound_oauth_quota_reserve_blocks_account(&reserve, Some(&ignored_hourly)));
         assert!(bound_oauth_quota_reserve_blocks_account(&reserve, None));
 
         let mut quota_error = available;
@@ -3179,7 +3194,8 @@ http_headers = { "x-cockpit-instance-id" = "default" }
         let reserve = CodexLocalAccessQuotaReserve {
             hourly_percent: 20,
             weekly_percent: 10,
-        };
+            strict: false, safety_margin_percent: 3,
+};
         let blocked =
             test_oauth_account_with_quota("account-bound", 20, 90, Some(true), Some(true));
         let scoped = vec!["account-bound".to_string(), "account-other".to_string()];
@@ -3202,7 +3218,8 @@ http_headers = { "x-cockpit-instance-id" = "default" }
         collection.bound_oauth_quota_reserve = Some(CodexLocalAccessQuotaReserve {
             hourly_percent: 20,
             weekly_percent: 10,
-        });
+            strict: false, safety_margin_percent: 3,
+});
         let account =
             test_oauth_account_with_quota("account-bound", 75, 40, Some(true), Some(false));
 
@@ -3210,8 +3227,8 @@ http_headers = { "x-cockpit-instance-id" = "default" }
         let reserve = manifest
             .get("quotaReserve")
             .expect("quota reserve should exist");
-        assert_eq!(reserve["hourlyThresholdPercent"], json!(20));
-        assert_eq!(reserve["weeklyThresholdPercent"], json!(10));
+        assert_eq!(reserve["hourlyThresholdPercent"], json!(23));
+        assert_eq!(reserve["weeklyThresholdPercent"], json!(13));
         assert!(reserve.get("snapshotUpdatedAtUnixSeconds").is_none());
         assert!(reserve.get("hourlyRemainingPercent").is_none());
 
@@ -4243,6 +4260,7 @@ http_headers = { "x-cockpit-instance-id" = "default" }
             vec![
                 "deepseek-flash",
                 "deepseek-v4-pro",
+                "grok-4.7",
                 "grok-4.6",
                 "grok-4.5",
                 "grok-4.3",
@@ -4255,8 +4273,11 @@ http_headers = { "x-cockpit-instance-id" = "default" }
         );
 
         let mut with_context = overlaid.clone();
-        with_context[2].context_window = Some(1_000_000);
-        with_context[2].auto_compact_token_limit = Some(900_000);
+        let grok_46 = with_context.iter_mut()
+            .find(|model| model.model_id == "grok-4.6")
+            .expect("grok-4.6 remains in the upgraded default catalog");
+        grok_46.context_window = Some(1_000_000);
+        grok_46.auto_compact_token_limit = Some(900_000);
         let preserved = super::overlay_rendered_pool_models_on_experimental_catalog(
             &profile_dir,
             with_context,

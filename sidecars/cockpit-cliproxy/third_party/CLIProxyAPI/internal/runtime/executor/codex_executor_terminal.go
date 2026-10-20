@@ -2,6 +2,10 @@ package executor
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -13,10 +17,11 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-const codexIncompleteStreamMessage = "stream error: stream disconnected before completion: stream closed before response.completed"
+const codexIncompleteStreamMessage = "stream closed before response.completed"
 
 type codexIncompleteStreamError struct {
 	statusErr
+	cause error
 }
 
 type codexEmptyIncompleteStreamError struct {
@@ -32,15 +37,41 @@ func newCodexEmptyIncompleteStreamError() codexEmptyIncompleteStreamError {
 
 func (codexEmptyIncompleteStreamError) IsRequestScoped() bool { return true }
 
-func newCodexIncompleteStreamError() codexIncompleteStreamError {
+func newCodexIncompleteStreamError(cause error) codexIncompleteStreamError {
+	status, code, message := http.StatusBadGateway, "incomplete_upstream_stream", codexIncompleteStreamMessage
+	if cause != nil && !errors.Is(cause, io.EOF) {
+		code, message = "upstream_stream_error", helps.RedactStreamTransportError(cause.Error())
+		var timeout net.Error
+		if errors.Is(cause, context.DeadlineExceeded) || errors.As(cause, &timeout) && timeout.Timeout() {
+			status, code = http.StatusRequestTimeout, "request_timeout"
+		}
+	}
+	body := []byte(`{"error":{"type":"server_error"}}`)
+	body, _ = sjson.SetBytes(body, "error.code", code)
+	body, _ = sjson.SetBytes(body, "error.message", message)
 	return codexIncompleteStreamError{statusErr: statusErr{
-		code: http.StatusRequestTimeout,
-		msg:  codexIncompleteStreamMessage,
-	}}
+		code: status,
+		msg:  string(body),
+	}, cause: cause}
 }
+
+func (e codexIncompleteStreamError) Unwrap() error { return e.cause }
 
 func (codexIncompleteStreamError) IsRequestScoped() bool {
 	return true
+}
+
+// Preserve cancellation and structured WebSocket failures, while giving transport
+// failures the same request-scoped classification as HTTP response-body reads.
+func codexResponsesReadError(cause error) error {
+	if errors.Is(cause, context.Canceled) {
+		return cause
+	}
+	var status interface{ StatusCode() int }
+	if errors.As(cause, &status) {
+		return cause
+	}
+	return newCodexIncompleteStreamError(cause)
 }
 
 // Streamed Codex responses may emit response.output_item.done events while leaving

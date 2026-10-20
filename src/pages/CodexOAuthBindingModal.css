@@ -62,3 +62,31 @@
 .codex-oauth-binding-quota-summary > svg {
   flex-shrink: 0;
 }
+
+.codex-oauth-binding-protection {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.codex-oauth-binding-protection .section-desc {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.codex-oauth-binding-protection .codex-oauth-binding-quota-field {
+  max-width: 260px;
+}
+
+.codex-oauth-binding-protection .codex-oauth-binding-quota-input-wrap > span {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.codex-local-access-quota-runtime {
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}

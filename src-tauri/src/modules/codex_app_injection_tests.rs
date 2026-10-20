@@ -169,9 +169,9 @@
         assert!(!script.contains("host.setAttribute('data-cockpit-quota-footer'"));
         assert!(script.contains("root.refreshRequestToken"));
         assert!(script.contains("hostHeartbeatTimeoutMs = 8000"));
-        // 余额徽章与额度徽章共用同一套锚点（访问权限与背景信息/模型之间的中点）。
-        assert!(script.contains("(permissionsRight + rightAnchorRect.left) / 2"));
-        assert!(script.contains("host.style.left = badgeAnchorLeft + 'px'"));
+        // 余额和额度都必须测量原生控件空档，空间不足时让位。
+        assert!(script.contains("badgeLayout.place(root, host, footer, permissions)"));
+        assert!(script.contains("host.style.left = placement.left + 'px'"));
         assert!(script.contains("details.style.left = badgeAnchorLeft + 'px'"));
     }
 
@@ -228,6 +228,7 @@
                 cooldown_account_count: Some(0),
                 plans: vec![QuotaPlanSummary {
                     plan: "PLUS".to_string(),
+                    official: false,
                     count: 14,
                     weekly_remaining_percent: Some(1387),
                     five_hour_remaining_percent: Some(100),
@@ -246,12 +247,12 @@
         assert!(script.contains("data-cockpit-quota-footer"));
         assert!(script.contains("document.body.appendChild(host)"));
         assert!(script.contains("position:fixed"));
-        // 底部徽章与弹框水平居中在「访问权限」与右侧「背景信息 / 模型」之间的空档中点。
-        assert!(script.contains("(permissionsRight + rightAnchorRect.left) / 2"));
-        assert!(script.contains("host.style.left = badgeAnchorLeft + 'px'"));
+        // 保留徽章外观，按完整宽度检查实际空档，不能覆盖原生 Fast 和语音控件。
+        assert!(script.contains("badgeLayout.place(root, host, footer, permissions)"));
+        assert!(script.contains("host.style.left = placement.left + 'px'"));
         assert!(script.contains("details.style.left = badgeAnchorLeft + 'px'"));
-        assert!(script.contains("[aria-label*=\"上下文用量\"]"));
-        assert!(script.contains("permissionsRect.top + permissionsRect.height / 2"));
+        assert!(script.contains("data-composer-navigation-target"));
+        assert!(script.contains("permissions.top + permissions.height / 2"));
         assert!(script.contains("justify-content:center"));
         assert!(script.contains("host.innerHTML !== nextHtml"));
         assert!(script.contains("mutations.every"));

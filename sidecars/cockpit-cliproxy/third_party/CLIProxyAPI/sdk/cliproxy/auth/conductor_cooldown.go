@@ -1520,6 +1520,11 @@ func shouldSkipCredentialCooldown(err *Error) bool {
 	if err != nil && err.Code == ErrorCodeForceCooldown {
 		return false
 	}
+	// Local quota admission did not send a request or observe an upstream 429.
+	// Keep credential rotation available without poisoning its health state.
+	if err != nil && err.Code == "quota_reserved" && err.HTTPStatus == http.StatusTooManyRequests {
+		return true
+	}
 	return isRequestScopedResultError(err) || isConnectionLifecycleResultError(err)
 }
 

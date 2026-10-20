@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { requestCodexOfficialAuthorizationCheck } from '../utils/codexAccountServiceNavigation';
 import type {
   CodexLocalAccessChatMessage,
   CodexLocalAccessChatResult,
@@ -39,6 +40,7 @@ export async function saveCodexLocalAccessAccounts(
   sessionAffinity?: boolean,
   sessionAffinityTtlMs?: number,
   imageGenerationAccountPolicies?: Record<string, CodexLocalAccessImageGenerationPolicy>,
+  officialAccountBindings?: Record<string, string>,
 ): Promise<CodexLocalAccessState> {
   return await invoke("codex_local_access_save_accounts", {
     accountIds,
@@ -48,6 +50,7 @@ export async function saveCodexLocalAccessAccounts(
     sessionAffinity: sessionAffinity ?? null,
     sessionAffinityTtlMs: sessionAffinityTtlMs ?? null,
     imageGenerationAccountPolicies: imageGenerationAccountPolicies ?? null,
+    officialAccountBindings: officialAccountBindings ?? null,
   });
 }
 
@@ -61,6 +64,13 @@ export async function removeCodexLocalAccessAccount(
   accountId: string,
 ): Promise<CodexLocalAccessState> {
   return await invoke("codex_local_access_remove_account", { accountId });
+}
+
+/** Both historical endpoints of one explicitly linked card may still be members. */
+export async function removeCodexLocalAccessAccounts(accountIds: string[]): Promise<CodexLocalAccessState> {
+  let state: CodexLocalAccessState | undefined;
+  for (const id of new Set(accountIds)) state = await removeCodexLocalAccessAccount(id);
+  return state ?? getCodexLocalAccessState();
 }
 
 export async function recoverCodexLocalAccessAccounts(
@@ -184,7 +194,9 @@ export async function prepareCodexLocalAccessForRestart(): Promise<CodexLocalAcc
 }
 
 export async function restartCodexLocalAccessSidecar(): Promise<CodexLocalAccessState> {
-  return await invoke("codex_local_access_restart_sidecar");
+  const state = await invoke<CodexLocalAccessState>("codex_local_access_restart_sidecar");
+  requestCodexOfficialAuthorizationCheck({ running: state.running && Boolean(state.collection?.enabled), restarted: true });
+  return state;
 }
 
 export async function killCodexLocalAccessPort(): Promise<CodexLocalAccessPortCleanupResult> {
@@ -416,7 +428,9 @@ export async function deleteCodexLocalAccessApiKey(
 export async function setCodexLocalAccessEnabled(
   enabled: boolean,
 ): Promise<CodexLocalAccessState> {
-  return await invoke("codex_local_access_set_enabled", { enabled });
+  const state = await invoke<CodexLocalAccessState>("codex_local_access_set_enabled", { enabled });
+  requestCodexOfficialAuthorizationCheck({ running: state.running && Boolean(state.collection?.enabled), ...(enabled ? { restarted: true } : { stopped: true }) });
+  return state;
 }
 
 export async function activateCodexLocalAccess(
@@ -425,10 +439,12 @@ export async function activateCodexLocalAccess(
   const startedAt = performance.now();
   console.info("[Codex API Service Switch][Service] invoke codex_local_access_activate started");
   try {
-    return await invoke("codex_local_access_activate", {
+    const state = await invoke<CodexLocalAccessState>("codex_local_access_activate", {
       autoRepairMode: null,
       instanceId: instanceId ?? null,
     });
+    requestCodexOfficialAuthorizationCheck({ running: state.running && Boolean(state.collection?.enabled), restarted: true });
+    return state;
   } finally {
     console.info(
       "[Codex API Service Switch][Service] invoke codex_local_access_activate finished",

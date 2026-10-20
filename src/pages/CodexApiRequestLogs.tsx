@@ -7,7 +7,7 @@ import { SingleSelectDropdown } from "../components/SingleSelectDropdown";
 import { PaginationControls } from "../components/PaginationControls";
 import { CodexRequestProxyLabel } from "../components/codex/CodexRequestProxyLabel";
 import { CodexRequestDetailModal } from "../components/codex/CodexRequestDetailModal";
-import { hasRequestFirstResponse, requestServiceTierPresentation } from "../utils/codexRequestDiagnostics";
+import { hasRequestFirstResponse, requestAuthorizationRouteKey, requestServiceTierPresentation } from "../utils/codexRequestDiagnostics";
 import { resolveCodexApiServiceLogModelPair } from "../utils/codexApiServiceLogModel";
 import type { CodexLocalAccessUsageEvent } from "../types/codexLocalAccess";
 import type { RequestLogKindFilter, RequestLogStatusFilter } from "./CodexApiServicePage";
@@ -351,6 +351,7 @@ export function CodexApiRequestLogs(props: Props) {
                         const tiers = requestServiceTierPresentation(event);
                         const requestedTier = tiers.requested.toLowerCase();
                         const speed = ["priority", "fast"].includes(requestedTier) ? "fast"
+                          : requestedTier === "ultrafast" ? "ultrafast"
                           : ["standard", "default"].includes(requestedTier) ? "standard" : null;
                         // 与请求模型相同时也保留实际上游模型；旧记录缺失时不推断。
                         const { requestedModel, upstreamModel } = resolveCodexApiServiceLogModelPair(event);
@@ -368,8 +369,8 @@ export function CodexApiRequestLogs(props: Props) {
                                 <span className="codex-api-service-pill muted">{requestKindLabel(event.requestKind, t)}</span>
                                 {event.reasoningEffort && <span className="codex-api-service-pill muted" title={t("codex.apiService.logs.reasoningEffort", "思考强度")}>{event.reasoningEffort}</span>}
                                 {speed && <span className={`codex-request-log-speed ${speed}`} title={t("codex.apiService.logs.serviceTierHint")}>
-                                  {speed === "fast" && <Zap size={12} aria-hidden="true" />}
-                                  {t(speed === "fast" ? "codex.speed.fast" : "codex.speed.standard")}
+                                  {speed !== "standard" && <Zap size={12} aria-hidden="true" />}
+                                  {t(`codex.speed.${speed}`)}
                                 </span>}
                               </div>
                             </div>
@@ -384,6 +385,7 @@ export function CodexApiRequestLogs(props: Props) {
                           {columnVisible("source") && <td><div className="codex-request-log-stack">
                             <span className="codex-request-log-truncate" title={`${t("codex.apiService.logs.apiKeyFilter", "API Key")}: ${apiKeyLabel}`}><span className="codex-request-log-label">{t("codex.apiService.logs.apiKeyFilter", "API Key")}</span> {apiKeyLabel}</span>
                             <span className="codex-request-log-truncate" title={event.clientInstanceId ? `${instanceLabel} (${event.clientInstanceId})` : instanceLabel}><span className="codex-request-log-label">{t("codex.apiService.logs.instanceFilter", "Instance")}</span> {instanceLabel}</span>
+                            <span className="codex-request-log-truncate" title={t(requestAuthorizationRouteKey(event.accountId, event.authorizationRoute))}><span className="codex-request-log-label">{t("codex.requestDiagnostics.authorizationRoute")}</span> {t(requestAuthorizationRouteKey(event.accountId, event.authorizationRoute))}</span>
                           </div></td>}
                           {columnVisible("account") && <td><span className="codex-request-log-truncate" title={maskedAccount}>{maskedAccount}</span></td>}
                           {columnVisible("tokens") && <td><div className="codex-request-log-token-grid">

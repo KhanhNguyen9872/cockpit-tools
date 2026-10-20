@@ -53,6 +53,7 @@ test('request attempts use current labels and privacy masking, with readable del
     '../SingleSelectDropdown': { SingleSelectDropdown: 'dropdown' },
     '../ModalErrorMessage': { ModalErrorMessage: 'modal-error' },
     './CodexOutputSpeed': { CodexOutputSpeed: 'speed' },
+    './CodexCapabilityFallbackTrace': { CodexCapabilityFallbackTrace: 'CodexCapabilityFallbackTrace' },
     '../../services/codexLocalAccessService': {
       async getCodexLocalAccessRequestDetail() {
         return { attempts: [

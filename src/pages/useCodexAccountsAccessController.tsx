@@ -1,3 +1,6 @@
+import { prepareCodexServiceJoins } from "../utils/codexServiceJoin";
+import { listChatGptPlanAccounts } from "../services/chatgptPlanService";
+import { canChooseCodexServiceAuthorization, requestCodexServiceAuthorizations } from "../utils/codexAccountServiceNavigation";
 import { resolveCodexAccountDisplayName } from "../utils/codexAccountDisplayName";
 import { listenSafely as listen } from "../utils/tauriEventListener";
 import { useState, useEffect, useMemo, useCallback, useRef, type ReactElement } from "react";
@@ -47,7 +50,7 @@ import { CODEX_BATCH_IMPORT_SESSION_STORAGE_KEY, DEFAULT_CODEX_API_BASE_URL, DEF
 import { useCodexApiKeyUsageFormatting } from "./codexApiKeyUsageFormatting";
 import { renderCodexApiKeyUsagePanel } from "./codexApiKeyUsagePanel";
 import type { CodexAccountsAccessControllerContext } from "./codexAccountsAccessControllerContract";
-import { DEFAULT_OAUTH_QUOTA_RESERVE_PERCENT, resolveOAuthBindingQuotaReserve } from "./codexAccountsControllerModel";
+import { DEFAULT_OAUTH_HOURLY_QUOTA_RESERVE_PERCENT, DEFAULT_OAUTH_WEEKLY_QUOTA_RESERVE_PERCENT, resolveOAuthBindingQuotaReserve } from "./codexAccountsControllerModel";
 
 /** 封装 useCodexAccountsPageController 的 useCodexAccountsAccessController 业务域状态与动作。 */
 export function useCodexAccountsAccessController(context: CodexAccountsAccessControllerContext) {
@@ -350,12 +353,12 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
       setOauthBindingHourlyReserveDraft(
         oauthBindingQuotaReserve
           ? String(oauthBindingQuotaReserve.hourlyPercent)
-          : String(DEFAULT_OAUTH_QUOTA_RESERVE_PERCENT),
+          : String(DEFAULT_OAUTH_HOURLY_QUOTA_RESERVE_PERCENT),
       );
       setOauthBindingWeeklyReserveDraft(
         oauthBindingQuotaReserve
           ? String(oauthBindingQuotaReserve.weeklyPercent)
-          : String(DEFAULT_OAUTH_QUOTA_RESERVE_PERCENT),
+          : String(DEFAULT_OAUTH_WEEKLY_QUOTA_RESERVE_PERCENT),
       );
       setOauthBindingQuotaReserveFieldErrors({});
       setOauthBindingQuotaReserveEditorOpen(true);
@@ -399,7 +402,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
       [t],
     );
   
-    const confirmOAuthBindingQuotaReserveEditor = useCallback(() => {
+    const confirmOAuthBindingQuotaReserveEditor = useCallback((protection?: { safetyMarginPercent: number }) => {
       const hourlyPercent = parseOAuthQuotaReservePercent(
         oauthBindingHourlyReserveDraft,
       );
@@ -428,7 +431,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
         });
         return;
       }
-      setOauthBindingQuotaReserve({ hourlyPercent, weeklyPercent });
+      setOauthBindingQuotaReserve({ hourlyPercent, weeklyPercent, ...protection, strict: true });
       setOauthBindingQuotaReserveEditorOpen(false);
       setOauthBindingQuotaReserveFieldErrors({});
     }, [oauthBindingHourlyReserveDraft, oauthBindingWeeklyReserveDraft, t]);
@@ -1970,36 +1973,26 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
         }
 
         if (options.addToApiService) {
-          const importedIds = result.imported
-            .map((account) => account.id)
-            .filter(Boolean);
-          const nextLocalAccessAccountIds = Array.from(
-            new Set([
-              ...(localAccessCollection?.accountIds ?? []),
-              ...importedIds,
-            ]),
-          );
           setLocalAccessSaving(true);
           try {
-            const nextState =
-              await codexLocalAccessService.saveCodexLocalAccessAccounts(
-                nextLocalAccessAccountIds,
-                localAccessCollection?.restrictFreeAccounts ?? true,
-              );
-            setLocalAccessState(nextState);
-            if (importedIds.length > 0) {
-              await ensureLocalAccessEntryVisible();
-              setImportApiServiceGuideCount(importedIds.length);
+            const grants = result.imported.some(canChooseCodexServiceAuthorization) ? await listChatGptPlanAccounts() : [];
+            const prepared = await prepareCodexServiceJoins(result.imported, grants, localAccessCollection?.accountIds ?? [], setLocalAccessState);
+            if (prepared.choiceIds.length) requestCodexServiceAuthorizations(prepared.choiceIds);
+            if (prepared.resumedIds.length) { await ensureLocalAccessEntryVisible(); setImportApiServiceGuideCount(prepared.resumedIds.length); }
+            if (prepared.localIds.length > 0) {
+              const appended = await codexLocalAccessService.appendCodexLocalAccessAccounts(prepared.localIds);
+              setLocalAccessState(appended.state);
+              if (appended.syncedAccountIds.length > 0) {
+                await ensureLocalAccessEntryVisible();
+                setImportApiServiceGuideCount(appended.syncedAccountIds.length);
+              }
             }
             window.dispatchEvent(new Event("codex-local-access-state-updated"));
           } catch (apiError) {
-            apiServiceError = t(
-              "codex.batchImport.addToApiServiceFailed",
-              "账号已导入，但添加到 API 服务失败: {{error}}",
-            ).replace("{{error}}", String(apiError).replace(/^Error:\s*/, ""));
-          } finally {
-            setLocalAccessSaving(false);
-          }
+            apiServiceError = t("codex.batchImport.addToApiServiceFailed",
+              "账号已导入，但添加到 API 服务失败: {{error}}")
+              .replace("{{error}}", String(apiError).replace(/^Error:\s*/, ""));
+          } finally { setLocalAccessSaving(false); }
         } else if (result.imported.length > 0) {
           try {
             await syncImportedAccountsToApiService(

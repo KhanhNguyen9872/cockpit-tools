@@ -136,6 +136,22 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 	if len(normalized) == 0 {
 		return cliproxyexecutor.Response{}, &Error{Code: "provider_not_found", Message: "no provider supplied"}
 	}
+	var continuityErr error
+	ctx, opts, continuityErr = m.prepareManagerExecutionContinuity(ctx, normalized, req, opts)
+	if continuityErr != nil {
+		return cliproxyexecutor.Response{}, continuityErr
+	}
+	normalized = continuityExecutionProviders(ctx, normalized, opts)
+	defer func() {
+		if errRelease := cliproxyexecutor.ReleaseContinuity(ctx); errRelease != nil {
+			log.WithError(errRelease).Warn("continuity plan release failed")
+		}
+	}()
+	defer func() {
+		if errFinish := cliproxyexecutor.FinishUnboundContinuity(ctx); errFinish != nil {
+			log.WithError(errFinish).Warn("continuity reservation release failed")
+		}
+	}()
 	if m.HomeEnabled() {
 		resp, errHome := m.executeHome(ctx, normalized, req, opts, false)
 		return resp, unwrapExecutionBoundaryError(errHome)
@@ -241,7 +257,7 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 
 // ExecuteStream performs a streaming execution using the configured selector and executor.
 // It supports multiple providers for the same model and round-robins the starting provider per model.
-func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
+func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (result *cliproxyexecutor.StreamResult, err error) {
 	ctx = cliproxyexecutor.SnapshotServiceTierDefault(ctx)
 	req, opts = cliproxysession.Enrich(req, opts)
 	if m.HomeEnabled() {
@@ -253,6 +269,27 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 	if len(normalized) == 0 {
 		return nil, &Error{Code: "provider_not_found", Message: "no provider supplied"}
 	}
+
+	var continuityErr error
+	ctx, opts, continuityErr = m.prepareManagerExecutionContinuity(ctx, normalized, req, opts)
+	if continuityErr != nil {
+		return nil, continuityErr
+	}
+	normalized = continuityExecutionProviders(ctx, normalized, opts)
+	defer func() {
+		if err != nil || result == nil || result.Chunks == nil {
+			if errRelease := cliproxyexecutor.ReleaseContinuity(ctx); errRelease != nil {
+				log.WithError(errRelease).Warn("continuity plan release failed")
+			}
+		} else {
+			result = cliproxyexecutor.ReleaseContinuityOnStreamEnd(ctx, result)
+		}
+	}()
+	defer func() {
+		if errFinish := cliproxyexecutor.FinishUnboundContinuity(ctx); errFinish != nil {
+			log.WithError(errFinish).Warn("continuity reservation release failed")
+		}
+	}()
 
 	defaultRequestRetry, maxRetryCredentials, maxWait := m.retrySettings()
 
@@ -584,7 +621,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 					}
 					continue
 				}
-				if isResponsesCompactRequestFaultError(execOpts, errExec) || isRequestInvalidError(errExec) {
+				if isResponsesCompactRequestFaultError(execOpts, errExec) || (isRequestInvalidError(errExec) && !canFallbackCapability(req, execOpts, errExec)) {
 					return cliproxyexecutor.Response{}, errExec
 				}
 				authErr = errExec
@@ -610,7 +647,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 				}
 				continue
 			}
-			if isResponsesCompactRequestFaultError(opts, authErr) || isRequestInvalidError(authErr) {
+			if isResponsesCompactRequestFaultError(opts, authErr) || (isRequestInvalidError(authErr) && !canFallbackCapability(req, opts, authErr)) {
 				return cliproxyexecutor.Response{}, authErr
 			}
 			lastErr = authErr
@@ -1087,7 +1124,7 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 				}
 				continue
 			}
-			if isRequestInvalidError(errStream) {
+			if isRequestInvalidError(errStream) && !canFallbackCapability(req, opts, errStream) {
 				return nil, errStream
 			}
 			lastErr = errStream

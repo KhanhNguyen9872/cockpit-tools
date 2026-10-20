@@ -257,6 +257,31 @@
     }
 
     #[test]
+    fn general_config_patch_validates_codex_app_enhancements_atomically() {
+        let mut config = UserConfig::default();
+        config.language = "ja".to_string();
+        let updates = serde_json::json!({
+            "codex_app_native_fast_enabled": true,
+            "codex_app_api_quota_compat_enabled": true,
+            "codex_app_api_dictation_enabled": true,
+            "codex_app_api_dictation_model": " custom/transcribe "
+        });
+        apply_general_config_updates(&mut config, updates.as_object().unwrap()).unwrap();
+        assert!(config.codex_app_native_fast_enabled);
+        assert!(config.codex_app_api_quota_compat_enabled);
+        assert!(config.codex_app_api_dictation_enabled);
+        assert_eq!(config.codex_app_api_dictation_model, "custom/transcribe");
+        assert_eq!(config.language, "ja");
+        let invalid = serde_json::json!({
+            "codex_app_native_fast_enabled": false,
+            "codex_app_api_dictation_model": "invalid model"
+        });
+        assert!(apply_general_config_updates(&mut config, invalid.as_object().unwrap()).is_err());
+        assert!(config.codex_app_native_fast_enabled);
+        assert_eq!(config.codex_app_api_dictation_model, "custom/transcribe");
+    }
+
+    #[test]
     fn general_config_patch_only_changes_submitted_fields() {
         let mut config = UserConfig {
             theme: "dark".to_string(),
@@ -375,21 +400,22 @@
     }
 
     #[test]
-    fn codex_takeover_settings_patch_persists_false_and_defaults_bridge_off() {
-        let mut config = UserConfig::default();
-        assert!(!config.codex_preserve_verified_external_bridge);
-        let updates = serde_json::json!({
-            "codex_auto_restore_takeover_on_launch": false,
-            "codex_preserve_verified_external_bridge": true
-        }).as_object().unwrap().clone();
-        apply_general_config_updates(&mut config, &updates).unwrap();
-        let saved = serde_json::to_value(&config).unwrap();
-        let loaded: UserConfig = serde_json::from_value(saved).unwrap();
-        assert!(!loaded.codex_auto_restore_takeover_on_launch);
-        assert!(loaded.codex_preserve_verified_external_bridge);
-        assert!(loaded.codex_launch_on_switch);
-        let updates = serde_json::json!({"codex_preserve_verified_external_bridge": false})
+    fn automatic_settings_ignore_legacy_opt_out_without_changing_other_preferences() {
+        let mut config: UserConfig = serde_json::from_value(serde_json::json!({
+            "codex_quota_sync_enabled": false,
+            "codex_preserve_verified_external_bridge": false
+        })).unwrap();
+        let updates = serde_json::json!({"codex_auto_restore_takeover_on_launch": false})
             .as_object().unwrap().clone();
         apply_general_config_updates(&mut config, &updates).unwrap();
-        assert!(!config.codex_preserve_verified_external_bridge);
+        let saved = serde_json::to_value(&config).unwrap();
+        assert!(saved.get("codex_quota_sync_enabled").is_none());
+        assert!(saved.get("codex_preserve_verified_external_bridge").is_none());
+        let loaded: UserConfig = serde_json::from_value(saved).unwrap();
+        assert!(!loaded.codex_auto_restore_takeover_on_launch);
+        assert!(loaded.codex_launch_on_switch);
+        for field in ["codex_quota_sync_enabled", "codex_preserve_verified_external_bridge"] {
+            let updates = serde_json::json!({(field): false}).as_object().unwrap().clone();
+            assert!(apply_general_config_updates(&mut config, &updates).is_err());
+        }
     }

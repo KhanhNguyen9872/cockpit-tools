@@ -22,6 +22,7 @@ fn gateway_mode_to_db_value(gateway_mode: CodexLocalAccessGatewayMode) -> &'stat
     match gateway_mode {
         CodexLocalAccessGatewayMode::Legacy => "legacy",
         CodexLocalAccessGatewayMode::Sidecar => "sidecar",
+        CodexLocalAccessGatewayMode::Native => "native",
     }
 }
 
@@ -29,6 +30,7 @@ fn gateway_mode_from_db_value(value: &str) -> Option<CodexLocalAccessGatewayMode
     match value.trim() {
         "legacy" => Some(CodexLocalAccessGatewayMode::Legacy),
         "sidecar" => Some(CodexLocalAccessGatewayMode::Sidecar),
+        "native" => Some(CodexLocalAccessGatewayMode::Native),
         _ => None,
     }
 }
@@ -548,14 +550,11 @@ fn deserialize_token_breakdown_from_db(raw: &str) -> Option<CodexTokenBreakdown>
     serde_json::from_str(raw).ok()
 }
 
-fn request_logs_proxy_route_select(conn: &Connection) -> Result<&'static str, String> {
-    if request_logs_has_column(conn, "proxy_route_json")
-        .map_err(|e| format!("检查 API 服务日志 proxy_route_json 列失败: {}", e))?
-    {
-        Ok("proxy_route_json")
-    } else {
-        Ok("'' AS proxy_route_json")
-    }
+fn request_logs_proxy_route_select(conn: &Connection) -> Result<String, String> {
+    let projection = ["proxy_route_json", "authorization_route"].into_iter().map(|column| {
+        request_logs_has_column(conn, column).map(|exists| if exists { column.to_string() } else { format!("'' AS {column}") })
+    }).collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    Ok(projection.join(", "))
 }
 
 fn official_stats_account_id(local_account_id: &str) -> Option<String> {
@@ -866,6 +865,10 @@ fn insert_local_access_usage_event(
             ],
         )
         .map_err(|e| format!("写入 API 服务请求日志失败: {}", e))?;
+    }
+    ensure_request_logs_column(conn, "authorization_route", "authorization_route TEXT NOT NULL DEFAULT ''").map_err(|error| error.to_string())?;
+    if let Some(route) = event.authorization_route.as_deref().filter(|route| matches!(*route, "official" | "local_gateway")) {
+        conn.execute("UPDATE request_logs SET authorization_route=?1 WHERE event_key=?2 AND authorization_route=''", params![route, local_access_log_event_key(event)]).map_err(|error| error.to_string())?;
     }
     if let Some(official_account_id) = official_stats_account_id(&event.account_id) {
         conn.execute(
@@ -1688,6 +1691,7 @@ fn usage_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodexLocalA
         Ok(value.max(0) as u64)
     };
     Ok(CodexLocalAccessUsageEvent {
+        authorization_route: row.get::<_, String>("authorization_route").ok().filter(|route| matches!(route.as_str(), "official" | "local_gateway")),
         timestamp: row.get("timestamp")?,
         request_id: row.get("request_id")?,
         account_id: row.get("account_id")?,
@@ -2072,7 +2076,7 @@ fn query_local_access_usage_events_blocking(
         params.push(SqlValue::Integer(end_at));
     }
     // 模型筛选同时匹配客户端请求模型与实际上游模型：
-    // 例如用 `cpa/gpt-5.5` 或 `glm-5.3` 都能命中同一条路由日志。
+    // 例如用 `cpa/gpt-5.6-sol` 或 `glm-5.3` 都能命中同一条路由日志。
     push_like_filter(
         &mut clauses,
         &mut params,
@@ -2729,6 +2733,7 @@ fn append_usage_event_with_meta(
     let usage = usage.cloned().unwrap_or_default();
     let model_id = model_id.unwrap_or_default().trim().to_string();
     let event = CodexLocalAccessUsageEvent {
+        authorization_route: None,
         timestamp: now,
         request_id: request_id.unwrap_or_default().trim().to_string(),
         account_id: account_id.unwrap_or_default().trim().to_string(),

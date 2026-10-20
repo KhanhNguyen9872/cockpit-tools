@@ -15,6 +15,7 @@ const modalImports = {
   '../ModalErrorMessage': { ModalErrorMessage: 'ModalErrorMessage' },
   '../SingleSelectDropdown': { SingleSelectDropdown: 'SingleSelectDropdown' },
   './CodexOutputSpeed': { CodexOutputSpeed: 'CodexOutputSpeed' },
+  './CodexCapabilityFallbackTrace': { CodexCapabilityFallbackTrace: 'CodexCapabilityFallbackTrace' },
 };
 
 test('payload setting retains old preference on save failure, deduplicates saves and requires confirmation before clearing', async () => {
