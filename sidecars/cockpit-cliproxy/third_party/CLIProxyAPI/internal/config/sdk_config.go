@@ -92,4 +92,6 @@ type StreamingConfig struct {
 	BootstrapRetryBaseDelayMS int  `yaml:"bootstrap-retry-base-delay-ms,omitempty" json:"bootstrap-retry-base-delay-ms,omitempty"`
 	BootstrapRetryMaxDelayMS  int  `yaml:"bootstrap-retry-max-delay-ms,omitempty" json:"bootstrap-retry-max-delay-ms,omitempty"`
 	AutoRetryWhenOverload     bool `yaml:"auto-retry-when-overload,omitempty" json:"auto-retry-when-overload,omitempty"`
+	AutoResetUsageOnWeekLimit bool `yaml:"auto-reset-usage-on-week-limit,omitempty" json:"auto-reset-usage-on-week-limit,omitempty"`
+	AutoResetUsageOn5hLimit   bool `yaml:"auto-reset-usage-on-5h-limit,omitempty" json:"auto-reset-usage-on-5h-limit,omitempty"`
 }

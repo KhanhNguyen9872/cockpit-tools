@@ -4596,7 +4596,11 @@
         "presetDeleted": "Đã xóa mẫu",
         "presetNameRequired": "Nhập tên mẫu",
         "deletePresetConfirm": "Xóa mẫu tùy chỉnh này?",
-        "deletePresetTitle": "Xóa mẫu"
+        "deletePresetTitle": "Xóa mẫu",
+        "autoResetUsageOn5hLimit": "Tự động dùng \"Reset usage\" khi chạm giới hạn 5h",
+        "autoResetUsageOn5hLimitHint": "Tự động kích hoạt lượt đặt lại (Reset usage) khi tài khoản chạm ngưỡng sử dụng 5 giờ",
+        "autoResetUsageOnWeekLimit": "Tự động dùng \"Reset usage\" khi chạm giới hạn tuần",
+        "autoResetUsageOnWeekLimitHint": "Tự động kích hoạt lượt đặt lại (Reset usage) khi tài khoản chạm ngưỡng sử dụng tuần"
       },
       "accountModelRules": {
         "action": "Chặn mô hình",

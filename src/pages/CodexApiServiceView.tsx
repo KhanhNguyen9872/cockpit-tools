@@ -2676,6 +2676,58 @@ export function CodexApiServiceView(props: CodexApiServiceViewProps) {
                       }
                     />
                   </label>
+                  <label className="codex-api-service-toggle-label">
+                    <div className="toggle-text">
+                      <span>
+                        {t(
+                          "codex.apiService.timeouts.autoResetUsageOn5hLimit",
+                          "Auto use \"Reset usage\" if hit limit 5h usage",
+                        )}
+                      </span>
+                      <small>
+                        {t(
+                          "codex.apiService.timeouts.autoResetUsageOn5hLimitHint",
+                          "当账号达到 5 小时使用限额且存在可用重置次数时，自动执行 Reset usage",
+                        )}
+                      </small>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={timeoutDrafts.autoResetUsageOn5hLimit === "true"}
+                      onChange={(event) =>
+                        updateTimeoutDraft(
+                          "autoResetUsageOn5hLimit",
+                          event.target.checked ? "true" : "false",
+                        )
+                      }
+                    />
+                  </label>
+                  <label className="codex-api-service-toggle-label">
+                    <div className="toggle-text">
+                      <span>
+                        {t(
+                          "codex.apiService.timeouts.autoResetUsageOnWeekLimit",
+                          "Auto use \"Reset usage\" if hit limit week usage",
+                        )}
+                      </span>
+                      <small>
+                        {t(
+                          "codex.apiService.timeouts.autoResetUsageOnWeekLimitHint",
+                          "当账号达到每周使用限额且存在可用重置次数时，自动执行 Reset usage",
+                        )}
+                      </small>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={timeoutDrafts.autoResetUsageOnWeekLimit === "true"}
+                      onChange={(event) =>
+                        updateTimeoutDraft(
+                          "autoResetUsageOnWeekLimit",
+                          event.target.checked ? "true" : "false",
+                        )
+                      }
+                    />
+                  </label>
                 </div>
               </section>
               <section className="codex-api-service-timeout-section">
