@@ -103,7 +103,7 @@ async fn plan_configuration_updates_preserve_explicit_model_suffix_overrides() {
 
 #[tokio::test]
 async fn plan_configuration_updates_do_not_drop_tool_restrictions_or_unknown_settings() {
-    let (_host, captures, task, _root, mut service) = fixture(COMPLETED, false).await;
+    let (host, captures, task, _root, mut service) = fixture(COMPLETED, false).await;
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
     for update in [
         json!({"type":"configuration_update","tools":[]}),
@@ -128,5 +128,7 @@ async fn plan_configuration_updates_do_not_drop_tool_restrictions_or_unknown_set
     }
     assert!(captures.lock().unwrap().is_empty());
     service.shutdown(Duration::from_secs(2)).await.unwrap();
+    assert!(host.reports.lock().unwrap().is_empty(),
+        "unsupported local configuration never became an upstream request");
     task.abort();
 }

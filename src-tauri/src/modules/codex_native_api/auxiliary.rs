@@ -569,20 +569,30 @@ async fn websocket_tracked(
             let tracker = tracker_slot
                 .as_mut()
                 .expect("WebSocket request tracker is present");
-            tracker.begin_attempt("websocket");
-            tracker.upstream_headers(&mapped);
-            let mut upstream = super::execution::prepare(
+            let connected = super::execution::prepare(
                 &state,
-                super::transport::connect_websocket(
+                super::transport::connect_websocket_tracked(
                     &route,
                     url.as_str(),
                     mapped,
                     state.options.max_body_bytes,
                     remaining_open.min(policy.websocket_connect_timeout),
                     state.stop.clone(),
+                    |headers| {
+                        tracker.begin_attempt("websocket");
+                        tracker.upstream_headers(headers);
+                    },
                 ),
             )
-            .await?;
+            .await;
+            let mut upstream = match connected {
+                Ok(upstream) => upstream,
+                Err(error) => {
+                    if error.upstream_not_sent { tracker.discard_unsent_attempt(); }
+                    return Err(error);
+                }
+            };
+            tracker.upstream_response_headers(&upstream.1);
             let selected_protocol = realtime::selected_protocol(&protocols, &upstream.1)?;
             let ws = if let Some(protocol) = selected_protocol {
                 ws.protocols([protocol])
@@ -885,12 +895,32 @@ async fn send_until(
     let (client, request) = request.build_split();
     let request = request.map_err(|_| {
         ServiceError::new(502, "upstream_unavailable", "Unable to connect to upstream")
+            .with_upstream_not_sent(true)
     })?;
-    tracker.begin_attempt("http");
-    tracker.upstream_headers(request.headers());
-    tracker.check_quota_before_send()?;
-    let response = tokio::select! {_=stop.wait()=>Err(stopping_error()),r=tokio::time::timeout_at(deadline,client.execute(request))=>r.map_err(|_|ServiceError::new(504,"upstream_timeout","Upstream request timed out"))?.map_err(|_|ServiceError::new(502,"upstream_unavailable","Unable to connect to upstream"))}?;
+    let result = tokio::select! {
+        biased;
+        _=stop.wait()=>Err(stopping_error()),
+        r=tokio::time::timeout_at(deadline,async {
+            if Instant::now() >= deadline {
+                return Err(ServiceError::new(504,"upstream_timeout","Upstream request timed out"));
+            }
+            tracker.begin_attempt("http");
+            tracker.upstream_headers(request.headers());
+            client.execute(request).await.map_err(|error| {
+                ServiceError::new(502,"upstream_unavailable","Unable to connect to upstream")
+                    .with_upstream_not_sent(error.is_connect() || error.is_builder())
+            })
+        })=>r.map_err(|_|ServiceError::new(504,"upstream_timeout","Upstream request timed out"))?
+    };
+    let response = match result {
+        Ok(response) => response,
+        Err(error) => {
+            if error.upstream_not_sent { tracker.discard_unsent_attempt(); }
+            return Err(error);
+        }
+    };
     tracker.quota_headers(response.headers());
+    tracker.upstream_response_headers(response.headers());
     Ok(response)
 }
 async fn read(state: &AppState, response: reqwest::Response) -> Result<Vec<u8>, ServiceError> {

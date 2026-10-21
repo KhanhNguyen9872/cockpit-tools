@@ -184,8 +184,8 @@ test('reconnecting reuses known transformed gates without widening them', () => 
   assert.equal(second.patchedSource, first.patchedSource);
 });
 
-function handoffBrowser() {
-  const result = load({ owner: 'fixture-owner' });
+function handoffBrowser(options = {}) {
+  const result = load({ owner: 'fixture-owner', ...options });
   const { sandbox } = result, listeners = new Map(), timers = new Map(), elements = [];
   let serial = 0;
   sandbox.name = 'existing-window';
@@ -270,6 +270,29 @@ test('wrong identity, stale handoff and invalid source are rejected after restor
   first.api.cancelHandoff('nonce-4');
 });
 
+test('retired dictation bridges and capability-only handoffs cannot be reinstalled', async () => {
+  const first = handoffBrowser();
+  await first.api.prepareHandoff('retired-dictation');
+  first.listeners.get('beforeunload')();
+  const prefix = 'cockpit-native-handoff-v1:';
+  for (const mutate of [
+    value => { value.source += ';globalThis.__cockpitApiDictation.transcribe(blob, options)'; },
+    value => { value.source += ';globalThis.__cockpitNativeDictation.capability(true, false)'; },
+    value => { value.mode = 'capability-only'; value.features = '0001:capability-only'; },
+  ]) {
+    const value = JSON.parse(first.sandbox.name.slice(prefix.length));
+    mutate(value);
+    const next = handoffBrowser();
+    next.sandbox.name = prefix + JSON.stringify(value);
+    assert.equal(next.api.consumeHandoff('retired-dictation').reason, 'handoff-invalid');
+    assert.equal(next.sandbox.name, 'existing-window');
+    assert.equal(next.elements.length, 0);
+    assert.equal(next.sandbox.reloaded, undefined);
+    assert.equal(next.sandbox.__cockpitEnhancements.nativePatchState, 'unsupported');
+  }
+  first.api.cancelHandoff('retired-dictation');
+});
+
 test('canceled navigation restores name and cancellation invalidates in-flight preparation', async () => {
   const env = handoffBrowser(); await env.api.prepareHandoff('nonce-5');
   env.listeners.get('beforeunload')(); [...env.timers.values()][0]();
@@ -304,17 +327,26 @@ test('cleanup restores a late inherited handoff only for the matching owner and 
 });
 
 test('current local app artifact has all four gates and retains serviceTiers', { skip: !process.env.COCKPIT_NATIVE_FAST_FIXTURE }, async () => {
-  const { api, sandbox } = load({ quotaCompat: true, apiDictation: true });
+  const { api, sandbox } = load({ quotaCompat: true, apiService: true });
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'quota.js'), 'utf8'), sandbox);
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'native_dictation.js'), 'utf8'), sandbox);
   const source = fs.readFileSync(process.env.COCKPIT_NATIVE_FAST_FIXTURE, 'utf8');
   const transformed = api.transform(source);
   assert.equal(transformed.ok, true);
   assert.equal(transformed.patchedSource.split('serviceTiers').length, source.split('serviceTiers').length);
   const prepared = await api.prepareModule(source, moduleUrl);
   assert.equal(prepared.ok, true);
-  assert.equal((prepared.patchedSource.match(/globalThis\.__cockpitQuotaCompat\.enabledFor\(/g) || []).length, 1);
-  assert.ok(prepared.patchedSource.includes('cockpitDictationScope'));
+  assert.equal((prepared.patchedSource.match(/globalThis\.__cockpitQuotaCompat\.initialReady=true/g) || []).length, 1);
+  assert.equal(prepared.patchedSource.includes('globalThis.__cockpitNativeDictation.'), false);
+  assert.equal(prepared.patchedSource.includes('globalThis.__cockpitApiDictation.'), false);
+  assert.equal(prepared.patchedSource.includes('cockpitDictationScope'), false);
+  const live = api.prepareLive(source, moduleUrl);
+  assert.equal(live.ok, true);
+  for (const name of ['YLo', 'XLo', 'l6u']) {
+    const marker = `function ${name}(`;
+    const start = source.indexOf(marker), next = source.indexOf('function ', start + marker.length);
+    assert.ok(start >= 0 && next > start, `installed native ${name} function is present`);
+    assert.ok(live.patchedSource.includes(source.slice(start, next)), `native ${name} capability/transcription function remains unchanged`);
+  }
   assert.equal(api.prepareLive(prepared.patchedSource, moduleUrl).ok, true);
   assert.ok(prepared.patchedSource.includes('//# sourceURL=' + moduleUrl));
   const parsed = new vm.SourceTextModule(prepared.patchedSource);

@@ -11,7 +11,6 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { CodexAccount, CodexAccountNoteUpdate } from "../types/codex";
-import type { CodexLocalAccessOAuthQuotaReserve } from "../types/codexLocalAccess";
 import { CODEX_ADDITIONAL_QUOTA_VISIBILITY_CHANGED_EVENT, CODEX_CODE_REVIEW_QUOTA_VISIBILITY_CHANGED_EVENT, isCodexAdditionalQuotaVisibleByDefault, isCodexCodeReviewQuotaVisibleByDefault } from "../utils/codexPreferences";
 import { emitAccountsChanged } from "../utils/accountSyncEvents";
 import { resolveCodexModelProviderAccountName } from "../utils/codexModelProviderAccountName";
@@ -27,7 +26,7 @@ import { resolveCodexModelProviderForApiKey } from "../utils/codexModelProviderK
 import { findCodexModelProviderById, findCodexModelProviderByBaseUrl, mergeCodexModelProviderApiKeysFromAccounts, type CodexModelProvider } from "../services/codexModelProviderService";
 import { readCodexApiKeyUsageCache, type CodexApiKeyUsageState } from "../services/codexApiKeyUsageRefreshService";
 import { parseMfaCredentialInput, upsertSavedMfaRecord } from "../utils/mfaVault";
-import { DEFAULT_CODEX_API_BASE_URL, DEFAULT_CODEX_API_PROVIDER_ID, getDefaultApiProviderPresetId, isSameHttpBaseUrl, normalizeHttpBaseUrl, normalizeSponsorApiProviderTemplates, OPENAI_OFFICIAL_PRESET_ID, parseApiModelCatalogText, resolveApiProviderPresetDefaults, type OAuthBindingQuotaReserveFieldErrors, type OAuthBindingTargetKind, type SponsorApiProviderTemplate } from "./codexAccountsControllerModel";
+import { DEFAULT_CODEX_API_BASE_URL, DEFAULT_CODEX_API_PROVIDER_ID, getDefaultApiProviderPresetId, isSameHttpBaseUrl, normalizeHttpBaseUrl, normalizeSponsorApiProviderTemplates, OPENAI_OFFICIAL_PRESET_ID, parseApiModelCatalogText, resolveApiProviderPresetDefaults, type OAuthBindingTargetKind, type SponsorApiProviderTemplate } from "./codexAccountsControllerModel";
 import type { useCodexAccountsBaseController } from "./useCodexAccountsBaseController";
 
 /** 封装 useCodexAccountsPageController 的 useCodexAccountsOAuthController 业务域状态与动作。 */
@@ -269,26 +268,6 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
       useState("");
     const [oauthBindingSaving, setOauthBindingSaving] = useState(false);
     const [oauthBindingAutoSwitch, setOauthBindingAutoSwitch] = useState(false);
-    const [oauthBindingQuotaReserve, setOauthBindingQuotaReserve] =
-      useState<CodexLocalAccessOAuthQuotaReserve | null>(null);
-    const [
-      oauthBindingQuotaReserveEditorOpen,
-      setOauthBindingQuotaReserveEditorOpen,
-    ] = useState(false);
-    const [oauthBindingHourlyReserveDraft, setOauthBindingHourlyReserveDraft] =
-      useState("");
-    const [oauthBindingWeeklyReserveDraft, setOauthBindingWeeklyReserveDraft] =
-      useState("");
-    const [
-      oauthBindingQuotaReserveFieldErrors,
-      setOauthBindingQuotaReserveFieldErrors,
-    ] = useState<OAuthBindingQuotaReserveFieldErrors>({});
-    const oauthBindingHourlyReserveInputRef = useRef<HTMLInputElement | null>(
-      null,
-    );
-    const oauthBindingWeeklyReserveInputRef = useRef<HTMLInputElement | null>(
-      null,
-    );
     const {
       message: oauthBindingError,
       scrollKey: oauthBindingErrorScrollKey,
@@ -1319,7 +1298,6 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
             if (reauthRetryOAuthBinding.targetKind === "local_access") {
               await codexLocalAccessService.updateCodexLocalAccessBoundOAuthAccount(
                 account.id,
-                reauthRetryOAuthBinding.quotaReserve ?? null,
               );
               await reloadLocalAccessState();
             } else if (reauthRetryOAuthBinding.targetAccountId) {
@@ -2287,17 +2265,10 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
     oauthBindingError,
     oauthBindingErrorScrollKey,
     oauthBindingHasExistingBinding,
-    oauthBindingHourlyReserveDraft,
-    oauthBindingHourlyReserveInputRef,
-    oauthBindingQuotaReserve,
-    oauthBindingQuotaReserveEditorOpen,
-    oauthBindingQuotaReserveFieldErrors,
     oauthBindingSaving,
     oauthBindingSelectedAccountId,
     oauthBindingTargetActive,
     oauthBindingTargetKind,
-    oauthBindingWeeklyReserveDraft,
-    oauthBindingWeeklyReserveInputRef,
     oauthCallbackError,
     oauthCallbackInput,
     oauthCallbackSubmitting,
@@ -2373,14 +2344,9 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
     setOauthBindingAccountId,
     setOauthBindingAutoSwitch,
     setOauthBindingError,
-    setOauthBindingHourlyReserveDraft,
-    setOauthBindingQuotaReserve,
-    setOauthBindingQuotaReserveEditorOpen,
-    setOauthBindingQuotaReserveFieldErrors,
     setOauthBindingSaving,
     setOauthBindingSelectedAccountId,
     setOauthBindingTargetKind,
-    setOauthBindingWeeklyReserveDraft,
     setOauthCallbackInput,
     setQuickSwitchAccountId,
     setQuickSwitchApiKeyId,

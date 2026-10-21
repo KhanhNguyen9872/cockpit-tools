@@ -1502,8 +1502,8 @@ export function CodexLaunchPreviewModal({
   useEscCloseTopmost(contextConfigOpen && !busy && !contextConfigSaving, () => closeContextConfig(false), contextDialog);
   useEscCloseTopmost(Boolean(manualRefreshResult) && !forceRefreshing, closeManualRefreshResult, refreshDialog);
 
-  const handleManualRefreshReauthorize = useCallback(() => {
-    if (!account || forceRefreshing || !manualRefreshResult?.requiresReauth) return;
+  const handleReauthorize = useCallback((retryInstanceLaunchAfterOAuth = false) => {
+    if (!account || !isStandardCodexOAuthAccount(account) || busy) return;
     setManualRefreshResult(null);
     onClose();
     window.dispatchEvent(
@@ -1512,14 +1512,19 @@ export function CodexLaunchPreviewModal({
     requestCodexOpenAddAccount({
       tab: "oauth",
       targetAccountId: account.id,
-      ...(mode === "instance"
+      ...(retryInstanceLaunchAfterOAuth && mode === "instance"
         ? {
             retryInstanceLaunchAfterOAuth: true,
             retryInstanceId: instanceId,
           }
         : {}),
     });
-  }, [account, forceRefreshing, instanceId, mode, onClose, manualRefreshResult?.requiresReauth]);
+  }, [account, busy, instanceId, mode, onClose]);
+
+  const handleManualRefreshReauthorize = useCallback(() => {
+    if (!manualRefreshResult?.requiresReauth) return;
+    handleReauthorize(true);
+  }, [handleReauthorize, manualRefreshResult?.requiresReauth]);
 
   const renderFooterAction = (action: CodexLaunchPreviewAction) => (
     <div
@@ -2328,6 +2333,17 @@ export function CodexLaunchPreviewModal({
                 </button>
               </div>
               <div className="codex-launch-preview-footer-primary">
+                {account && isStandardCodexOAuthAccount(account) && (
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => handleReauthorize()}
+                    disabled={busy}
+                  >
+                    <KeyRound size={15} />
+                    {t("common.reauthorize", "重新授权")}
+                  </button>
+                )}
                 {dirty && (
                   <button
                     type="button"

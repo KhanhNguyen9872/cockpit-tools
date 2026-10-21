@@ -1,7 +1,7 @@
 import { prepareCodexServiceJoins } from "../utils/codexServiceJoin";
-import { listChatGptPlanAccounts } from "../services/chatgptPlanService";
+import { chatGptPlanErrorKey, listChatGptPlanAccounts } from "../services/chatgptPlanService";
 import { implicitCodexServiceAccountIds } from "../utils/chatgptPlanOverview";
-import { canChooseCodexServiceAuthorization, requestCodexServiceAuthorizations } from "../utils/codexAccountServiceNavigation";
+import { canChooseCodexServiceAuthorization } from "../utils/codexAccountServiceNavigation";
 import { resolveCodexAccountDisplayName } from "../utils/codexAccountDisplayName";
 import { listenSafely as listen } from "../utils/tauriEventListener";
 import { refreshCodexQuotaWithFeedback } from "../utils/codexQuotaRefreshFeedback";
@@ -598,6 +598,7 @@ export function useCodexAccountsBaseController() {
       async (accountIds: string[], force = false) => {
         if ((!syncImportedToApiService && !force) || accountIds.length === 0)
           return null;
+        const failures: string[] = [];
         if (explicitApiServiceChoiceRef.current) {
           explicitApiServiceChoiceRef.current = false;
           const imported = await codexService.listCodexAccounts();
@@ -605,25 +606,31 @@ export function useCodexAccountsBaseController() {
           const grants = candidates.some(canChooseCodexServiceAuthorization) ? await listChatGptPlanAccounts() : [];
           const prepared = await prepareCodexServiceJoins(candidates, grants,
             localAccessState?.collection?.accountIds ?? [], setLocalAccessState);
-          if (prepared.choiceIds.length) requestCodexServiceAuthorizations(prepared.choiceIds);
+          failures.push(...prepared.failures.map(({ accountId, error }) => {
+            const account = candidates.find((candidate) => candidate.id === accountId);
+            const label = maskAccountText(account ? resolveCodexAccountDisplayName(account, t("common.apiKeyAccount")) : accountId);
+            const raw = String(error).replace(/^Error:\s*/, "");
+            return `${label}: ${raw.startsWith("CHATGPT_PLAN_") ? t(chatGptPlanErrorKey(error)) : raw}`;
+          }));
           if (prepared.resumedIds.length) { await ensureLocalAccessEntryVisible(); setImportApiServiceGuideCount(prepared.resumedIds.length); }
           accountIds = prepared.localIds;
-          if (!accountIds.length) return null;
         }
-        accountIds = implicitCodexServiceAccountIds(accountIds, await listChatGptPlanAccounts());
-        if (!accountIds.length) return null;
-        const result =
-          await codexLocalAccessService.appendCodexLocalAccessAccounts(
-            accountIds,
-          );
-        setLocalAccessState(result.state);
-        if (result.syncedAccountIds.length > 0) {
-          await ensureLocalAccessEntryVisible();
-          setImportApiServiceGuideCount(result.syncedAccountIds.length);
+        let result = null;
+        if (accountIds.length) {
+          accountIds = implicitCodexServiceAccountIds(accountIds, await listChatGptPlanAccounts());
+          if (accountIds.length) {
+            result = await codexLocalAccessService.appendCodexLocalAccessAccounts(accountIds);
+            setLocalAccessState(result.state);
+            if (result.syncedAccountIds.length > 0) {
+              await ensureLocalAccessEntryVisible();
+              setImportApiServiceGuideCount(result.syncedAccountIds.length);
+            }
+          }
         }
+        if (failures.length) throw new Error(failures.join("\n"));
         return result;
       },
-      [ensureLocalAccessEntryVisible, localAccessState?.collection?.accountIds, syncImportedToApiService],
+      [ensureLocalAccessEntryVisible, localAccessState?.collection?.accountIds, maskAccountText, syncImportedToApiService, t],
     );
 
     const reauthTargetAccountId = reauthTargetAccount?.id?.trim() ?? "";
@@ -1244,23 +1251,6 @@ export function useCodexAccountsBaseController() {
     useEffect(() => {
       void reloadLocalAccessState();
     }, [reloadLocalAccessState]);
-  
-    useEffect(() => {
-      if (
-        !localAccessState?.running ||
-        !localAccessState.collection?.boundOauthQuotaReserve
-      ) {
-        return;
-      }
-      const timer = window.setInterval(() => {
-        void reloadLocalAccessState();
-      }, 60_000);
-      return () => window.clearInterval(timer);
-    }, [
-      localAccessState?.collection?.boundOauthQuotaReserve,
-      localAccessState?.running,
-      reloadLocalAccessState,
-    ]);
   
     useEffect(() => {
       void reloadLocalAccessEntryVisibility();

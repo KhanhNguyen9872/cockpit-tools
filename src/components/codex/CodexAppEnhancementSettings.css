@@ -10,14 +10,6 @@
 .codex-app-enhancements .row-control {
   min-width: 0;
 }
-.codex-app-enhancements input[type='text'] {
-  width: 100%;
-  max-width: 260px;
-  box-sizing: border-box;
-}
-.codex-app-enhancements input[aria-invalid='true'] {
-  border-color: var(--danger, #dc3545);
-}
 .codex-app-enhancements-error {
   color: var(--danger, #dc3545);
   overflow-wrap: anywhere;

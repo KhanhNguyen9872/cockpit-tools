@@ -7,6 +7,9 @@ pub(crate) const REQUEST_SCOPED: &str = "upstream_request_scoped";
 /// Mirrors the Go host's request-fault decision before credential penalties.
 /// A status alone must not turn malformed prompts into authentication failures.
 pub(crate) fn request_fault(status: u16, body: &Value) -> bool {
+    if super::official_fallback::explicit_rejection(body).is_some() {
+        return false;
+    }
     let text = body
         .as_str()
         .map(str::to_owned)

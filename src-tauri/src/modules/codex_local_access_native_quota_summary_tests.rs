@@ -92,6 +92,8 @@ fn quota_reply_deduplicates_source_channels_and_uses_only_scoped_channel_health(
     assert_eq!(merged["availableAccountCount"], 1);
     assert_eq!(merged["cooldownAccountCount"], 0);
     assert_eq!(merged["fiveHourRemainingPercent"], 65);
+    assert_eq!(merged["fiveHourCapacityPercent"], 100);
+    assert_eq!(merged["weeklyCapacityPercent"], 100);
     assert_eq!(merged["plans"].as_array().unwrap().len(), 1);
     assert_eq!(merged["plans"][0]["count"], 1);
     let isolated =
@@ -156,8 +158,120 @@ fn quota_reply_merges_equal_source_plans_and_keeps_unknown_windows_unknown() {
     );
     assert_eq!(missing["missingAccountCount"], 1);
     assert!(missing.get("remainingPercent").is_none());
+    assert!(missing.get("fiveHourCapacityPercent").is_none());
+    assert!(missing.get("weeklyCapacityPercent").is_none());
     assert_eq!(
         missing["availableAccountCount"], 1,
         "unknown source quota is not a failed official channel"
     );
+}
+
+#[test]
+fn quota_capacity_counts_only_windows_that_contribute_remaining_percent() {
+    let first = quota_display_account("first", "plus", 100, 90);
+    let second = quota_display_account("second", "plus", 100, 80);
+    let third = quota_display_account("third", "plus", 95, 70);
+    let accounts = vec![first, second, third];
+    let response = native_quota_summary(
+        &[
+            "first".into(),
+            "second".into(),
+            "third".into(),
+            "missing".into(),
+        ],
+        &accounts,
+        &HashSet::new(),
+        1001,
+        &HashMap::new(),
+    );
+    assert_eq!(response["accountCount"], 4);
+    assert_eq!(response["fiveHourRemainingPercent"], 295);
+    assert_eq!(response["fiveHourCapacityPercent"], 300);
+    assert_eq!(response["weeklyRemainingPercent"], 240);
+    assert_eq!(response["weeklyCapacityPercent"], 300);
+    assert_eq!(response["missingAccountCount"], 1);
+}
+
+#[test]
+fn quota_capacity_keeps_missing_invalid_and_unclassified_windows_unknown() {
+    let mut hourly = quota_display_account("hourly", "plus", 60, 80);
+    hourly.quota.as_mut().unwrap().weekly_window_present = Some(false);
+    let mut weekly = quota_display_account("weekly", "plus", 60, 80);
+    weekly.quota.as_mut().unwrap().hourly_window_present = Some(false);
+    let mut invalid = quota_display_account("invalid", "plus", 101, -1);
+    let mut unclassified = quota_display_account("unclassified", "plus", 50, 70);
+    unclassified.quota.as_mut().unwrap().hourly_window_minutes = Some(1440);
+    unclassified.quota.as_mut().unwrap().weekly_window_minutes = Some(1440);
+    let accounts = vec![
+        hourly.clone(),
+        weekly.clone(),
+        invalid.clone(),
+        unclassified.clone(),
+    ];
+    let response = native_quota_summary(
+        &[
+            hourly.id.clone(),
+            weekly.id.clone(),
+            invalid.id.clone(),
+            unclassified.id.clone(),
+        ],
+        &accounts,
+        &HashSet::new(),
+        1001,
+        &HashMap::new(),
+    );
+    assert_eq!(response["fiveHourRemainingPercent"], 60);
+    assert_eq!(response["fiveHourCapacityPercent"], 100);
+    assert_eq!(response["weeklyRemainingPercent"], 80);
+    assert_eq!(response["weeklyCapacityPercent"], 100);
+    invalid.quota = None;
+    for account in [invalid, unclassified] {
+        let unknown = native_quota_summary(
+            &[account.id.clone()],
+            &[account],
+            &HashSet::new(),
+            1001,
+            &HashMap::new(),
+        );
+        assert!(unknown.get("fiveHourCapacityPercent").is_none());
+        assert!(unknown.get("weeklyCapacityPercent").is_none());
+    }
+}
+
+#[test]
+fn quota_capacity_distinguishes_exhausted_window_from_empty_pool() {
+    let account = quota_display_account("exhausted", "plus", 100, 0);
+    let response = native_quota_summary(
+        &[account.id.clone()],
+        &[account.clone()],
+        &HashSet::from([account.id.clone()]),
+        1001,
+        &HashMap::new(),
+    );
+    assert_eq!(response["fiveHourRemainingPercent"], 0);
+    assert_eq!(response["weeklyRemainingPercent"], 0);
+    assert_eq!(response["fiveHourCapacityPercent"], 100);
+    assert_eq!(response["weeklyCapacityPercent"], 100);
+    assert_eq!(response["cooldownAccountCount"], 1);
+    let empty = native_quota_summary(&[], &[account], &HashSet::new(), 1001, &HashMap::new());
+    assert_eq!(empty["fiveHourCapacityPercent"], 0);
+    assert_eq!(empty["weeklyCapacityPercent"], 0);
+    assert_eq!(empty["accountCount"], 0);
+}
+
+#[test]
+fn quota_capacity_tracks_multiple_qualifying_windows_without_account_count_guessing() {
+    let mut account = quota_display_account("two-short-windows", "plus", 60, 80);
+    account.quota.as_mut().unwrap().weekly_window_minutes = Some(120);
+    let response = native_quota_summary(
+        &[account.id.clone()],
+        &[account],
+        &HashSet::new(),
+        1001,
+        &HashMap::new(),
+    );
+    assert_eq!(response["accountCount"], 1);
+    assert_eq!(response["fiveHourRemainingPercent"], 140);
+    assert_eq!(response["fiveHourCapacityPercent"], 200);
+    assert!(response.get("weeklyCapacityPercent").is_none());
 }

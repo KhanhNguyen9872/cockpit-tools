@@ -22,7 +22,10 @@ mod request_fault_websocket_tests;
 
 #[derive(Clone)]
 enum Behavior {
+    QuotaGate { metadata: bool, business: Option<Value>, reused: bool, wait_interrupt: bool },
+    WaitForInterrupt,
     Success,
+    DropHandshakeAfterRequest,
     Handshake(u16),
     HandshakeBody(u16, Value),
     First401UntilRefresh,
@@ -38,6 +41,7 @@ enum Behavior {
 
 struct Upstream {
     behavior: Behavior,
+    response_id: &'static str,
     attempts: AtomicUsize,
     handshakes: Mutex<Vec<HeaderMap>>,
     requests: Mutex<Vec<(HeaderMap, Value)>>,
@@ -73,6 +77,28 @@ async fn endpoint(state: Arc<Upstream>, headers: HeaderMap, ws: WebSocketUpgrade
             let _=socket.send(Message::Close(Some(axum::extract::ws::CloseFrame{code:1009,reason:"message too big".into()}))).await;
             return;
         }
+        if let Behavior::QuotaGate { metadata, business, reused: false, wait_interrupt } = &state.behavior {
+            quota_gate_events(&mut socket, *metadata, business.as_ref(), *wait_interrupt, if state.response_id == "completed" {"quota-active"} else {"quota-backup-active"}).await;
+            return;
+        }
+        if matches!(state.behavior, Behavior::WaitForInterrupt) {
+            socket.send(Message::Text(json!({"type":"response.created","response":{"id":"backup-active","output":[]}}).to_string().into())).await.unwrap();
+            loop {
+                match socket.recv().await {
+                    Some(Ok(Message::Text(text))) => {
+                        let control: Value = serde_json::from_str(text.as_str()).unwrap();
+                        state.requests.lock().unwrap().push((headers.clone(), control.clone()));
+                        assert_eq!(control["response_id"], "backup-active");
+                        break;
+                    }
+                    Some(Ok(Message::Ping(value))) => { socket.send(Message::Pong(value)).await.unwrap(); }
+                    _ => return,
+                }
+            }
+            socket.send(Message::Text(json!({"type":"response.completed","response":{"id":"backup-active","status":"completed","output":[]}}).to_string().into())).await.unwrap();
+            while socket.recv().await.is_some() {}
+            return;
+        }
         let error = json!({"type":"error","status":401,"error":{"code":"invalid_api_key","message":"expired"}});
         let event = match &state.behavior {
             Behavior::First401UntilRefresh
@@ -92,11 +118,18 @@ async fn endpoint(state: Arc<Upstream>, headers: HeaderMap, ws: WebSocketUpgrade
             Behavior::SuccessThenAlwaysOverload if state.attempts.load(Ordering::SeqCst) > 1 => {
                 json!({"type":"error","error":{"code":"server_is_overloaded","type":"service_unavailable_error"}})
             }
-            _ => json!({"type":"response.completed","response":{"id":"completed","status":"completed","output":[]}}),
+            _ => json!({"type":"response.completed","response":{"id":state.response_id,"status":"completed","output":[]}}),
         };
         let _ = socket.send(Message::Text(event.to_string().into())).await;
         while let Some(Ok(message)) = socket.recv().await {
             if matches!(message, Message::Close(_)) { break; }
+            if let Behavior::QuotaGate { metadata, business, reused: true, wait_interrupt } = &state.behavior {
+                if let Message::Text(text) = &message {
+                    state.requests.lock().unwrap().push((headers.clone(), serde_json::from_str(text.as_str()).unwrap()));
+                    quota_gate_events(&mut socket, *metadata, business.as_ref(), *wait_interrupt, if state.response_id == "completed" {"quota-active"} else {"quota-backup-active"}).await;
+                    return;
+                }
+            }
             if matches!(state.behavior, Behavior::SuccessThenOverload | Behavior::SuccessThenAlwaysOverload) && matches!(message, Message::Text(_)) {
                 socket.send(Message::Text(json!({"type":"response.created","response":{"id":"second"}}).to_string().into())).await.unwrap();
                 socket.send(Message::Text(json!({"type":"error","error":{"code":"server_is_overloaded","type":"service_unavailable_error"}}).to_string().into())).await.unwrap();
@@ -245,6 +278,7 @@ struct RetryHost {
     capacity: Arc<tokio::sync::Semaphore>,
     refreshable: AtomicBool,
     refresh_fails: AtomicBool,
+    passthrough: AtomicBool,
 }
 
 impl Host for RetryHost {
@@ -307,6 +341,10 @@ impl Host for RetryHost {
                 installation_profile: None,
                 official_authorization_revision: None,
                 official_registration_id: None,
+                official_fallback_registration_id: None,
+                official_fallback_authorization_revision: None,
+                authorization_scope_fingerprint: None,
+                official_fallback_failure: None,
                 transport_identity: None,
                 account_id: account.into(),
                 owner_id: format!("owner-{account}"),
@@ -328,6 +366,9 @@ impl Host for RetryHost {
     }
     fn models<'a>(&'a self, _: &'a Caller) -> BoxFuture<'a, Result<Value, ServiceError>> {
         Box::pin(async { Ok(json!({})) })
+    }
+    fn responses_websocket_passthrough<'a>(&'a self, _: &'a Caller, _: &'a Route) -> BoxFuture<'a, Result<bool, ServiceError>> {
+        Box::pin(async { Ok(self.passthrough.load(Ordering::Acquire)) })
     }
     fn execution_policy(&self) -> BoxFuture<'_, Result<ExecutionPolicy, ServiceError>> {
         Box::pin(async { Ok(self.policy.clone()) })
@@ -358,19 +399,25 @@ struct Fixture {
     first: Arc<Upstream>,
     second: Arc<Upstream>,
     task: tokio::task::JoinHandle<()>,
+    raw_task: Option<tokio::task::JoinHandle<()>>,
     path: PathBuf,
 }
 
 impl Fixture {
     async fn start(first: Behavior, policy: ExecutionPolicy, broken_first: bool) -> Self {
+        Self::start_with_second(first, Behavior::Success, policy, broken_first).await
+    }
+    async fn start_with_second(first: Behavior, second: Behavior, policy: ExecutionPolicy, broken_first: bool) -> Self {
         let first = Arc::new(Upstream {
             behavior: first,
+            response_id: "completed",
             attempts: AtomicUsize::new(0),
             handshakes: Mutex::new(Vec::new()),
             requests: Mutex::new(Vec::new()),
         });
         let second = Arc::new(Upstream {
-            behavior: Behavior::Success,
+            behavior: second,
+            response_id: "completed-b",
             attempts: AtomicUsize::new(0),
             handshakes: Mutex::new(Vec::new()),
             requests: Mutex::new(Vec::new()),
@@ -381,6 +428,9 @@ impl Fixture {
                 get({
                     let state = first.clone();
                     move |headers, ws| endpoint(state.clone(), headers, ws)
+                }).post({
+                    let state = first.clone();
+                    move |headers, body| quota_gate_tests::http_endpoint(state.clone(), headers, body)
                 }),
             )
             .route(
@@ -388,6 +438,9 @@ impl Fixture {
                 get({
                     let state = second.clone();
                     move |headers, ws| endpoint(state.clone(), headers, ws)
+                }).post({
+                    let state = second.clone();
+                    move |headers, body| quota_gate_tests::http_endpoint(state.clone(), headers, body)
                 }),
             );
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -395,7 +448,25 @@ impl Fixture {
         let task = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        let first_base = if broken_first {
+        let mut raw_task = None;
+        let first_base = if matches!(first.behavior, Behavior::DropHandshakeAfterRequest) {
+            let raw = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}/a", raw.local_addr().unwrap());
+            let source = first.clone();
+            raw_task = Some(tokio::spawn(async move {
+                use tokio::io::AsyncReadExt;
+                loop {
+                    let (mut stream, _) = raw.accept().await.unwrap();
+                    let mut bytes = [0; 4096];
+                    assert!(stream.read(&mut bytes).await.unwrap() > 0);
+                    source.attempts.fetch_add(1, Ordering::SeqCst);
+                    // The request reached upstream; losing its response is
+                    // ambiguous and must still consume the send retry budget.
+                    drop(stream);
+                }
+            }));
+            base
+        } else if broken_first {
             let unused = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let base = format!("http://{}/a", unused.local_addr().unwrap());
             drop(unused);
@@ -412,6 +483,7 @@ impl Fixture {
             capacity: Arc::new(tokio::sync::Semaphore::new(1)),
             refreshable: AtomicBool::new(true),
             refresh_fails: AtomicBool::new(false),
+            passthrough: AtomicBool::new(true),
         });
         let path = std::env::temp_dir().join(format!("native-ws-retry-{}", uuid::Uuid::now_v7()));
         let handle = crate::modules::codex_native_api::start(
@@ -428,6 +500,7 @@ impl Fixture {
             first,
             second,
             task,
+            raw_task,
             path,
         }
     }
@@ -461,6 +534,7 @@ impl Fixture {
         self.handle.shutdown(Duration::from_secs(2)).await.unwrap();
         assert_eq!(self.host.capacity.available_permits(), 1);
         self.task.abort();
+        if let Some(task) = self.raw_task { task.abort(); }
         let _ = std::fs::remove_dir_all(self.path);
     }
 }
@@ -627,12 +701,12 @@ async fn websocket_retry_server_status_has_its_own_budget_before_account_switch(
 #[tokio::test]
 async fn websocket_retry_network_send_budget_is_independent_of_status_budget() {
     let fixture = Fixture::start(
-        Behavior::Success,
+        Behavior::DropHandshakeAfterRequest,
         ExecutionPolicy {
             send_retries: 1,
             ..policy()
         },
-        true,
+        false,
     )
     .await;
     assert_eq!(
@@ -640,6 +714,7 @@ async fn websocket_retry_network_send_budget_is_independent_of_status_budget() {
         "response.completed"
     );
     assert_eq!(fixture.second.attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.first.attempts.load(Ordering::SeqCst), 2);
     assert!(fixture.host.failures.lock().unwrap().is_empty());
     // Two network attempts plus the alternate account's successful attempt.
     let host = fixture.host.clone();
@@ -871,3 +946,7 @@ async fn websocket_refresh_failure_cannot_transfer_known_opaque_owner() {
         .all(|request| request.excluded_account_ids.is_empty()));
     fixture.finish().await;
 }
+
+#[path = "websocket_quota_gate_tests.rs"]
+mod quota_gate_tests;
+use quota_gate_tests::quota_gate_events;

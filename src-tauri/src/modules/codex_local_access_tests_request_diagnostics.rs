@@ -116,6 +116,103 @@ mod request_diagnostics_tests {
         conn
     }
 
+    fn authorization_fallback_attempt() -> CodexLocalAccessRequestAttempt {
+        CodexLocalAccessRequestAttempt {
+            sequence: 2, account_id: "account-a".into(), model_id: "gpt-5.5".into(),
+            authorization_route: Some("local_gateway".into()),
+            upstream_request_id: Some("req_local-success".into()),
+            authorization_fallback: Some(crate::models::codex_local_access::CodexLocalAccessAuthorizationFallbackTrace {
+                reason: "eligibility_rejected".into(), trigger_stage: "upstream".into(), from_account_id: "account-a".into(),
+                to_account_id: "account-a".into(), from_route: "official".into(), to_route: "local_gateway".into(),
+                status: Some(403), error_code: Some("subscription_sharing_user_not_eligible".into()),
+                error_message: Some("The ChatGPT user is not eligible for subscription sharing.".into()),
+            }),
+            status: Some(200), success: true, ..Default::default()
+        }
+    }
+
+    #[test]
+    fn authorization_fallback_metadata_survives_without_payloads_and_late_snapshots() {
+        let conn = memory_logs();
+        let mut detail = diagnostic("authorization-fallback", 100);
+        detail.payloads.clear();
+        detail.attempts[0].authorization_route = Some("official".into());
+        detail.attempts[0].success = false;
+        detail.attempts[0].status = Some(403);
+        detail.attempts[0].error_message = Some("not eligible".into());
+        detail.attempts[0].upstream_request_id = Some("req_official-rejected".into());
+        detail.attempts.push(authorization_fallback_attempt());
+        insert_request_diagnostic(&conn, detail.clone()).unwrap();
+        detail.captured_at_ms += 10;
+        detail.attempts[1].authorization_fallback = None;
+        detail.attempts[1].upstream_request_id = None;
+        insert_request_diagnostic(&conn, detail).unwrap();
+        let stored = read_request_diagnostic(&conn, "authorization-fallback").unwrap().unwrap();
+        assert!(stored.payloads.is_empty());
+        assert_eq!(stored.attempts.len(), 2);
+        assert_eq!(stored.attempts[0].status, Some(403));
+        assert_eq!(stored.attempts[0].error_message.as_deref(), Some("not eligible"));
+        assert_eq!(stored.attempts[1].authorization_fallback, authorization_fallback_attempt().authorization_fallback);
+        assert_eq!(stored.attempts[1].upstream_request_id.as_deref(), Some("req_local-success"));
+    }
+
+    #[test]
+    fn authorization_fallback_rejects_unrelated_accounts_routes_and_unbounded_metadata() {
+        for mutation in 0..7 {
+            let mut attempt = authorization_fallback_attempt();
+            let trace = attempt.authorization_fallback.as_mut().unwrap();
+            match mutation {
+                0 => trace.to_account_id = "other-account".into(),
+                1 => trace.from_route = "local_gateway".into(),
+                2 => trace.to_route = "official".into(),
+                3 => attempt.authorization_route = Some("official".into()),
+                4 => trace.reason = "untrusted.key".into(),
+                5 => trace.from_account_id = "x".repeat(257),
+                _ => trace.trigger_stage = "unknown".into(),
+            }
+            assert!(normalize_authorization_fallback_trace(&mut attempt));
+            assert!(attempt.authorization_fallback.is_none());
+        }
+        let mut detail = diagnostic("invalid-upstream-id", 100);
+        detail.attempts[0].upstream_request_id = Some("https://secret.example/token".into());
+        assert!(normalize_request_diagnostics(detail).attempts[0].upstream_request_id.is_none());
+        assert!(authorization_fallback_from_attempts_json(&"x".repeat(65537)).is_none());
+        assert!(authorization_fallback_from_attempts_json("not-json").is_none());
+        assert!(authorization_fallback_from_attempts_json("[]").is_none());
+        let mut legacy = serde_json::to_value(authorization_fallback_attempt()).unwrap();
+        legacy["authorizationFallback"].as_object_mut().unwrap().remove("triggerStage");
+        let stored = authorization_fallback_from_attempts_json(&serde_json::to_string(&vec![legacy]).unwrap()).unwrap();
+        assert_eq!(stored.trigger_stage, "upstream", "old traces retain their upstream meaning");
+    }
+
+    #[test]
+    fn authorization_fallback_summary_is_paged_optional_and_handles_late_diagnostic_writes() {
+        let conn = memory_logs();
+        insert_local_access_usage_event(&conn, &CodexLocalAccessUsageEvent {
+            request_id: "fallback-summary".into(), account_id: "account-a".into(),
+            success: true, ..Default::default()
+        }).unwrap();
+        let projection = request_logs_authorization_fallback_select(&conn).unwrap();
+        let sql = format!("SELECT {projection} FROM request_logs ORDER BY id DESC LIMIT 1");
+        let summary = || {
+            conn.query_row(&sql, [], |row| row.get::<_, Option<String>>(0)).unwrap()
+                .as_deref().and_then(authorization_fallback_from_attempts_json)
+        };
+        // A read before optional diagnostics arrive returns immediately with the usage row.
+        assert!(summary().is_none());
+        let detail = CodexLocalAccessRequestDetail {
+            request_id: "fallback-summary".into(), captured_at_ms: 100,
+            attempts: vec![authorization_fallback_attempt()], ..Default::default()
+        };
+        insert_request_diagnostic(&conn, detail).unwrap();
+        assert_eq!(summary(), authorization_fallback_attempt().authorization_fallback);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM request_logs", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+        conn.execute("UPDATE request_diagnostics SET attempts_json=?1", [&"x".repeat(65537)]).unwrap();
+        assert!(summary().is_none());
+        conn.execute_batch("DROP TABLE request_diagnostics").unwrap();
+        assert_eq!(request_logs_authorization_fallback_select(&conn).unwrap(), "'' AS authorization_attempts_json");
+    }
+
     fn capability_trace(
     ) -> crate::models::codex_local_access::CodexLocalAccessCapabilityFallbackTrace {
         crate::models::codex_local_access::CodexLocalAccessCapabilityFallbackTrace {

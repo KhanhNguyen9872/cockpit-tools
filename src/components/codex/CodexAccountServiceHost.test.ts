@@ -11,15 +11,11 @@ import { codexOfficialAuthorizationRows, codexOfficialAuthorizationRelatedIds, n
 const sources = [{ id: 'one', email: 'one@example.com' }, { id: 'two', email: 'two@example.com' }];
 const grant = { id: 'grant', source_account_id: 'one', source_binding_valid: true, connected: true, needs_reauth: false, verified_model: 'model', in_service: false };
 function nodes(node: any): any[] { return !node ? [] : Array.isArray(node) ? node.flatMap(nodes) : typeof node !== 'object' ? [] : [node, ...nodes(node.props?.children)]; }
-function harness(options: { timers?: Record<string, unknown>; state?: () => Promise<any>; grants?: () => Promise<any[]>; apply?: (...args: any[]) => Promise<any>; activePage?: boolean; realNavigation?: boolean; disabled?: boolean; storageFails?: boolean; check?: () => Promise<any>; unlink?: () => Promise<any>; disconnect?: () => Promise<any>; release?: (disposition: string) => Promise<any>; deadline?: (operation: Promise<any>, ms?: number) => Promise<any> } = {}) {
+function harness(options: { timers?: Record<string, unknown>; state?: () => Promise<any>; grants?: () => Promise<any[]>; apply?: (...args: any[]) => Promise<any>; activePage?: boolean; realNavigation?: boolean; check?: () => Promise<any>; unlink?: () => Promise<any>; disconnect?: () => Promise<any>; release?: (disposition: string) => Promise<any>; deadline?: (operation: Promise<any>, ms?: number) => Promise<any> } = {}) {
   const window = new EventTarget();
   const calls = { read: 0, fetch: 0, applied: [] as any[], notices: [] as any[], managed: [] as any[] };
   let pending: any[] = [];
-  let check: number | null = null;
-  let current = true;
   let managePending = false;
-  let snoozed = false;
-  let disabled = options.disabled ?? false;
   let activePage = options.activePage ?? true;
   const error = { message: '', scrollKey: 0, clear() { this.message = ''; }, report(value: string) { this.message = value; this.scrollKey++; } };
   const t = (key: string) => key;
@@ -40,28 +36,15 @@ function harness(options: { timers?: Record<string, unknown>; state?: () => Prom
       CODEX_ACCOUNT_SERVICE_DRAFT_CANCEL: 'cancel-draft',
       cancelCodexServiceDraftAuthorizations() {}, isCodexServiceDraftRequestActive: () => true, announceCodexServiceDraftResult: () => true,
       requeueCodexServiceAuthorizationRequests: (items: any[]) => { pending = items; window.dispatchEvent(new Event('open-service')); },
-      CODEX_ACCOUNT_SERVICE_REQUEST: 'open-service', CODEX_OFFICIAL_AUTHORIZATION_CHECK: 'check-service',
+      CODEX_ACCOUNT_SERVICE_REQUEST: 'open-service',
       CODEX_OFFICIAL_AUTHORIZATION_MANAGE: 'manage-service',
       takeCodexOfficialAuthorizationManagement: () => { const next = managePending; managePending = false; return next; },
       requestCodexOfficialAuthorizationManagement: () => { managePending = true; window.dispatchEvent(new Event('manage-service')); },
-      snoozeCodexOfficialAuthorizationPrompts: () => { snoozed = true; },
       takeCodexServiceAuthorizationRequests: () => { const next = pending; pending = []; return next; },
-      takeCodexOfficialAuthorizationCheck: (visible: boolean) => { if (!visible || snoozed) return null; const next = check; check = null; return next; },
-      isCodexOfficialAuthorizationCheckCurrent: () => current, retryCodexOfficialAuthorizationCheck() {},
-      isCodexOfficialAuthorizationStartup: () => false, deferCodexOfficialAuthorizationCheck: (value: number) => { check = value; },
       requestCodexServiceAuthorizations: (ids: string[]) => { pending = ids.map((accountId) => ({ accountId })); window.dispatchEvent(new Event('open-service')); },
       announceCodexServiceAuthorizationApplied: (...args: any[]) => calls.notices.push(JSON.parse(JSON.stringify(args))),
     },
     '../../utils/codexOfficialAuthorization': { codexOfficialAuthorizationRows, codexOfficialAuthorizationRelatedIds, needsCodexOfficialAuthorizationReview, codexOfficialAuthorizationState, codexOfficialAuthorizationStateKey, codexOfficialAuthorizationDeadline: (operation: Promise<any>, ms?: number) => options.deadline?.(operation, ms) ?? operation },
-    '../../utils/codexOfficialReminders': {
-      CODEX_OFFICIAL_REMINDERS_CHANGED: 'reminders-changed',
-      readCodexOfficialReminders: () => ({ disabled, entrySeen: false }),
-      areCodexOfficialRemindersEnabled: () => !disabled,
-      setCodexOfficialRemindersEnabled: (enabled: boolean) => {
-        if (options.storageFails) throw new Error('storage unavailable');
-        disabled = !enabled; window.dispatchEvent(new Event('reminders-changed'));
-      },
-    },
     './CodexOfficialManagementDialog': { CodexOfficialManagementDialog: 'Management' },
     './CodexOfficialAuthorizationDialog': { CodexOfficialAuthorizationDialog: 'Authorization' },
     './CodexOfficialBadge': { CodexOfficialBadge: 'Badge' },
@@ -100,8 +83,7 @@ function harness(options: { timers?: Record<string, unknown>; state?: () => Prom
   return { hook, calls, error, click, window,
     manage() { managePending = true; window.dispatchEvent(new Event('manage-service')); return hook.flush(); },
     open(...ids: string[]) { pending = ids.map((accountId) => ({ accountId })); window.dispatchEvent(new Event('open-service')); return hook.flush(); },
-    inspect() { check = 1; window.dispatchEvent(new Event('check-service')); return hook.flush(); },
-    stop() { current = false; },
+    inspect() { window.dispatchEvent(new Event('codex-official-authorization-check')); return hook.flush(); },
     activate() { activePage = true; return hook.flush(); },
     hide() { activePage = false; return hook.flush(); },
   };
@@ -118,99 +100,38 @@ test('host does no startup I/O; a batch is one list and cancel clears it', async
   ctx.hook.unmount();
 });
 
-test('global opt-out keeps all rows, explains the member entry and preserves manual management', async () => {
-  const ctx = harness({ state: async () => ({ collection: { accountIds: ['one', 'two'] } }) });
-  ctx.inspect(); await settlePromises();
-  const checkbox = nodes(ctx.hook.flush()).find((node) => node.type === 'input' && node.props.type === 'checkbox');
-  checkbox.props.onChange({ target: { checked: true } }); ctx.hook.flush();
-  assert.equal(nodes(ctx.hook.flush()).filter((node) => node.type === 'li').length, 2);
-  assert.ok(nodes(ctx.hook.flush()).some((node) => node.props.children === 'chatgptPlan.officialFlow.reminderEntryHint'));
-  assert.equal(nodes(ctx.hook.flush()).some((node) => node.props.className === 'codex-official-dismiss'), false);
-  ctx.click('chatgptPlan.officialFlow.later'); ctx.inspect(); await settlePromises(); assert.equal(ctx.hook.flush(), null);
-  ctx.manage(); await settlePromises(); assert.equal(nodes(ctx.hook.flush()).filter((node) => node.type === 'li').length, 2);
-  assert.deepEqual(ctx.calls.applied, []); ctx.hook.unmount();
-});
-test('failed reminder persistence is reported inside the open dialog without hiding rows', async () => {
-  const ctx = harness({ storageFails: true }); ctx.inspect(); await settlePromises();
-  nodes(ctx.hook.flush()).find((node) => node.type === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); ctx.hook.flush();
-  assert.equal(ctx.error.message, 'chatgptPlan.officialFlow.reminderSaveFailed');
-  assert.equal(nodes(ctx.hook.flush()).filter((node) => node.type === 'li').length, 1); ctx.hook.unmount();
-});
-
-test('later snoozes automatic prompts but the manual entry works with a stopped service', async () => {
-  let running = true;
-  const ctx = harness({ state: async () => ({ running, collection: { accountIds: ['one'] } }) });
-  ctx.inspect(); await settlePromises(); ctx.click('chatgptPlan.officialFlow.later');
-  ctx.inspect(); await settlePromises(); assert.equal(ctx.hook.flush(), null);
-  running = false; ctx.manage(); await settlePromises();
-  assert.equal(nodes(ctx.hook.flush()).filter((node) => node.type === 'li').length, 2);
-  assert.deepEqual(ctx.calls.applied, []);
-  ctx.hook.unmount();
-});
-
-test('startup reminders show only service members missing authorization and perform no mutations', async () => {
-  const ctx = harness({ state: async () => ({ collection: { accountIds: ['two'] } }) });
-  ctx.inspect(); await settlePromises();
-  const rows = nodes(ctx.hook.flush()).filter((node) => node.type === 'li');
-  assert.deepEqual(rows.map((row) => row.key), ['two']);
-  assert.equal(ctx.calls.applied.length, 0);
-  ctx.click('chatgptPlan.officialFlow.authorizeUse');
-  const dialog = ctx.hook.flush();
-  assert.equal(dialog.type, 'Authorization');
-  assert.equal(dialog.props.sourceAccount.id, 'two'); assert.equal(dialog.props.completionMode, 'service');
-  assert.equal(dialog.props.intent, undefined);
-  dialog.props.onComplete({ ...grant, source_account_id: 'two', in_service: true });
-  await settlePromises(); ctx.hook.flush();
-  assert.equal(ctx.hook.flush(), null, 'the last missing authorization closes the reminder');
-  assert.deepEqual(ctx.calls.applied, [['two', 'official', 'grant', { intent: 'switch' }]]);
-  ctx.hook.unmount();
-});
-
-test('an already authorized startup pool never opens a redundant prompt', async () => {
-  const ctx = harness({ grants: async () => [grant, { ...grant, id: 'second', source_account_id: 'two' }] });
-  ctx.inspect(); await settlePromises();
-  assert.equal(ctx.hook.flush(), null);
-  assert.equal(ctx.calls.applied.length, 0);
-  ctx.hook.unmount();
-});
-
-test('an authorized service member never prompts for other unjoined accounts', async () => {
-  for (const memberId of ['one', 'chatgpt_plan_grant']) {
-    const ctx = harness({ state: async () => ({ collection: { accountIds: [memberId] } }), grants: async () => [grant] });
-    ctx.inspect(); await settlePromises();
-    assert.equal(ctx.hook.flush(), null, 'the sole authorized member matches the reported screenshot');
-    assert.equal(ctx.calls.applied.length, 0);
+test('legacy startup events and page changes never read accounts or open authorization', async () => {
+  for (const state of [
+    { collection: { accountIds: ['one', 'two'] } },
+    { collection: { accountIds: ['one'], officialAccountBindings: { one: 'grant' } } },
+    { running: false, collection: { accountIds: ['one'] } },
+  ]) {
+    const ctx = harness({ state: async () => state, grants: async () => [{ ...grant, needs_reauth: true }], activePage: false });
+    ctx.inspect(); ctx.activate(); ctx.inspect(); ctx.hide(); ctx.activate(); await settlePromises();
+    assert.equal(ctx.hook.flush(), null);
+    assert.equal(ctx.calls.read, 0);
+    assert.deepEqual(ctx.calls.applied, []);
     ctx.hook.unmount();
   }
 });
 
-test('an empty service never prompts even when all global accounts lack authorization', async () => {
-  const ctx = harness({ state: async () => ({ collection: { accountIds: [] } }) });
-  ctx.inspect(); await settlePromises();
-  assert.equal(ctx.hook.flush(), null);
-  assert.equal(ctx.calls.applied.length, 0);
+test('manual management remains available without reminders or preference controls', async () => {
+  const ctx = harness({ state: async () => ({ running: false, collection: { accountIds: ['one', 'two'] } }) });
+  ctx.manage(); await settlePromises();
+  const tree = nodes(ctx.hook.flush());
+  assert.equal(tree.filter((node) => node.type === 'li').length, 2);
+  assert.equal(tree.some((node) => node.props.className === 'codex-official-reminder-preference'), false);
+  assert.equal(tree.some((node) => node.type === 'input' && node.props.type === 'checkbox'), false);
+  assert.deepEqual(ctx.calls.applied, []);
+  ctx.click('common.close'); assert.equal(ctx.hook.flush(), null);
   ctx.hook.unmount();
 });
 
-test('a mixed service reminder excludes its authorized member and closes after remaining authorization', async () => {
-  const ctx = harness({ state: async () => ({ collection: { accountIds: ['one', 'two'], officialAccountBindings: { one: 'grant' } } }), grants: async () => [grant] });
-  ctx.inspect(); await settlePromises();
-  const rows = nodes(ctx.hook.flush()).filter((node) => node.type === 'li');
-  assert.deepEqual(rows.map((row) => row.key), ['two']);
-  ctx.click('chatgptPlan.officialFlow.authorizeUse');
-  const dialog = ctx.hook.flush();
-  dialog.props.onComplete({ ...grant, id: 'grant-two', source_account_id: 'two', in_service: true });
-  await settlePromises();
-  assert.equal(ctx.hook.flush(), null);
-  assert.deepEqual(ctx.calls.applied, [['two', 'official', 'grant-two', { intent: 'switch' }]]);
-  ctx.hook.unmount();
-});
-
-test('a revoked official service member is still shown for reauthorization', async () => {
+test('a revoked authorization is available for manual management without an automatic prompt', async () => {
   const ctx = harness({ state: async () => ({ collection: { accountIds: ['one'], officialAccountBindings: { one: 'grant' } } }), grants: async () => [{ ...grant, needs_reauth: true }] });
-  ctx.inspect(); await settlePromises();
-  assert.deepEqual(nodes(ctx.hook.flush()).filter((node) => node.type === 'li').map((row) => row.key), ['one']);
-  ctx.click('chatgptPlan.officialFlow.authorizeUse');
+  ctx.inspect(); await settlePromises(); assert.equal(ctx.hook.flush(), null);
+  ctx.manage(); await settlePromises(); ctx.click('chatgptPlan.officialFlow.manageAccount');
+  ctx.click('chatgptPlan.officialFlow.authorizeAgain');
   assert.equal(ctx.hook.flush().props.sourceAccount.id, 'one');
   assert.equal(ctx.hook.flush().props.intent, undefined);
   ctx.hook.unmount();
@@ -254,8 +175,8 @@ test('declining authorization joins only the selected source through the local g
 
 test('authorization for an existing member only binds; an explicit join failure stays in the dialog', async () => {
   const ctx = harness({ apply: async () => { throw new Error('private upstream details'); } });
-  ctx.inspect(); await settlePromises(); ctx.hook.flush();
-  ctx.click('chatgptPlan.officialFlow.authorizeUse');
+  ctx.manage(); await settlePromises(); ctx.hook.flush();
+  ctx.click('chatgptPlan.officialFlow.authorize');
   assert.equal(ctx.hook.flush().props.intent, undefined);
   ctx.hook.flush().props.onClose(); ctx.hook.flush();
   ctx.open('one'); await settlePromises(); ctx.hook.flush();
@@ -266,7 +187,7 @@ test('authorization for an existing member only binds; an explicit join failure 
   ctx.hook.unmount();
 });
 
-test('closing metadata loading fences late results; stopping service fences startup checks', async () => {
+test('closing metadata loading fences late results and startup events do not load metadata', async () => {
   const state = deferred<any>();
   const ctx = harness({ state: () => state.promise });
   ctx.open('one'); ctx.click('common.cancel');
@@ -275,29 +196,9 @@ test('closing metadata loading fences late results; stopping service fences star
   ctx.hook.unmount();
   const slow = deferred<any>();
   const startup = harness({ state: () => slow.promise });
-  startup.inspect(); startup.stop(); slow.resolve({ collection: { accountIds: [] } }); await settlePromises();
+  startup.inspect(); slow.resolve({ collection: { accountIds: [] } }); await settlePromises();
   assert.equal(startup.hook.flush(), null);
   startup.hook.unmount();
-});
-
-test('a hidden page defers the page-check until the user enters a relevant page', async () => {
-  const ctx = harness({ activePage: false });
-  ctx.inspect(); await settlePromises();
-  assert.equal(ctx.calls.read, 0);
-  ctx.activate(); await settlePromises();
-  assert.notEqual(ctx.hook.flush(), null);
-  ctx.hook.unmount();
-});
-
-test('leaving the page during metadata loading defers the prompt until returning', async () => {
-  const state = deferred<any>();
-  const ctx = harness({ state: () => state.promise });
-  ctx.inspect(); ctx.hide();
-  state.resolve({ collection: { accountIds: ['one'] } }); await settlePromises();
-  assert.equal(ctx.hook.flush(), null);
-  ctx.activate(); await settlePromises();
-  assert.notEqual(ctx.hook.flush(), null);
-  ctx.hook.unmount();
 });
 
 test('a closed confirmed local join still publishes the backend member fact when it completes late', async () => {
@@ -349,41 +250,30 @@ test('a binding saved before validation failure is refreshed when returning to t
 });
 
 
-test('launch-preview activation reopens the real guide after a previous check, even on another page', async () => {
+test('starting or restarting the API service cannot request authorization', async () => {
   const previous = globalThis.window;
   const ctx = harness({ activePage: false, realNavigation: true });
   Object.assign(globalThis, { window: ctx.window });
   try {
-    navigation.requestCodexOfficialAuthorizationCheck({ running: false, stopped: true });
-    navigation.requestCodexOfficialAuthorizationCheck({ running: true });
-    assert.equal(typeof navigation.takeCodexOfficialAuthorizationCheck(), 'number');
     const service: Record<string, any> = {};
     const compiled = ts.transpileModule(readFileSync(new URL('../../services/codexLocalAccessService.ts', import.meta.url), 'utf8'), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     }).outputText;
     vm.runInNewContext(compiled, { exports: service, performance, console: { info() {} }, require(name: string) {
-      if (name === '../utils/codexAccountServiceNavigation') return navigation;
-      if (name === '@tauri-apps/api/core') return { invoke: async (command: string) => {
-        assert.equal(command, 'codex_local_access_activate');
-        return { running: true, collection: { enabled: true, accountIds: ['one'] } };
-      } };
+      if (name === '@tauri-apps/api/core') return { invoke: async () => ({ running: true, collection: { enabled: true, accountIds: ['one'] } }) };
       throw new Error(name);
     } });
     await service.activateCodexLocalAccess('default');
-    // A keep-alive page can publish an earlier stopped snapshot during this read.
-    navigation.requestCodexOfficialAuthorizationCheck({ running: false });
-    await settlePromises();
-    const rows = nodes(ctx.hook.flush()).filter((node) => node.type === 'li');
-    assert.equal(rows.length, 1, 'the successful explicit launch shows only missing service authorizations');
-    assert.equal(rows[0].key, 'one');
-    assert.equal(ctx.calls.applied.length, 0, 'a startup reminder never changes account authorization');
-  } finally {
-    ctx.hook.unmount();
-    navigation.requestCodexOfficialAuthorizationCheck({ running: false, stopped: true });
-    Object.assign(globalThis, { window: previous });
-  }
+    await service.restartCodexLocalAccessSidecar();
+    await service.setCodexLocalAccessEnabled(true);
+    ctx.activate(); await settlePromises();
+    assert.equal(ctx.hook.flush(), null);
+    assert.equal(ctx.calls.read, 0);
+    assert.deepEqual(ctx.calls.applied, []);
+    navigation.requestCodexOfficialAuthorizationManagement(); await settlePromises();
+    assert.notEqual(ctx.hook.flush(), null, 'the explicit management entry still opens');
+  } finally { ctx.hook.unmount(); Object.assign(globalThis, { window: previous }); }
 });
-
 
 test('tabs show only their own explanation and action, clear errors and never mutate membership', async () => {
   const ctx = harness();
@@ -418,18 +308,6 @@ test('access tabs are usable during slow metadata loading and support keyboard s
   assert.deepEqual(ctx.calls.applied, []);
   ctx.click('common.cancel');
   state.resolve({ collection: { accountIds: [] } }); await settlePromises();
-  assert.equal(ctx.hook.flush(), null);
-  ctx.hook.unmount();
-});
-
-test('a reminder explicitly authorizes and switches the existing source without joining again', async () => {
-  const ctx = harness();
-  ctx.inspect(); await settlePromises();
-  assert.equal(nodes(ctx.hook.flush()).some((node) => node.props.role === 'tab'), false);
-  ctx.click('chatgptPlan.officialFlow.authorizeUse');
-  ctx.hook.flush().props.onComplete({ ...grant, in_service: false });
-  await settlePromises();
-  assert.deepEqual(ctx.calls.applied, [['one', 'official', 'grant', { intent: 'switch' }]]);
   assert.equal(ctx.hook.flush(), null);
   ctx.hook.unmount();
 });

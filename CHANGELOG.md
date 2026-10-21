@@ -10,6 +10,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.3.72] - 2026-10-21
+
+### Added
+
+- **Official-first API Service routing**: Prefer linked official ChatGPT access, then recover through the same account's local OAuth route or another permitted account after a safe, recoverable failure. Preserve explicit local-only choices, conversation and tool history, account permissions and quota limits. Official access uses default speed; local fallback retains the requested speed. Request details show the actual route and recovery results.
+- **Account tests**: Rename Pelican test and add candy reasoning, distinct public benchmark cases, and fixed-answer mathematics, code tracing, long-context ledger and dependency-planning tasks. Show descriptive task names, expanded references and per-field results, distinguishing format compliance from final-answer correctness. Retired prompts and their original graders remain available in history. Plain-text replies can be compared alongside HTML; incomplete requests are not scored, and local results are separate from official leaderboards.
+- **API Service usage overview**: A compact, readable dialog shows the selected model family’s GPT account quotas, DeepSeek balance or Grok quota alongside current-chat metrics and service statistics. Switch between current-chat and service-wide request records and load more without losing the scroll position. Account names, known subscription labels, requested and upstream models, authorization routes, token usage and performance follow API Service conventions. GPT API Key account counts load independently of request statistics and follow the current service/key account scope, retaining confirmed counts across chat changes and disconnections. The 660px dialog keeps request fields compact with internal horizontal scrolling when needed. Balance rows align provider, contributing account count and amount; dialog height adapts to overview content across both tabs, capped at 700px and 85% of the viewport, metric units are smaller, repeated overview models are collapsed, and clicking outside closes the dialog. Unlinked or unmeasured data stays unknown; incomplete historical statistics are marked as verified subsets.
+- Keep Reauthorize available in the Codex launch preview, allowing credentials to be replaced for the existing account before an authorization failure.
+
+### Changed
+
+- Show API Service quota, speed and cache in one status strip with a light surface and a single purple accent dot; use blue for speed and account-overview colors for displayed quota percentages: green at ≥80%, yellow at ≥40%, orange at ≥10%, red below 10%, and “—” for missing data. Click to view details and refresh. Client output speed uses the same post-first-response timing as API Service, weighted over the current chat’s recent valid requests; unmatched chats or missing timing show “—”.
+- Hide the ChatGPT subscription usage banner in API Service clients while preserving native notices and actual limits for ordinary accounts.
+
+### Removed
+
+- Remove automatic official-authorization prompts on API Service startup, page entry and ordinary account additions. Manual authorization remains in member management; batch additions continue for healthy accounts and report individual failures without changing saved access choices.
+- Remove OAuth quota reserves, thresholds and safety margins from both API Service engines. Existing reserve settings no longer affect routing; actual quota exhaustion, key scopes and account concurrency still apply.
+
+### Fixed
+
+- Correct Windows update-package installer identification so automatic updates can select the appropriate installer format.
+- Restore native dictation controls and transcription in Codex clients bound to API Service, following the client’s native capabilities and settings instead of overriding dictation. General audio APIs and realtime voice remain available.
+- Recover Rust and Go API requests when quota errors arrive after stream handshakes, including accounts without official authorization. Cool down exhausted access before trying a safe fallback, respect upstream reset times and retain conversation and tool safety checks. Requests with delivered output or uncertain execution are not replayed; unsent candidates create no failure records and consume no upstream retry attempts.
+- Fix the send button remaining disabled for independent API conversations when the linked ChatGPT quota is exhausted in mixed mode. Preserve unsaved drafts, rich content, active conversations and actual quota limits.
+- Keep Cockpit-managed Codex realtime voice connections on the current API Service port after reconnection, while preserving custom voice endpoints.
+
 ## [1.3.71] - 2026-10-20
 
 ### Added

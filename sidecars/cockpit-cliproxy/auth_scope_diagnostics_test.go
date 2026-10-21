@@ -182,13 +182,13 @@ func TestScopeFailureDiagnosticsAbsentAfterMatchingOrWithoutScope(t *testing.T) 
 func TestScopeFailureErrorMessageUsesHostTranslations(t *testing.T) {
 	selector := &cockpitSelector{locale: " JA-jp ", manifest: &manifest{GatewayErrorMessages: map[string]map[string]string{
 		"pool_unavailable":        {"ja": "利用可能なアカウントなし"},
-		"pool_diagnostic_detail":  {"ja": "{{model}}:{{candidate}}/{{scoped}}/{{available}}/{{unavailable}}/{{modelExcluded}}/{{quotaReserved}}/{{imageBlocked}}"},
+		"pool_diagnostic_detail":  {"ja": "{{model}}:{{candidate}}/{{scoped}}/{{available}}/{{unavailable}}/{{modelExcluded}}/{{imageBlocked}}"},
 		"scope_mismatch":          {"ja": "範囲外"},
 		"account_mapping_missing": {"ja": "アカウントとの対応付けなし"},
 	}}}
 	stats := authPoolSelectionStats{
 		candidateAuths: 7, scopedAuths: 0, availableAuths: 0, unavailableAuths: 1,
-		modelExcludedAuths: 2, quotaReservedAuths: 3, imagePolicyBlockedAuths: 4,
+		modelExcludedAuths: 2, imagePolicyBlockedAuths: 4,
 		scopeDiagnostics: []authPoolScopeDiagnostic{
 			{AccountID: "private-account-one", AccountEmail: "private-one@example.com", ReasonCode: "scope_mismatch"},
 			{AccountID: "private-account-two", ReasonCode: "scope_mismatch"},
@@ -198,7 +198,7 @@ func TestScopeFailureErrorMessageUsesHostTranslations(t *testing.T) {
 		},
 	}
 	err := selector.poolUnavailableError("gpt-6.1-sol", stats, "no auth available")
-	want := "利用可能なアカウントなし. gpt-6.1-sol:7/0/0/1/2/3/4 範囲外 アカウントとの対応付けなし bound_account_not_loaded bound_account_not_candidate"
+	want := "利用可能なアカウントなし. gpt-6.1-sol:7/0/0/1/2/4 範囲外 アカウントとの対応付けなし bound_account_not_loaded bound_account_not_candidate"
 	if err.Message != want {
 		t.Fatalf("localized scope error = %q, want %q", err.Message, want)
 	}

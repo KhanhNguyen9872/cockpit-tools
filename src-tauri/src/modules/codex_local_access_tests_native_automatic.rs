@@ -340,14 +340,7 @@ fn native_official_quota_reset_reopens_elapsed_windows_but_keeps_other_windows_a
     assert!(
         native_cooldown_wait(&states, &account.id, "gpt-fixture", true, Instant::now()).is_none()
     );
-    let mut reserved = collection;
-    reserved.bound_oauth_account_id = Some(account.id.clone());
-    reserved.bound_oauth_quota_reserve = Some(CodexLocalAccessQuotaReserve {
-        hourly_percent: 10,
-        weekly_percent: 10,
-        strict: false, safety_margin_percent: 3,
-});
-    assert!(!native_quota_allows(&reserved, &account));
+
 }
 
 #[test]

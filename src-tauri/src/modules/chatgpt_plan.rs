@@ -14,6 +14,9 @@ mod storage;
 mod types;
 #[path = "chatgpt_plan_runtime.rs"]
 mod runtime;
+#[path = "chatgpt_plan_official_health.rs"]
+mod official_health;
+pub(crate) use official_health::{official_route_snapshot, record_official_route_failure, record_official_route_success, fallback_epoch_matches, OfficialRouteSnapshot};
 pub(crate) use runtime::{official_runtime_overlay, authorization_epoch_matches};
 pub use status::check_authorization;
 pub(crate) use status::{observe_inference_result, token_fingerprint};

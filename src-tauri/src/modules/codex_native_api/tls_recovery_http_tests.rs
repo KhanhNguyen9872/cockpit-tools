@@ -6,7 +6,7 @@ use futures_util::{future::BoxFuture, StreamExt};
 use serde_json::{json, Value};
 use std::{
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -43,6 +43,8 @@ struct TlsHost {
     bootstrap_retries: u8,
     permits: Option<Arc<Semaphore>>,
     headers_observed: Arc<Notify>,
+    local_fallback: AtomicBool,
+    fallback_refreshes: Mutex<Vec<bool>>,
 }
 
 fn trusted_client(root: &reqwest::Certificate) -> reqwest::Client {
@@ -99,27 +101,35 @@ impl Host for TlsHost {
                 None => None,
             };
             let current = self.generation.lock().unwrap();
+            let local_fallback = self.local_fallback.load(Ordering::SeqCst);
+            let reselected_official = local_fallback && current.number > 0;
             let identity = format!("tls-generation-{}", current.number);
             self.routed
                 .lock()
                 .unwrap()
                 .push((request.clone(), identity.clone()));
             Ok(Route {
-                continuity_account_id: None,
+                continuity_account_id: reselected_official.then(|| "chatgpt_plan_grant".into()),
                 installation_profile: None,
                 official_authorization_revision: None,
-                official_registration_id: None,
+                official_registration_id: reselected_official.then(|| "grant".into()),
+                official_fallback_registration_id: (local_fallback && !reselected_official).then(|| "grant".into()),
+                official_fallback_authorization_revision: (local_fallback && !reselected_official).then(|| "epoch".into()),
+                authorization_scope_fingerprint: local_fallback.then(|| "scope".into()),
+                official_fallback_failure: (local_fallback && !reselected_official).then(|| OfficialFallbackFailure {
+                    trigger_stage: "health_pause", status: 0, code: "official_unavailable".into(), message: None, retry_after: None,
+                }),
                 transport_identity: Some(identity),
                 account_id: "account-a".into(),
-                owner_id: "owner-a".into(),
+                owner_id: if reselected_official { "official-owner" } else { "owner-a" }.into(),
                 base_url: self.base.clone(),
                 model: request.model,
                 headers: HeaderMap::new(),
                 client: current.client.clone(),
                 proxy_url: None,
                 proxy_route: None,
-                chatgpt: matches!(self.mode, Mode::Codex),
-                chatgpt_plan: matches!(self.mode, Mode::Plan),
+                chatgpt: matches!(self.mode, Mode::Codex) && !reselected_official,
+                chatgpt_plan: matches!(self.mode, Mode::Plan) || reselected_official,
                 wire_api: if matches!(self.mode, Mode::Chat) {
                     WireApi::Chat
                 } else {
@@ -130,6 +140,32 @@ impl Host for TlsHost {
                 default_service_tier: None,
                 permit,
             })
+        })
+    }
+    fn refresh_route<'a>(
+        &'a self,
+        caller: &'a Caller,
+        previous: &'a Route,
+        request: RouteRequest,
+    ) -> BoxFuture<'a, Result<Route, ServiceError>> {
+        Box::pin(async move {
+            if previous.official_fallback_registration_id.is_none() {
+                return self.route(caller, request).await;
+            }
+            self.fallback_refreshes.lock().unwrap().push(request.force_refresh);
+            let mut refreshed = self.route(caller, request).await?;
+            // Default selection has recovered to official. The refresh hook
+            // retains this turn's local namespace while renewing its client.
+            refreshed.continuity_account_id = previous.continuity_account_id.clone();
+            refreshed.owner_id = previous.owner_id.clone();
+            refreshed.official_registration_id = previous.official_registration_id.clone();
+            refreshed.official_fallback_registration_id = previous.official_fallback_registration_id.clone();
+            refreshed.official_fallback_authorization_revision = previous.official_fallback_authorization_revision.clone();
+            refreshed.authorization_scope_fingerprint = previous.authorization_scope_fingerprint.clone();
+            refreshed.official_fallback_failure = previous.official_fallback_failure.clone();
+            refreshed.chatgpt = previous.chatgpt;
+            refreshed.chatgpt_plan = previous.chatgpt_plan;
+            Ok(refreshed)
         })
     }
     fn execution_policy(&self) -> BoxFuture<'_, Result<ExecutionPolicy, ServiceError>> {
@@ -327,6 +363,8 @@ impl Fixture {
             bootstrap_retries: if before_output { 1 } else { 2 },
             permits: before_output.then(|| Arc::new(Semaphore::new(1))),
             headers_observed,
+            local_fallback: AtomicBool::new(false),
+            fallback_refreshes: Mutex::new(Vec::new()),
         });
         let path = std::env::temp_dir().join(format!(
             "native-tls-recovery-{}.sqlite",
@@ -515,9 +553,9 @@ async fn tls_decrypt_survives_chat_canonical_stream_and_next_request_recovers() 
     assert_tls_recovery(Mode::Chat).await;
 }
 
-#[tokio::test]
-async fn tls_decrypt_before_first_event_refreshes_same_transport_with_single_route_permit() {
+async fn assert_bootstrap_tls_recovery(local_fallback: bool) {
     let fixture = Fixture::start_with_phase(Mode::Codex, true).await;
+    fixture.host.local_fallback.store(local_fallback, Ordering::SeqCst);
     let client = reqwest::Client::builder()
         .no_proxy()
         .timeout(DEADLINE)
@@ -559,6 +597,7 @@ async fn tls_decrypt_before_first_event_refreshes_same_transport_with_single_rou
         assert_eq!(reports.len(), 1);
         assert!(reports[0].success);
         assert_eq!(reports[0].account_id, "account-a");
+        assert_eq!(reports[0].official_fallback_registration_id.as_deref(), local_fallback.then_some("grant"));
         assert!(!reports[0].credential_scope);
         let attempts = &reports[0].diagnostics.as_ref().unwrap().attempts;
         assert_eq!(attempts.len(), 2);
@@ -580,5 +619,16 @@ async fn tls_decrypt_before_first_event_refreshes_same_transport_with_single_rou
         fixture.host.permits.as_ref().unwrap().available_permits(),
         1
     );
+    assert_eq!(*fixture.host.fallback_refreshes.lock().unwrap(), if local_fallback { vec![false] } else { vec![] });
     fixture.shutdown().await;
+}
+
+#[tokio::test]
+async fn tls_decrypt_before_first_event_refreshes_same_transport_with_single_route_permit() {
+    assert_bootstrap_tls_recovery(false).await;
+}
+
+#[tokio::test]
+async fn official_fallback_tls_decrypt_refresh_keeps_local_namespace_when_official_recovers() {
+    assert_bootstrap_tls_recovery(true).await;
 }

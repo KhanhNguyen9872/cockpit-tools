@@ -20,6 +20,7 @@ pub(super) struct Transport {
     pub http: bool,
     pub local: bool,
     pub identity: Option<super::super::diagnostics::HeaderIdentity>,
+    pub(super) opening_retries: OpeningRetries,
 }
 
 pub(super) async fn passthrough(
@@ -89,7 +90,7 @@ pub(super) async fn open_with_retries(
     history.begin(prepared);
     if passthrough(state, caller, prepared).await? {
         match open_response(state, prepared, tracker, policy, deadline, retries).await {
-            Ok((socket, initial, identity)) => {
+            Ok((socket, initial, identity, opening_retries)) => {
                 history.begin(prepared);
                 let (sink, source) = socket.split();
                 let source = stream::iter(initial.into_iter().map(Ok))
@@ -111,6 +112,7 @@ pub(super) async fn open_with_retries(
                     http: false,
                     local: false,
                     identity: Some(identity),
+                    opening_retries,
                 });
             }
             Err(error) if error.status == 426 && error.code == "websocket_upstream_rejected" => {
@@ -133,6 +135,7 @@ pub(super) async fn open_with_retries(
             http: true,
             local: true,
             identity: None,
+            opening_retries: OpeningRetries::default(),
         });
     }
     let body = history.replay(prepared)?;
@@ -197,6 +200,7 @@ pub(super) async fn open_with_retries(
         http: true,
         local: false,
         identity: None,
+        opening_retries: OpeningRetries::default(),
     })
 }
 

@@ -4,6 +4,10 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
 struct Options {
+    api_service: bool,
+    profile_dir: PathBuf,
+    draft_snapshot: Option<Value>,
+    draft_approval_rejection: Option<&'static str>,
     startup: Option<Arc<StartupReload>>,
     prepare_failures: usize,
     prepare_reason: &'static str,
@@ -18,6 +22,7 @@ struct Options {
     reload_rejections: Vec<&'static str>,
     disconnect_on_reload: bool,
     active_new_context: bool,
+    capability_only: bool,
     rejected_new_context: Option<&'static str>,
     metadata_length: Option<u64>,
 }
@@ -25,6 +30,10 @@ struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            api_service: false,
+            profile_dir: PathBuf::new(),
+            draft_snapshot: None,
+            draft_approval_rejection: None,
             startup: Some(Arc::new(StartupReload::new())),
             prepare_failures: 0,
             prepare_reason: "unsupported-gates",
@@ -39,6 +48,7 @@ impl Default for Options {
             reload_rejections: Vec::new(),
             disconnect_on_reload: false,
             active_new_context: true,
+            capability_only: false,
             rejected_new_context: None,
             metadata_length: Some(32),
         }
@@ -78,6 +88,8 @@ async fn start(options: Options) -> Running {
     let navigations = Arc::new(AtomicU64::new(0));
     let server_navigations = navigations.clone();
     let startup = options.startup.clone();
+    let profile_dir = options.profile_dir.clone();
+    let api_service = options.api_service;
     let server = tokio::spawn(async move {
         let (socket, _) = listener.accept().await.unwrap();
         let mut socket = tokio_tungstenite::accept_async(socket).await.unwrap();
@@ -138,9 +150,17 @@ async fn start(options: Options) -> Running {
                         if let Some(reason) = options.inspect_sequence.get(inspections - 1) {
                             json!({"ok":false,"reason":reason})
                         } else if inspections <= options.inspect_failures {
-                            json!({"ok":false,"reason":options.inspect_reason})
+                            json!({"ok":false,"reason":options.inspect_reason,"draft":options.draft_snapshot})
                         } else {
                             json!({"ok":true,"reason":"clean-startup"})
+                        }
+                    } else if expression
+                        .starts_with("window.__cockpitStartupGuard.approveSavedDraft(")
+                    {
+                        if let Some(reason) = options.draft_approval_rejection {
+                            json!({"ok":false,"reason":reason})
+                        } else {
+                            json!({"ok":true,"reason":"saved-home-draft"})
                         }
                     } else if let Some(nonce) = argument(expression, "reloadPreparedDocument") {
                         assert_eq!(Some(&nonce), prepared_nonce.as_ref());
@@ -164,7 +184,11 @@ async fn start(options: Options) -> Running {
                             if let Some(reason) = options.rejected_new_context {
                                 json!({"state":"unsupported","reason":reason})
                             } else if options.active_new_context {
-                                json!({"state":"active"})
+                                if options.capability_only {
+                                    json!({"state":"active-capability","reason":"capability-only-quota-provider-not-unique"})
+                                } else {
+                                    json!({"state":"active"})
+                                }
                             } else {
                                 json!({"state":"pending"})
                             }
@@ -255,10 +279,11 @@ async fn start(options: Options) -> Running {
     let (stop, stop_rx) = watch::channel(false);
     let runtime = tokio::spawn(run(
         format!("ws://{address}/devtools/page/mock"),
+        profile_dir,
         true,
         true,
         true,
-        true,
+        api_service,
         startup,
         stop_rx,
     ));
@@ -384,6 +409,25 @@ async fn fresh_launch_registers_then_reloads_once_and_requires_module_evaluation
 }
 
 #[tokio::test]
+async fn capability_only_activation_reports_partial_state_and_never_claims_full_activation() {
+    let mut runtime = start(Options {
+        api_service: true,
+        capability_only: true,
+        ..Options::default()
+    })
+    .await;
+    let notice = runtime
+        .notice("activation", Some("capability-only-quota-provider-not-unique"))
+        .await;
+    assert_eq!(notice["state"], "active-capability");
+    assert_eq!(runtime.navigations.load(Ordering::Acquire), 1);
+    let calls = runtime.finish(false).await;
+    assert_eq!(methods(&calls, "Page.addScriptToEvaluateOnNewDocument"), 1);
+    assert_eq!(methods(&calls, "Page.removeScriptToEvaluateOnNewDocument"), 1);
+    assert_safe_protocol(&calls);
+}
+
+#[tokio::test]
 async fn restored_running_page_registers_but_never_reloads() {
     let mut runtime = start(Options {
         startup: None,
@@ -401,6 +445,65 @@ async fn restored_running_page_registers_but_never_reloads() {
         0
     );
     assert_safe_protocol(&calls);
+}
+
+#[tokio::test]
+async fn saved_native_home_draft_activates_once_but_stale_disk_or_editor_proof_never_navigates() {
+    let dir = tempfile::tempdir().unwrap();
+    let snapshot = json!({"placement":"home","document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"saved draft"}]}]}});
+    let state = json!({"electron-persisted-atom-state":{
+        "draft-thread-identities-v1":{"new-conversation":"client-new-thread:fixture"},
+        "composer-prompt-drafts-v2":{"client-new-thread:fixture":{"prompt":{"document":snapshot["document"],"plainTextMode":false}}}
+    }});
+    let path = dir.path().join(".codex-global-state.json");
+    tokio::fs::write(&path, serde_json::to_vec(&state).unwrap())
+        .await
+        .unwrap();
+    let mut runtime = start(Options {
+        profile_dir: dir.path().to_path_buf(),
+        draft_snapshot: Some(snapshot.clone()),
+        inspect_failures: 1,
+        inspect_reason: "draft-present",
+        ..Options::default()
+    })
+    .await;
+    runtime.notice("activation", Some("module-evaluated")).await;
+    assert_eq!(runtime.navigations.load(Ordering::Acquire), 1);
+    let calls = runtime.finish(false).await;
+    assert_eq!(
+        expressions(&calls, "window.__cockpitStartupGuard.approveSavedDraft()"),
+        1
+    );
+    assert_safe_protocol(&calls);
+
+    for stale_disk in [false, true] {
+        if stale_disk {
+            tokio::fs::write(&path, b"{}").await.unwrap();
+        }
+        let mut runtime = start(Options {
+            profile_dir: dir.path().to_path_buf(),
+            draft_snapshot: Some(snapshot.clone()),
+            inspect_failures: usize::MAX,
+            inspect_reason: "draft-present",
+            draft_approval_rejection: Some("draft-present"),
+            ..Options::default()
+        })
+        .await;
+        runtime.notice("document", Some("draft-present")).await;
+        assert_eq!(runtime.navigations.load(Ordering::Acquire), 0);
+        let calls = runtime.finish(false).await;
+        assert_eq!(
+            expressions(&calls, "window.__cockpitStartupGuard.approveSavedDraft()"),
+            usize::from(!stale_disk)
+        );
+        assert_eq!(
+            expressions(
+                &calls,
+                "window.__cockpitNativeFast.reloadPreparedDocument()"
+            ),
+            0
+        );
+    }
 }
 
 #[tokio::test]
@@ -1046,6 +1149,7 @@ async fn handoff_uses_one_nonce_and_keeps_new_document_script_small() {
         .unwrap();
     assert!(script.contains(&format!("consumeHandoff({})", json!(nonce))));
     assert!(script.contains("\"apiKeyAuthVerified\":true"));
+    assert!(script.contains("\"apiService\":false"));
     assert!(script.len() < 200_000);
     for expression in calls
         .iter()
@@ -1069,6 +1173,29 @@ async fn handoff_uses_one_nonce_and_keeps_new_document_script_small() {
             .count(),
         1
     );
+    assert_safe_protocol(&calls);
+}
+
+#[tokio::test]
+async fn api_service_binding_is_carried_into_the_new_document_and_revoked_on_cleanup() {
+    let mut runtime = start(Options { api_service: true, ..Options::default() }).await;
+    runtime.notice("activation", Some("module-evaluated")).await;
+    let calls = runtime.finish(false).await;
+    let script = calls.iter()
+        .find(|call| call["method"] == "Page.addScriptToEvaluateOnNewDocument")
+        .unwrap()["params"]["source"].as_str().unwrap();
+    assert!(script.contains("\"apiService\":true"));
+    // The CDP startup script must retain native dictation eligibility and
+    // transcription rather than installing either retired audio adapter.
+    assert!(!script.contains("function capability("));
+    assert!(!script.contains("function policyOverride("));
+    assert!(!script.contains("function installCockpitDictation("));
+    assert!(!script.contains("/audio/transcriptions"));
+    assert!(!script.contains("__cockpitDictationBridge_"));
+    assert!(script.contains("previous.apiDictation = false"));
+    assert!(script.contains("capability = nativeValue => nativeValue"));
+    assert!(calls.iter().filter_map(|call| call["params"]["expression"].as_str())
+        .any(|value| value.contains("s.apiService=false;")));
     assert_safe_protocol(&calls);
 }
 
@@ -1183,6 +1310,7 @@ async fn disabled_and_stopped_sessions_do_not_connect() {
     let (_, receiver) = watch::channel(false);
     assert!(run(
         "invalid".to_string(),
+        PathBuf::new(),
         false,
         false,
         false,
@@ -1195,10 +1323,11 @@ async fn disabled_and_stopped_sessions_do_not_connect() {
     let (_, receiver) = watch::channel(true);
     assert!(run(
         "invalid".to_string(),
+        PathBuf::new(),
         true,
         true,
         true,
-        true,
+        false,
         None,
         receiver
     )

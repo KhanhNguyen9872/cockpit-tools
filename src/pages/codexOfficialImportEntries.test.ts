@@ -18,7 +18,7 @@ function evaluate(code: string, context: Record<string, unknown>) {
   return vm.runInNewContext(ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } }).outputText, { require, exports: {}, ...context });
 }
 for (const file of ['./useCodexAccountsBaseController.tsx', './useCodexAccountsAccessController.tsx']) {
-  test(`${file}: explicit import requests one batch and keeps API-key accounts on their existing path`, async () => {
+  test(`${file}: explicit import adds unbound accounts locally without requesting authorization`, async () => {
     const source = parse(file);
     const condition = file.includes('Base') ? 'explicitApiServiceChoiceRef.current' : 'options.addToApiService';
     const block = all(source, (node) => ts.isIfStatement(node) && node.expression.getText(source) === condition)[0] as ts.IfStatement;
@@ -28,12 +28,12 @@ for (const file of ['./useCodexAccountsBaseController.tsx', './useCodexAccountsA
     const appended: string[][] = [];
     const run = evaluate(`(async () => { let accountIds = ['a', 'b', 'api']; ${block.thenStatement.getText(source)} return accountIds; })`, {
       explicitApiServiceChoiceRef: { current: true }, result: { imported },
+      failures: [],
       codexService: { listCodexAccounts: async () => imported },
       listChatGptPlanAccounts: async () => [], canChooseCodexServiceAuthorization: (account: { oauth: boolean }) => account.oauth,
       localAccessState: { collection: { accountIds: [] } }, localAccessCollection: { accountIds: [] },
       prepareCodexServiceJoins: async (accounts: typeof imported) => ({
-        choiceIds: accounts.filter((account) => account.oauth).map((account) => account.id),
-        localIds: accounts.filter((account) => !account.oauth).map((account) => account.id), resumedIds: [],
+        localIds: accounts.map((account) => account.id), resumedIds: [], failures: [],
       }),
       t: (key: string) => key,
       requestCodexServiceAuthorizations: (ids: string[]) => requested.push(Array.from(ids)),
@@ -42,10 +42,61 @@ for (const file of ['./useCodexAccountsBaseController.tsx', './useCodexAccountsA
       ensureLocalAccessEntryVisible: async () => {}, window: { dispatchEvent() {} }, Event,
     });
     const remaining = await run();
-    assert.deepEqual(requested, [['a', 'b']]);
-    if (file.includes('Base')) assert.deepEqual(Array.from(remaining), ['api']);
-    else assert.deepEqual(appended, [['api']]);
+    assert.deepEqual(requested, []);
+    if (file.includes('Base')) assert.deepEqual(Array.from(remaining), ['a', 'b', 'api']);
+    else assert.deepEqual(appended, [['a', 'b', 'api']]);
   });
+}
+
+for (const file of ['./useCodexAccountsBaseController.tsx', './useCodexAccountsAccessController.tsx']) {
+  for (const localIds of [['before', 'after'], []]) {
+    test(`${file}: report stale authorization after committing ${localIds.length ? 'other local accounts' : 'other official accounts'}`, async () => {
+      const source = parse(file);
+      const base = file.includes('Base');
+      const imported = ['before', 'stale', 'after'].map((id) => ({ id, email: `${id}@example.test` }));
+      const prepared = {
+        localIds, resumedIds: ['official'],
+        failures: [{ accountId: 'stale', error: new Error('CHATGPT_PLAN_REAUTH_REQUIRED') }],
+      };
+      const appended: string[][] = [], states: unknown[] = [], events: string[] = [];
+      const state = { collection: { accountIds: ['official', ...localIds] } };
+      const context = {
+        useCallback: (action: unknown) => action,
+        explicitApiServiceChoiceRef: { current: true }, syncImportedToApiService: true,
+        result: { imported }, codexService: { listCodexAccounts: async () => imported },
+        localAccessState: { collection: { accountIds: [] } }, localAccessCollection: { accountIds: [] },
+        listChatGptPlanAccounts: async () => [], canChooseCodexServiceAuthorization: () => true,
+        prepareCodexServiceJoins: async () => prepared,
+        implicitCodexServiceAccountIds: (ids: string[]) => ids,
+        maskAccountText: (text: string) => text.replace('@example.test', '@masked'),
+        resolveCodexAccountDisplayName: (account: { email: string }) => account.email,
+        chatGptPlanErrorKey: () => 'chatgptPlan.error.reauthRequired',
+        t: (key: string, fallback?: string) => key === 'chatgptPlan.error.reauthRequired' ? 'Please reauthorize' : fallback ?? key,
+        codexLocalAccessService: { appendCodexLocalAccessAccounts: async (ids: string[]) => {
+          appended.push(Array.from(ids)); events.push('append'); return { state, syncedAccountIds: ids };
+        } },
+        setLocalAccessState: (value: unknown) => { states.push(value); events.push('state'); },
+        ensureLocalAccessEntryVisible: async () => {}, setImportApiServiceGuideCount() {}, setLocalAccessSaving() {},
+        window: { dispatchEvent() {} }, Event,
+      };
+      let message: string;
+      if (base) {
+        const declaration = all(source, (node) => ts.isVariableDeclaration(node) && node.name.getText(source) === 'syncImportedAccountsToApiService')[0] as ts.VariableDeclaration;
+        const run = evaluate(`(${declaration.initializer!.getText(source)})`, context);
+        try { await run(imported.map((account) => account.id)); assert.fail('partial failure must reach the import error handler'); }
+        catch (error) { message = String(error); }
+      } else {
+        const block = all(source, (node) => ts.isIfStatement(node) && node.expression.getText(source) === 'options.addToApiService')[0] as ts.IfStatement;
+        const run = evaluate(`(async () => { let apiServiceError = null; ${block.thenStatement.getText(source)} return apiServiceError; })`, context);
+        message = await run();
+      }
+      assert.match(message!, /stale@masked: Please reauthorize/);
+      assert.doesNotMatch(message!, /CHATGPT_PLAN_REAUTH_REQUIRED/);
+      assert.deepEqual(appended, localIds.length ? [localIds] : []);
+      assert.deepEqual(states, localIds.length ? [state] : []);
+      assert.deepEqual(events, localIds.length ? ['append', 'state'] : []);
+    });
+  }
 }
 
 test('compact and table add actions carry the same official badge and use the shared join handler', () => {

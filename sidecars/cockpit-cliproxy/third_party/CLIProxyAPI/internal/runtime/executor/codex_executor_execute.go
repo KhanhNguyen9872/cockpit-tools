@@ -206,6 +206,7 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 	outputItemsByIndex := make(map[int64][]byte)
 	var outputItemsFallback [][]byte
 	sawOutputDelta := false
+	replaySafe := true
 	for _, line := range lines {
 		if !bytes.HasPrefix(line, dataTag) {
 			continue
@@ -236,9 +237,10 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 			if errClearReplay := clearCodexReasoningReplayOnInvalidSignature(ctx, replayScope, streamErr.StatusCode(), terminalBody); errClearReplay != nil {
 				return resp, errClearReplay
 			}
-			err = streamErr
+			err = helps.CodexStopAfterExecution(streamErr, replaySafe && helps.CodexEventHasNoExecution(eventData))
 			return resp, err
 		}
+		replaySafe = replaySafe && helps.CodexHandshakeMetadataEvent(eventData)
 
 		if eventType == "response.output_item.done" {
 			itemResult := gjson.GetBytes(eventData, "item")

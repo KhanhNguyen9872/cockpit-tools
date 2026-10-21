@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canChooseCodexServiceAuthorization, rebaseCodexMemberSelection, requestCodexServiceAuthorization, requestCodexServiceAuthorizations, takeCodexServiceAuthorizationRequests, requestCodexOfficialAuthorizationCheck, takeCodexOfficialAuthorizationCheck, isCodexOfficialAuthorizationCheckCurrent, retryCodexOfficialAuthorizationCheck } from './codexAccountServiceNavigation';
+import { canChooseCodexServiceAuthorization, rebaseCodexMemberSelection, requestCodexServiceAuthorization, requestCodexServiceAuthorizations, takeCodexServiceAuthorizationRequests } from './codexAccountServiceNavigation';
 import type { CodexAccount } from '../types/codex';
 
 test('dual authorization choices exclude credential kinds that cannot bind a Codex identity', () => {
@@ -9,33 +9,6 @@ test('dual authorization choices exclude credential kinds that cannot bind a Cod
   for (const extra of [{ auth_mode: 'apikey' }, { token_source_mode: 'chatgpt_web_session' }, { agent_identity: { agent_runtime_id: 'runtime' } }, { authorization_status: 'pending' }, { api_provider_mode: 'custom' }, { upstream_grok_account_id: 'grok' }, { api_provider_id: 'provider' }, { openai_api_key: 'key' }]) {
     assert.equal(canChooseCodexServiceAuthorization({ ...account, ...extra } as CodexAccount), false);
   }
-});
-
-test('page checks share one run; explicit restart reopens and late old checks cannot acknowledge it', () => {
-  const previous = globalThis.window;
-  Object.assign(globalThis, { window: new EventTarget() });
-  try {
-    requestCodexOfficialAuthorizationCheck({ running: false, stopped: true });
-    assert.equal(takeCodexOfficialAuthorizationCheck(), null);
-    requestCodexOfficialAuthorizationCheck({ running: true });
-    assert.equal(takeCodexOfficialAuthorizationCheck(false), null, 'hidden page does not consume a page prompt');
-    const first = takeCodexOfficialAuthorizationCheck()!;
-    assert.equal(typeof first, 'number');
-    requestCodexOfficialAuthorizationCheck({ running: true });
-    assert.equal(takeCodexOfficialAuthorizationCheck(), null, 'other page and ordinary refresh cannot repeat it');
-    requestCodexOfficialAuthorizationCheck({ running: true, restarted: true });
-    const restarted = takeCodexOfficialAuthorizationCheck(false)!;
-    assert.notEqual(first, restarted);
-    assert.equal(isCodexOfficialAuthorizationCheckCurrent(first), false);
-    retryCodexOfficialAuthorizationCheck(first);
-    requestCodexOfficialAuthorizationCheck({ running: true });
-    assert.equal(takeCodexOfficialAuthorizationCheck(), null);
-    retryCodexOfficialAuthorizationCheck(restarted);
-    requestCodexOfficialAuthorizationCheck({ running: true });
-    assert.equal(takeCodexOfficialAuthorizationCheck(), restarted, 'failed metadata can be retried without declaring a new run');
-    requestCodexOfficialAuthorizationCheck({ running: false, stopped: true });
-    assert.equal(isCodexOfficialAuthorizationCheckCurrent(restarted), false);
-  } finally { Object.assign(globalThis, { window: previous }); }
 });
 
 test('batch entry emits one request and normalizes/deduplicates source IDs', () => {
@@ -75,27 +48,6 @@ test('entry requests preserve explicit mode, queue batch accounts and deduplicat
   } finally { Object.assign(globalThis, { window: previous }); }
 });
 
-
-test('late stopped-state reads from keep-alive pages cannot erase a launch-preview prompt', () => {
-  const previous = globalThis.window;
-  Object.assign(globalThis, { window: new EventTarget() });
-  try {
-    requestCodexOfficialAuthorizationCheck({ running: false, stopped: true });
-    requestCodexOfficialAuthorizationCheck({ running: true });
-    const previousPageCheck = takeCodexOfficialAuthorizationCheck()!;
-    requestCodexOfficialAuthorizationCheck({ running: true, restarted: true });
-    // A background page started its get_state before the explicit activation.
-    requestCodexOfficialAuthorizationCheck({ running: false });
-    const launchCheck = takeCodexOfficialAuthorizationCheck(false)!;
-    assert.equal(typeof launchCheck, 'number');
-    assert.notEqual(launchCheck, previousPageCheck);
-    assert.equal(isCodexOfficialAuthorizationCheckCurrent(launchCheck), true);
-    requestCodexOfficialAuthorizationCheck({ running: true });
-    assert.equal(takeCodexOfficialAuthorizationCheck(), null, 'ordinary refresh still deduplicates');
-    requestCodexOfficialAuthorizationCheck({ running: false, stopped: true });
-    assert.equal(isCodexOfficialAuthorizationCheckCurrent(launchCheck), false, 'an explicit stop still invalidates the run');
-  } finally { Object.assign(globalThis, { window: previous }); }
-});
 
 test('draft results are separate from live membership events and delivered once per source', async () => {
   const nav = await import('./codexAccountServiceNavigation');

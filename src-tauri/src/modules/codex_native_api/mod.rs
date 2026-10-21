@@ -47,6 +47,9 @@ mod multi_agent_lifecycle_http_tests;
 #[cfg(test)]
 mod tls_recovery_http_tests;
 mod native_chat;
+mod official_fallback;
+#[cfg(test)]
+mod official_fallback_http_tests;
 mod output_error;
 mod output_items;
 mod output_usage;

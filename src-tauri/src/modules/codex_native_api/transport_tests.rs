@@ -61,6 +61,10 @@ impl Host for PolicyHost {
                 installation_profile: None,
                 official_authorization_revision: None,
                 official_registration_id: None,
+                official_fallback_registration_id: None,
+                official_fallback_authorization_revision: None,
+                authorization_scope_fingerprint: None,
+                official_fallback_failure: None,
                 transport_identity: None,
                 account_id: "a".into(),
                 owner_id: "a".into(),
@@ -301,6 +305,7 @@ async fn native_transport_terminal_record_survives_tracker_drop() {
         },
         "m",
     );
+    tracker.begin_attempt("http");
     tracker.complete(200, true, None, None).await;
     drop(tracker);
     assert!(activity.tasks.load(Ordering::SeqCst) > 0);
@@ -352,6 +357,10 @@ async fn native_transport_rejects_forged_websocket_accept() {
         installation_profile: None,
         official_authorization_revision: None,
         official_registration_id: None,
+        official_fallback_registration_id: None,
+        official_fallback_authorization_revision: None,
+        authorization_scope_fingerprint: None,
+                official_fallback_failure: None,
         transport_identity: None,
         account_id: "a".into(),
         owner_id: "a".into(),

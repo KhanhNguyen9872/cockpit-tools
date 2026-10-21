@@ -18,6 +18,9 @@ use super::{
     server::{downstream_response, AppState},
 };
 
+#[path = "http_pre_business.rs"]
+mod pre_business;
+
 pub(super) async fn responses(State(state): State<Arc<AppState>>, request: Request) -> Response {
     handle(state, request, false)
         .await
@@ -202,7 +205,7 @@ pub(super) async fn dispatch_responses(
     tracker.routed(&caller, &prepared.route, &requested_model);
     tracker.routing_identity(&prepared.request);
     tracker.track_rebuild(prepared.binding.rebuild_abort_handle());
-    tracker.request_metadata(&prepared.body);
+    tracker.prepared_metadata(&prepared);
     if let Some(raw) = raw_chat {
         if prepared.route.wire_api == super::contract::WireApi::Chat {
             protocol.native();
@@ -251,7 +254,7 @@ pub(super) async fn dispatch_selected(
     tracker.routed(&caller, &prepared.route, &requested_model);
     tracker.routing_identity(&prepared.request);
     tracker.track_rebuild(prepared.binding.rebuild_abort_handle());
-    tracker.request_metadata(&prepared.body);
+    tracker.prepared_metadata(&prepared);
     forward(state, prepared, false, client_stream, tracker).await
 }
 
@@ -436,13 +439,19 @@ async fn forward_with_policy(
     }
     if is_sse && status.is_success() && client_stream {
         let event_limit = state.options.max_event_bytes;
+        let fence = super::bootstrap::Fence::new(!prepared.route.chatgpt_plan);
         let stream_state = StreamingResponse {
             state,
             prepared,
             upstream,
             decoder: SseDecoder::new(event_limit),
-            observation: ResponseObservation::default(),
+            observation: ResponseObservation {
+                retry_after: retry_after_headers(&headers),
+                ..Default::default()
+            },
             tracker,
+            fence,
+            recovery_generation: 0,
             finished: false,
             sequence: 0,
             pending_error: None,
@@ -483,9 +492,9 @@ async fn forward_with_policy(
                             Err(error) => Err(error),
                         }
                     }
-                    Ok(None) => match current.decoder.finish_frames() {
+                    Ok(None) => { let generation=current.recovery_generation; match current.decoder.finish_frames() {
                         Ok(frames) => match current.observe_frames(frames).await {
-                            Ok(bytes) if current.observation.terminal => Ok(bytes),
+                            Ok(bytes) if current.observation.terminal || generation!=current.recovery_generation => Ok(bytes),
                             Ok(bytes) => {
                                 let error = ServiceError::new(
                                     502,
@@ -502,7 +511,7 @@ async fn forward_with_policy(
                             Err(error) => Err(error),
                         },
                         Err(error) => Err(error),
-                    },
+                    }},
                     Ok(Some(Err(error))) => Err(transport_failure(
                         502,
                         "upstream_stream_error",
@@ -544,7 +553,8 @@ async fn forward_with_policy(
     }
     if is_sse && status.is_success() {
         let mut observation =
-            match collect_sse(&state, &prepared, upstream, &mut tracker, &policy, deadline).await {
+            match collect_sse(&state, &mut prepared, upstream, &mut tracker, &policy, deadline,
+                retry_after_headers(&headers)).await {
                 Ok(observation) => observation,
                 Err(error) => {
                     tracker.fail(&error).await;
@@ -755,6 +765,8 @@ struct StreamingResponse {
     observation: ResponseObservation,
     tracker: RequestTracker,
     finished: bool,
+    fence: super::bootstrap::Fence,
+    recovery_generation: u64,
     sequence: u64,
     pending_error: Option<ServiceError>,
     policy: ExecutionPolicy,
@@ -767,10 +779,23 @@ impl StreamingResponse {
     async fn observe_frames(&mut self, frames: Vec<SseFrame>) -> Result<Bytes, ServiceError> {
         let mut bytes = Vec::new();
         for frame in frames {
+            if let Some(opened)=pre_business::recover(&self.state,&mut self.prepared,&mut self.tracker,
+                &mut self.fence,&frame,self.observation.retry_after,&self.policy,self.deadline,true).await? {
+                self.recovery_generation=self.recovery_generation.saturating_add(1);
+                self.upstream=opened.bytes;
+                self.decoder=SseDecoder::new(self.state.options.max_event_bytes);
+                self.observation=ResponseObservation { retry_after:retry_after_headers(&opened.headers),..Default::default() };
+                self.idle_deadline=tokio::time::Instant::now()+self.policy.idle_timeout;
+                return Ok(bytes.into());
+            }
             if let Some(event) = frame.value {
                 if self.prepared.route.chatgpt_plan {
                     super::chatgpt_plan_wire::validate_event(frame.identity_event.as_ref().unwrap_or(&event))?;
                 }
+                observe_late_official_rejection(
+                    &self.state, &self.prepared, frame.identity_event.as_ref().unwrap_or(&event),
+                    self.observation.retry_after, self.deadline,
+                ).await?;
                 let event_sequence = event
                     .get("sequence_number")
                     .and_then(Value::as_u64)
@@ -894,18 +919,23 @@ async fn read_bounded(
 }
 
 async fn collect_sse(
-    state: &AppState,
-    prepared: &Prepared,
+    state: &Arc<AppState>,
+    prepared: &mut Prepared,
     mut stream: super::upstream::ByteStream,
     tracker: &mut RequestTracker,
     policy: &ExecutionPolicy,
     deadline: tokio::time::Instant,
+    initial_retry_after: Option<std::time::Duration>,
 ) -> Result<ResponseObservation, ServiceError> {
     let mut decoder = SseDecoder::new(state.options.max_event_bytes);
-    let mut observation = ResponseObservation::default();
+    let mut observation = ResponseObservation {
+        retry_after: initial_retry_after,
+        ..Default::default()
+    };
+    let mut fence=super::bootstrap::Fence::new(!prepared.route.chatgpt_plan);
     let mut total = 0usize;
     let mut stop = state.stop.clone();
-    loop {
+    'read: loop {
         let next = tokio::select! {
             _ = stop.wait() => return Err(stopping_error()),
             _ = tokio::time::sleep_until(deadline) => return Err(super::retry::total_timeout()),
@@ -926,10 +956,22 @@ async fn collect_sse(
                     ));
                 }
                 for frame in decoder.push_frames(&chunk)? {
+                    if let Some(opened)=pre_business::recover(state,prepared,tracker,&mut fence,&frame,
+                        observation.retry_after,policy,deadline,false).await? {
+                        stream=opened.bytes;
+                        decoder=SseDecoder::new(state.options.max_event_bytes);
+                        observation=ResponseObservation { retry_after:retry_after_headers(&opened.headers),..Default::default() };
+                        total=0;
+                        continue 'read;
+                    }
                     let Some(event) = frame.value else { continue };
                     if prepared.route.chatgpt_plan {
                         super::chatgpt_plan_wire::validate_event(frame.identity_event.as_ref().unwrap_or(&event))?;
                     }
+                    observe_late_official_rejection(
+                        state, prepared, frame.identity_event.as_ref().unwrap_or(&event),
+                        observation.retry_after, deadline,
+                    ).await?;
                     if frame.identity_event.is_some() {
                         prepared.binding.abort_rebuild();
                     }
@@ -960,10 +1002,22 @@ async fn collect_sse(
             }
             None => {
                 for frame in decoder.finish_frames()? {
+                    if let Some(opened)=pre_business::recover(state,prepared,tracker,&mut fence,&frame,
+                        observation.retry_after,policy,deadline,false).await? {
+                        stream=opened.bytes;
+                        decoder=SseDecoder::new(state.options.max_event_bytes);
+                        observation=ResponseObservation { retry_after:retry_after_headers(&opened.headers),..Default::default() };
+                        total=0;
+                        continue 'read;
+                    }
                     let Some(event) = frame.value else { continue };
                     if prepared.route.chatgpt_plan {
                         super::chatgpt_plan_wire::validate_event(frame.identity_event.as_ref().unwrap_or(&event))?;
                     }
+                    observe_late_official_rejection(
+                        state, prepared, frame.identity_event.as_ref().unwrap_or(&event),
+                        observation.retry_after, deadline,
+                    ).await?;
                     if frame.identity_event.is_some() {
                         prepared.binding.abort_rebuild();
                     }
@@ -989,6 +1043,44 @@ async fn collect_sse(
                     "Upstream stream ended without a final response",
                 ));
             }
+        }
+    }
+}
+
+// A late terminal rejection is real route-health evidence even after business
+// output makes replay unsafe. This observer never selects or resends a route.
+async fn observe_late_official_rejection(
+    state: &AppState,
+    prepared: &Prepared,
+    event: &Value,
+    previous_retry_after: Option<std::time::Duration>,
+    deadline: tokio::time::Instant,
+) -> Result<(), ServiceError> {
+    if !prepared.route.chatgpt_plan || !matches!(
+        super::events::response_terminal_kind(event), Some("error" | "response.failed")
+    ) {
+        return Ok(());
+    }
+    let Some((code, status)) = super::official_fallback::explicit_rejection(event) else {
+        return Ok(());
+    };
+    let failure = super::contract::OfficialFallbackFailure {
+        trigger_stage: "upstream", status, code,
+        message: super::diagnostics::upstream_error_metadata_status(status, event).0,
+        retry_after: previous_retry_after.max(super::events::retry_after_event(event)),
+    };
+    let mut stop = state.stop.clone();
+    let observation_deadline = deadline.min(tokio::time::Instant::now() + state.options.request_timeout);
+    tokio::select! {
+        _ = stop.wait() => Err(stopping_error()),
+        result = tokio::time::timeout_at(observation_deadline,
+            state.host.observe_official_failure(&prepared.route, &prepared.route.model, &failure)) => {
+            if result.is_err() {
+                crate::modules::logger::log_warn(
+                    "[NativeAPI] official_health_observation_timeout; preserving upstream rejection",
+                );
+            }
+            Ok(())
         }
     }
 }
@@ -1208,3 +1300,7 @@ mod response_format_tests;
 #[cfg(test)]
 #[path = "preparation_timeout_tests.rs"]
 mod preparation_timeout_tests;
+
+#[cfg(test)]
+#[path = "official_late_rejection_tests.rs"]
+mod official_late_rejection_tests;

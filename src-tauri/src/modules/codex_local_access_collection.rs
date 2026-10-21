@@ -133,7 +133,10 @@ fn save_collection_to_disk(collection: &CodexLocalAccessCollection) -> Result<()
     save_collection_to_path(&path, collection)
 }
 
-fn save_collection_to_path(path: &Path, collection: &CodexLocalAccessCollection) -> Result<(), String> {
+fn save_collection_to_path(
+    path: &Path,
+    collection: &CodexLocalAccessCollection,
+) -> Result<(), String> {
     update_string_atomic(path, |current| {
         let mut next = collection.clone();
         next.image_generation_main_model =
@@ -144,26 +147,41 @@ fn save_collection_to_path(path: &Path, collection: &CodexLocalAccessCollection)
             // Explicit body-recording choices must survive every full collection write.
             match serde_json::from_str::<Value>(current) {
                 Ok(current) => {
-                    if next.chatgpt_plan_service_revision < current
-                        .get("chatgptPlanServiceRevision").and_then(Value::as_u64).unwrap_or(0) {
+                    if next.chatgpt_plan_service_revision
+                        < current
+                            .get("chatgptPlanServiceRevision")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0)
+                    {
                         return Err("CHATGPT_PLAN_SERVICE_CHANGED".to_string());
                     }
                     // Only membership transactions resume a paused member. A
                     // settings snapshot may remove it explicitly but cannot resume it.
                     if let Some(paused) = current.get("pausedAccountIds") {
-                        let paused: Vec<String> = serde_json::from_value(paused.clone()).map_err(|_| "CHATGPT_PLAN_STORAGE_FAILED")?;
-                        next.paused_account_ids = paused.into_iter().filter(|id| next.account_ids.contains(id)).collect();
+                        let paused: Vec<String> = serde_json::from_value(paused.clone())
+                            .map_err(|_| "CHATGPT_PLAN_STORAGE_FAILED")?;
+                        next.paused_account_ids = paused
+                            .into_iter()
+                            .filter(|id| next.account_ids.contains(id))
+                            .collect();
                     }
                     if let Some(fingerprints) = current.get("serviceAccountIdentityFingerprints") {
-                        next.service_account_identity_fingerprints = serde_json::from_value(fingerprints.clone()).map_err(|_| "CHATGPT_PLAN_STORAGE_FAILED")?;
-                        next.service_account_identity_fingerprints.retain(|id, _| next.account_ids.contains(id));
+                        next.service_account_identity_fingerprints =
+                            serde_json::from_value(fingerprints.clone())
+                                .map_err(|_| "CHATGPT_PLAN_STORAGE_FAILED")?;
+                        next.service_account_identity_fingerprints
+                            .retain(|id, _| next.account_ids.contains(id));
                     }
                     if let Some(bindings) = current.get("officialAccountBindings") {
-                        next.official_account_bindings = serde_json::from_value(bindings.clone()).map_err(|_| "CHATGPT_PLAN_STORAGE_FAILED")?;
-                        next.official_account_bindings.retain(|id, _| next.account_ids.contains(id));
+                        next.official_account_bindings =
+                            serde_json::from_value(bindings.clone())
+                                .map_err(|_| "CHATGPT_PLAN_STORAGE_FAILED")?;
+                        next.official_account_bindings
+                            .retain(|id, _| next.account_ids.contains(id));
                     }
                     if let Some(origins) = current.get("officialAccountSourceIds") {
-                        next.official_account_source_ids = serde_json::from_value(origins.clone()).map_err(|_| "CHATGPT_PLAN_STORAGE_FAILED")?;
+                        next.official_account_source_ids = serde_json::from_value(origins.clone())
+                            .map_err(|_| "CHATGPT_PLAN_STORAGE_FAILED")?;
                     }
                     // A stale pre-upgrade snapshot must not clear the migration marker.
                     next.native_gateway_default_migrated |= current
@@ -172,24 +190,35 @@ fn save_collection_to_path(path: &Path, collection: &CodexLocalAccessCollection)
                         .unwrap_or(false);
                     // Only the engine-switch transaction owns this field. An older stats or
                     // settings snapshot must never silently switch the service back.
-                    if let Some(mode) = current.get("gatewayMode").cloned()
-                        .and_then(|value| serde_json::from_value::<CodexLocalAccessGatewayMode>(value).ok())
-                        .filter(|mode| *mode != CodexLocalAccessGatewayMode::Legacy) {
+                    if let Some(mode) = current
+                        .get("gatewayMode")
+                        .cloned()
+                        .and_then(|value| {
+                            serde_json::from_value::<CodexLocalAccessGatewayMode>(value).ok()
+                        })
+                        .filter(|mode| *mode != CodexLocalAccessGatewayMode::Legacy)
+                    {
                         next.gateway_mode = mode;
                     }
                     // Ordinary full-snapshot writers do not own the image model directory.
                     // The dedicated field transaction alone can add/delete/restore a model.
                     if current.get("imageGenerationModels").is_some() {
-                        let latest: CodexLocalAccessCollection = serde_json::from_value(current.clone())
-                            .map_err(|error| format!("读取最新生图型号目录失败: {}", error))?;
+                        let latest: CodexLocalAccessCollection =
+                            serde_json::from_value(current.clone())
+                                .map_err(|error| format!("读取最新生图型号目录失败: {}", error))?;
                         copy_image_model_catalog_fields(&mut next, &latest);
                     }
                     // Only the dedicated image settings transaction changes this field.
                     // Normalize the newest disk value, not an older stats snapshot.
                     next.image_generation_main_model = normalize_image_generation_main_model(
-                        current.get("imageGenerationMainModel").and_then(Value::as_str).map(str::to_owned),
-                    ).unwrap_or(None);
-                    next.request_payload_logging = current.get("requestPayloadLogging")
+                        current
+                            .get("imageGenerationMainModel")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
+                    )
+                    .unwrap_or(None);
+                    next.request_payload_logging = current
+                        .get("requestPayloadLogging")
                         .and_then(Value::as_bool)
                         .unwrap_or_else(|| REQUEST_PAYLOAD_LOGGING_ENABLED.load(Ordering::SeqCst));
                     // Capability declarations have a dedicated field transaction too.
@@ -211,7 +240,8 @@ fn save_collection_to_path(path: &Path, collection: &CodexLocalAccessCollection)
                 Err(error) => {
                     // Keep the existing recovery path for damaged files. With no readable
                     // choice, use the last published setting (off before initial loading).
-                    next.request_payload_logging = REQUEST_PAYLOAD_LOGGING_ENABLED.load(Ordering::SeqCst);
+                    next.request_payload_logging =
+                        REQUEST_PAYLOAD_LOGGING_ENABLED.load(Ordering::SeqCst);
                     logger::log_codex_api_warn(&format!(
                         "本地接入配置损坏，保存可用配置并保留运行态正文记录设置: line={}, column={}",
                         error.line(), error.column()
@@ -1625,7 +1655,9 @@ fn sanitize_collection_structure(
         collection.image_generation_mode = CodexLocalAccessImageGenerationMode::Enabled;
         changed = true;
     }
-    let normalized_main_model = normalize_image_generation_main_model(collection.image_generation_main_model.clone()).unwrap_or(None);
+    let normalized_main_model =
+        normalize_image_generation_main_model(collection.image_generation_main_model.clone())
+            .unwrap_or(None);
     if normalized_main_model != collection.image_generation_main_model {
         collection.image_generation_main_model = normalized_main_model;
         changed = true;
@@ -1673,11 +1705,6 @@ fn sanitize_collection_structure(
         collection.bound_oauth_account_id = normalized_bound_oauth_account_id;
         changed = true;
     }
-    let has_bound_oauth_account = collection.bound_oauth_account_id.is_some();
-    changed |= normalize_bound_oauth_quota_reserve(
-        &mut collection.bound_oauth_quota_reserve,
-        has_bound_oauth_account,
-    );
 
     let original_custom_routing_rules = std::mem::take(&mut collection.custom_routing_rules);
     let normalized_custom_routing_rules = normalize_custom_routing_rules(
@@ -1711,7 +1738,8 @@ fn sanitize_collection_structure(
     if normalized_model_pricings != original_model_pricings {
         changed = true;
     }
-    collection.model_pricings = if collection.model_pricing_version < DEFAULT_MODEL_PRICING_VERSION {
+    collection.model_pricings = if collection.model_pricing_version < DEFAULT_MODEL_PRICING_VERSION
+    {
         drop_superseded_default_56_model_pricings(normalized_model_pricings)
     } else {
         normalized_model_pricings
@@ -1805,15 +1833,22 @@ fn sanitize_collection_with_accounts(
         .iter()
         // Declared sources must survive a selected-model mismatch; an empty image scope
         // would silently fall back to the conversation provider. Dispatch validates exact ID.
-        .filter(|account| !account.is_agent_identity_auth()
-            && (account.is_api_key_auth() || codex_account::account_has_refresh_token(account)))
+        .filter(|account| {
+            !account.is_agent_identity_auth()
+                && (account.is_api_key_auth() || codex_account::account_has_refresh_token(account))
+        })
         .map(|account| account.id.clone())
         .collect();
     let valid_account_ids: HashSet<String> = accounts
         .iter()
         .filter(|account| {
             is_local_access_eligible_account(account, collection.restrict_free_accounts)
-                || (collection.official_account_bindings.contains_key(&account.id) && !account.is_api_key_auth() && !account.is_agent_identity_auth() && !account.is_web_session_auth())
+                || (collection
+                    .official_account_bindings
+                    .contains_key(&account.id)
+                    && !account.is_api_key_auth()
+                    && !account.is_agent_identity_auth()
+                    && !account.is_web_session_auth())
         })
         .map(|account| account.id.clone())
         .collect();
@@ -1823,29 +1858,32 @@ fn sanitize_collection_with_accounts(
         .map(|account| account.id.clone())
         .collect();
 
-    let known_account_ids: HashSet<&str> = accounts.iter().map(|account| account.id.as_str()).collect();
+    let known_account_ids: HashSet<&str> =
+        accounts.iter().map(|account| account.id.as_str()).collect();
     // Account enumeration can be partial during credential rewrites or storage failures.
     // Only a known ineligible account or an explicit deletion revokes membership.
     let explicitly_deleted_ids: HashSet<String> = effective_sidecar_account_ids(collection)
         .into_iter()
         .chain(collection.bound_oauth_account_id.iter().cloned())
-        .filter(|id| matches!(codex_account::account_storage_status(id),
-            Ok(codex_account::CodexAccountStorageStatus::Deleted)))
+        .filter(|id| {
+            matches!(
+                codex_account::account_storage_status(id),
+                Ok(codex_account::CodexAccountStorageStatus::Deleted)
+            )
+        })
         .collect();
     let paused_ids: HashSet<String> = collection.paused_account_ids.iter().cloned().collect();
     let keep_reference = |id: &str, valid_ids: &HashSet<String>| {
         !explicitly_deleted_ids.contains(id)
-            && (paused_ids.contains(id) || !known_account_ids.contains(id) || valid_ids.contains(id))
+            && (paused_ids.contains(id)
+                || !known_account_ids.contains(id)
+                || valid_ids.contains(id))
     };
 
     if let Some(bound_id) = collection.bound_oauth_account_id.as_deref() {
         if !keep_reference(bound_id, &valid_bound_oauth_account_ids) {
             collection.bound_oauth_account_id = None;
             changed = true;
-            changed |= normalize_bound_oauth_quota_reserve(
-                &mut collection.bound_oauth_quota_reserve,
-                false,
-            );
         }
     }
 
@@ -1875,7 +1913,10 @@ fn sanitize_collection_with_accounts(
             changed = true;
             continue;
         }
-        if deduped_image_accounts.iter().any(|value| value == account_id) {
+        if deduped_image_accounts
+            .iter()
+            .any(|value| value == account_id)
+        {
             changed = true;
             continue;
         }
@@ -1887,12 +1928,19 @@ fn sanitize_collection_with_accounts(
     }
 
     let before_image_models = collection.image_generation_account_models.clone();
-    collection.image_generation_account_models.retain(|id, _| collection.image_generation_account_ids.contains(id));
+    collection
+        .image_generation_account_models
+        .retain(|id, _| collection.image_generation_account_ids.contains(id));
     changed |= collection.image_generation_account_models != before_image_models;
 
     // 清理对话池与显式图片池都已移除的策略，保留实例 self 生图来源的 Enabled。
     let before_image_policies = collection.image_generation_account_policies.clone();
-    let pool_account_ids: HashSet<&str> = collection.account_ids.iter().chain(collection.image_generation_account_ids.iter()).map(String::as_str).collect();
+    let pool_account_ids: HashSet<&str> = collection
+        .account_ids
+        .iter()
+        .chain(collection.image_generation_account_ids.iter())
+        .map(String::as_str)
+        .collect();
     collection
         .image_generation_account_policies
         .retain(|account_id, _| pool_account_ids.contains(account_id.as_str()));
@@ -1909,9 +1957,9 @@ fn sanitize_collection_with_accounts(
         } else {
             &valid_account_ids
         };
-        api_key.account_ids.retain(|account_id| {
-            keep_reference(account_id, valid_scope_account_ids)
-        });
+        api_key
+            .account_ids
+            .retain(|account_id| keep_reference(account_id, valid_scope_account_ids));
         if api_key.account_ids != before {
             changed = true;
         }
@@ -2034,7 +2082,7 @@ async fn ensure_runtime_loaded_without_start_with_profile_restore(
                 account_concurrency_default_migrated: true,
                 account_concurrency_wait_ms: DEFAULT_ACCOUNT_CONCURRENCY_WAIT_MS,
                 bound_oauth_account_id: None,
-                bound_oauth_quota_reserve: None,
+
                 account_ids: Vec::new(),
                 created_at: now_ms(),
                 updated_at: now_ms(),
@@ -2139,7 +2187,6 @@ async fn ensure_runtime_loaded_without_start() -> Result<(), String> {
 
 async fn ensure_runtime_loaded() -> Result<(), String> {
     ensure_runtime_loaded_without_start().await?;
-    ensure_bound_oauth_quota_monitor_started();
 
     let should_start = {
         let runtime = gateway_runtime().lock().await;
@@ -2153,10 +2200,6 @@ async fn ensure_runtime_loaded() -> Result<(), String> {
     if should_start {
         ensure_gateway_matches_runtime().await?;
         ensure_local_access_profile_takeovers_from_runtime().await?;
-        trigger_bound_oauth_quota_refresh_in_background(
-            "API 服务运行态检查",
-            BOUND_OAUTH_QUOTA_RESERVE_REFRESH_INTERVAL,
-        );
     }
 
     Ok(())
@@ -2164,7 +2207,6 @@ async fn ensure_runtime_loaded() -> Result<(), String> {
 
 async fn ensure_runtime_loaded_for_app_startup() -> Result<(), String> {
     ensure_runtime_loaded_without_start_with_profile_restore(false).await?;
-    ensure_bound_oauth_quota_monitor_started();
 
     let should_start = {
         let runtime = gateway_runtime().lock().await;
@@ -2183,14 +2225,11 @@ async fn ensure_runtime_loaded_for_app_startup() -> Result<(), String> {
         };
         if let Some(collection) = collection.as_ref() {
             if crate::modules::config::get_user_config().codex_auto_restore_takeover_on_launch
-                && local_access_profile_takeovers_need_sync(collection) {
+                && local_access_profile_takeovers_need_sync(collection)
+            {
                 ensure_local_access_profile_takeovers_from_runtime().await?;
             }
         }
-        trigger_bound_oauth_quota_refresh_in_background(
-            "API 服务启动恢复",
-            BOUND_OAUTH_QUOTA_RESERVE_REFRESH_INTERVAL,
-        );
     }
 
     Ok(())
@@ -2264,179 +2303,31 @@ pub fn collection_contains_account(account_id: &str) -> bool {
         })
 }
 
-fn bound_oauth_quota_refresh_control() -> &'static TokioMutex<BoundOauthQuotaRefreshControl> {
-    BOUND_OAUTH_QUOTA_REFRESH_CONTROL
-        .get_or_init(|| TokioMutex::new(BoundOauthQuotaRefreshControl::default()))
-}
-
-async fn bound_oauth_quota_refresh_target() -> Option<String> {
-    let runtime = gateway_runtime().lock().await;
-    let collection = runtime.collection.as_ref()?;
-    if (!runtime.running && !native_api_running()) || !collection.enabled || collection.bound_oauth_quota_reserve.is_none() {
-        return None;
-    }
-    normalize_optional_account_ref(collection.bound_oauth_account_id.as_deref())
-}
-
-async fn refresh_bound_oauth_quota_if_due(reason: &'static str, min_interval: Duration) {
-    let Some(account_id) = bound_oauth_quota_refresh_target().await else {
-        return;
-    };
-
-    {
-        let control = bound_oauth_quota_refresh_control().lock().await;
-        if control.in_flight { return; }
-        if control.last_account_id.as_deref() == Some(account_id.as_str())
-            && (control.retry_at.is_some_and(|at| at > Instant::now())
-                || control.last_started_at.is_some_and(|at| at.elapsed() < min_interval.min(Duration::from_secs(5)))) {
-            return;
-        }
-    }
-    let read_id = account_id.clone();
-    let account = tokio::task::spawn_blocking(move || codex_account::load_account(&read_id)).await.ok().flatten();
-    let dynamic = bound_oauth_dynamic_refresh_interval(account.as_ref());
-    let critical = {
-        let runtime = quota_reserve_coordinator().lock().ok();
-        runtime.as_ref().and_then(|runtime| runtime.watched_reserve.as_ref().map(|reserve|
-            account.as_ref().is_none_or(|account| {
-                let decision = quota_reserve_decision(reserve, account, runtime.accounts.get(&account.id));
-                decision.0 || decision.1
-            }))).unwrap_or(true)
-    };
-    let min_interval = if critical { min_interval.min(dynamic) } else { dynamic };
-    {
-        let mut control = bound_oauth_quota_refresh_control().lock().await;
-        if control.in_flight { return; }
-        if control.last_account_id.as_deref() != Some(account_id.as_str()) {
-            control.failures = 0;
-            control.retry_at = None;
-        }
-        if control.retry_at.is_some_and(|at| at > Instant::now()) { return; }
-        if control.last_account_id.as_deref() == Some(account_id.as_str())
-            && control
-                .last_started_at
-                .map(|started_at| started_at.elapsed() < min_interval)
-                .unwrap_or(false)
-        {
-            return;
-        }
-        control.in_flight = true;
-        control.last_account_id = Some(account_id.clone());
-        control.last_started_at = Some(Instant::now());
-    }
-
-    let refresh_started = Instant::now();
-    let result = timeout(Duration::from_secs(10), codex_quota::refresh_account_quota_background(&account_id))
-        .await.unwrap_or_else(|_| Err("OAuth quota refresh timed out".to_string()));
-    {
-        let mut control = bound_oauth_quota_refresh_control().lock().await;
-        control.in_flight = false;
-        if result.is_ok() {
-            control.failures = 0;
-            control.retry_at = None;
-        } else {
-            control.failures = control.failures.saturating_add(1);
-            control.retry_at = Some(Instant::now() + quota_refresh_failure_backoff(control.failures,
-                result.as_ref().err().map(String::as_str)));
-        }
-    }
-    if result.is_err() {
-        note_gateway_quota_refresh_failure(&account_id, refresh_started);
-    }
-
-    match result {
-        Ok(_) => logger::log_codex_api_info(&format!(
-            "[CodexLocalAccess] 绑定 OAuth 配额刷新完成: reason={}, account_id={}",
-            reason, account_id
-        )),
-        Err(error) => logger::log_codex_api_warn(&format!(
-            "[CodexLocalAccess] 绑定 OAuth 配额刷新失败: reason={}, account_id={}, error={}",
-            reason, account_id, error
-        )),
-    }
-}
-
-fn trigger_bound_oauth_quota_refresh_in_background(reason: &'static str, min_interval: Duration) {
-    tauri::async_runtime::spawn(refresh_bound_oauth_quota_if_due(reason, min_interval));
-}
-
-fn ensure_bound_oauth_quota_monitor_started() {
-    if BOUND_OAUTH_QUOTA_MONITOR_STARTED.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    tauri::async_runtime::spawn(async move {
-        let mut interval = tokio::time::interval(BOUND_OAUTH_QUOTA_RESERVE_MONITOR_TICK);
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            interval.tick().await;
-            refresh_bound_oauth_quota_if_due(
-                "API 服务定时监控",
-                BOUND_OAUTH_QUOTA_RESERVE_REFRESH_INTERVAL,
-            )
-            .await;
-        }
-    });
-}
-
-pub async fn reevaluate_bound_oauth_quota_reserve_after_refresh(
-    account_id: &str,
-    refresh_succeeded: bool,
-) {
+pub async fn on_account_quota_refreshed(account_id: &str, refresh_succeeded: bool) {
     let account_id = account_id.trim();
     if account_id.is_empty() {
         return;
     }
-    notify_quota_reserve_changed(account_id);
-    let refreshed_account = refresh_succeeded.then(|| codex_account::load_account(account_id)).flatten();
-    if let Ok(mut failures) = bound_oauth_quota_refresh_failures().lock() {
-        if refresh_succeeded {
-            failures.remove(account_id);
-        } else {
-            failures.insert(account_id.to_string());
-        }
-    }
-    let (matching_collection, active_collection) = {
+    let refreshed_account = if refresh_succeeded {
+        let account_id = account_id.to_owned();
+        tokio::task::spawn_blocking(move || codex_account::load_account(&account_id)).await.ok().flatten()
+    } else { None };
+    let collection = {
         let mut runtime = gateway_runtime().lock().await;
-        let collection = runtime
-            .collection
-            .as_ref()
-            .filter(|collection| {
-                collection.bound_oauth_quota_reserve.is_some()
-                    && normalize_optional_account_ref(collection.bound_oauth_account_id.as_deref())
-                        .as_deref()
-                        == Some(account_id)
-            })
-            .cloned();
-        if collection.is_some() {
-            runtime.prepared_accounts.remove(account_id);
-        }
+        runtime.prepared_accounts.remove(account_id);
         if let Some(account) = refreshed_account.as_ref() {
             sync_runtime_quota_cooldowns(&mut runtime, std::slice::from_ref(account), now_ms());
         }
-        (collection, runtime.collection.clone())
+        runtime.collection.clone()
     };
-
-    if let Some(collection) = active_collection {
-        if collection_gateway_mode(&collection) == CodexLocalAccessGatewayMode::Sidecar {
-            if let Err(error) = write_sidecar_quota_pool_state(&collection) {
-                logger::log_codex_api_warn(&format!(
-                    "[CodexLocalAccess] API 服务额度池快照热更新失败: {}",
-                    error
-                ));
-            }
-        }
-    }
-
-    if let Some(collection) = matching_collection {
-        if collection_gateway_mode(&collection) == CodexLocalAccessGatewayMode::Sidecar {
-            if let Err(error) = write_sidecar_quota_reserve_state(&collection) {
-                let mut runtime = gateway_runtime().lock().await;
-                runtime.last_error = Some(error.clone());
-                logger::log_codex_api_warn(&format!(
-                    "[CodexLocalAccess] 绑定 OAuth 配额快照热更新失败: {}",
-                    error
-                ));
-            }
+    if let Some(collection) = collection.filter(|collection| {
+        collection_gateway_mode(collection) == CodexLocalAccessGatewayMode::Sidecar
+    }) {
+        if let Err(error) = write_sidecar_quota_pool_state(&collection) {
+            logger::log_codex_api_warn(&format!(
+                "[CodexLocalAccess] API 服务额度池快照更新失败: {}",
+                error
+            ));
         }
     }
 }

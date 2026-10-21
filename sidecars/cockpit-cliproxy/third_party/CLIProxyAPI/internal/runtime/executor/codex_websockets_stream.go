@@ -442,8 +442,13 @@ func (e *CodexWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *clipr
 			payload = helps.MarkCodexMultiAgentV2PlaintextResponse(ctx, opts.Headers, payload, plaintextPolicy, e.cfg)
 
 			if wsErr, ok := parseCodexWebsocketErrorWithCooling(payload, e.modelLevelCooling()); ok {
+				safeBeforeOutput := helps.CodexEventHasNoExecution(payload)
 				if sess != nil {
-					e.invalidateUpstreamConn(sess, conn, "upstream_error", wsErr)
+					if safeBeforeOutput && isCodexRetryableBootstrapFailure([]byte(wsErr.Error())) {
+						e.invalidateUpstreamConnWithoutDisconnectNotify(sess, conn, "upstream_error", wsErr)
+					} else {
+						e.invalidateUpstreamConn(sess, conn, "upstream_error", wsErr)
+					}
 					sess.clearActive(conn, readCh)
 					unlockStreamSession()
 				} else {
@@ -457,7 +462,7 @@ func (e *CodexWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *clipr
 				}
 				helps.RecordAPIWebsocketError(ctx, e.cfg, "upstream_error", wsErr)
 				reporter.PublishFailure(ctx, wsErr)
-				return nil, wsErr
+				return nil, helps.CodexStopAfterExecution(wsErr, safeBeforeOutput)
 			}
 			if streamErr, terminalBody, ok := codexTerminalFailureErrWithCooling(payload, e.modelLevelCooling()); ok {
 				// A transient capacity rejection is retried on another credential, so the
@@ -465,7 +470,7 @@ func (e *CodexWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *clipr
 				// the disconnect here would close the client connection before the retry can
 				// deliver anything. Every other terminal failure is forwarded in-stream and
 				// legitimately terminates the session, so it keeps the notifying variant.
-				failoverPending := isCodexRetryableBootstrapFailure(terminalBody)
+				failoverPending := helps.CodexEventHasNoExecution(payload) && isCodexRetryableBootstrapFailure(terminalBody)
 				if sess != nil {
 					unlockStreamSession()
 					if failoverPending {
@@ -491,6 +496,9 @@ func (e *CodexWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *clipr
 					// status the upstream refused to put on the wire.
 					helps.LogWithRequestID(ctx).Debugf("codex websockets executor: bootstrap overload rejection after %d buffered handshake events, failing over", len(bufferedChunks))
 					return nil, newCodexBootstrapFailureErr(terminalBody, e.modelLevelCooling())
+				}
+				if !helps.CodexEventHasNoExecution(payload) {
+					return nil, helps.CodexStopAfterExecution(streamErr, false)
 				}
 				bootstrapTerminalErr = streamErr
 				break
@@ -546,7 +554,7 @@ func (e *CodexWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *clipr
 				currentChunks = helps.TranslateStreamWithClaudeInputTokens(ctx, to, responseFormat, req.Model, originalPayload, clientBody, line, &param, claudeInputTokens)
 			}
 
-			if isCodexHandshakeMetadataEvent(eventType) && !isTerminalEvent {
+			if helps.CodexHandshakeMetadataEvent(payload) && !isTerminalEvent {
 				bufferedEvents++
 				bufferedBytes += len(payload)
 				for _, chunk := range currentChunks {

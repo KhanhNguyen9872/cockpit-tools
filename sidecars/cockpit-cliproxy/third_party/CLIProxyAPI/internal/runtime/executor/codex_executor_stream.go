@@ -258,13 +258,16 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 					}
 					helps.RecordAPIResponseError(ctx, e.cfg, streamErr)
 					reporter.PublishFailure(ctx, streamErr)
-					if isCodexRetryableBootstrapFailure(terminalBody) {
+					if helps.CodexEventHasNoExecution(data) && isCodexRetryableBootstrapFailure(terminalBody) {
 						// Transient capacity rejection smuggled into an HTTP 200 stream. Fail the
 						// attempt before the downstream headers are committed so the conductor can
 						// transparently retry on another credential, and report the status the
 						// upstream refused to put on the wire.
 						helps.LogWithRequestID(ctx).Debugf("codex executor: bootstrap overload rejection after %d buffered handshake events, failing over", len(bufferedChunks))
 						return nil, newCodexBootstrapFailureErr(terminalBody, e.modelLevelCooling())
+					}
+					if !helps.CodexEventHasNoExecution(data) {
+						return nil, helps.CodexStopAfterExecution(streamErr, false)
 					}
 					bootstrapTerminalErr = streamErr
 					break
@@ -278,7 +281,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 					reporter.PublishFailure(ctx, streamErr)
 					return nil, streamErr
 				}
-				if isCodexHandshakeMetadataEvent(eventType) {
+				if helps.CodexHandshakeMetadataEvent(data) {
 					isHandshake = true
 				}
 				switch eventType {

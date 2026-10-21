@@ -11,6 +11,7 @@ const vm = require('node:vm');
 const repository = path.resolve(__dirname, '..');
 const enhancements = path.join(repository, 'src-tauri/src/modules/codex_app_enhancements');
 const moduleUrl = 'app://-/assets/app-initial-fixture.js';
+const primaryUrl = 'app://-/assets/app-primary-fixture.js';
 const resultPrefix = 'COCKPIT_MODULE_LOADER_RESULT ';
 
 if (!process.versions.electron) {
@@ -45,6 +46,7 @@ if (!process.versions.electron) {
       assert.ok(line, 'Electron must return its observed module result');
       const result = JSON.parse(line.slice(resultPrefix.length));
       assert.equal(result.original.access, null);
+      assert.equal(result.original.dictation, true);
       assert.equal(result.waiting.reason, 'ui-busy');
       assert.equal(result.transientProgress.reason, 'conversation-busy');
       assert.equal(result.resumed.ok, true);
@@ -52,9 +54,12 @@ if (!process.versions.electron) {
       assert.equal(result.adapted.state.nativePatchState, 'active');
       assert.equal(result.adapted.state.nativePatchFeatures, '1011');
       assert.equal(result.adapted.fixture.access.granted, true);
+      assert.equal(result.adapted.fixture.dictation, true);
       assert.equal(result.adapted.fixture.dependency, 'static-relative-import-ok');
       assert.equal(result.adapted.fixture.dynamic, 'dynamic-relative-import-ok');
       assert.equal(result.adapted.fixture.importUrl, moduleUrl);
+      assert.equal(result.adapted.primary.importUrl, primaryUrl);
+      assert.equal(result.prepared.mode, 'full');
       assert.equal(result.adapted.temporaryElements, 0);
       assert.equal(result.adapted.name, 'fixture-original-name');
       assert.ok(result.injectionBytes < 100000, 'new-document script contains no module payload');
@@ -71,6 +76,12 @@ if (!process.versions.electron) {
       assert.equal(result.header.state.nativePatchState, 'unsupported');
       assert.equal(result.header.state.nativePatchReason, 'module-preload-failed');
       assert.equal(result.header.name, 'fixture-original-name');
+      assert.equal(result.unsupported.prepared.ok, false);
+      assert.equal(result.unsupported.fixture.access, null, 'unsupported quota must not activate partial Fast patches');
+      assert.equal(result.unsupported.fixture.dictation, true, 'native dictation stays available even if quota adaptation is unsupported');
+      assert.equal(result.unsupported.temporaryElements, 0);
+      assert.equal(result.unsupported.name, 'fixture-original-name');
+      assert.deepEqual(result.unsupported.moduleErrors, []);
       assert.equal(result.inlineScriptBlocked, true, 'the original CSP must still block an untrusted inline script');
       assert.equal(result.restored.access, null, 'removing the new-document script restores the unmodified module');
       assert.deepEqual(result.moduleErrors, []);
@@ -108,8 +119,7 @@ async function runElectronFixture() {
   const fast = fs.readFileSync(path.join(enhancements, 'fast.js'), 'utf8');
   const guard = fs.readFileSync(path.join(enhancements, 'startup_guard.js'), 'utf8');
   const quota = fs.readFileSync(path.join(enhancements, 'quota.js'), 'utf8');
-  const dictation = fs.readFileSync(path.join(enhancements, 'native_dictation.js'), 'utf8');
-  const runtime = `${guard};${fast};${quota};${dictation}`;
+  const runtime = `${guard};${fast};${quota}`;
   const unitTest = fs.readFileSync(path.join(enhancements, 'fast.test.cjs'), 'utf8');
   const fixtureLiteral = unitTest.match(/const fixture = ([\s\S]*?);\n\nfunction load/);
   assert.ok(fixtureLiteral, 'reuse the same four structural gate fixture as the unit tests');
@@ -118,23 +128,35 @@ async function runElectronFixture() {
   const dictationLiteral = dictationUnitTest.match(/const fixture = ([\s\S]*?);\n\nfunction load/);
   assert.ok(dictationLiteral);
   const dictationFixture = vm.runInNewContext(dictationLiteral[1]);
+  const quotaFixture = require('./helpers/codexNativeQuotaFixture.cjs')();
   // The real client's script policy does not allow blob:. It is intentionally
   // present during every navigation, including the adapted document.
   const csp = "default-src 'self'; script-src 'self' 'sha256-Z2/iFzh9VMlVkEOar1f/oSHWwQk3ve1qk/C2WdsC4Xk=' 'wasm-unsafe-eval'; style-src 'self';";
   const html = `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${csp}"><script type="module" src="./assets/index-fixture.js"></script></head><body><textarea></textarea></body></html>`;
   const nativeModule = `import {dependency} from './dependency-fixture.js';
 ${gates}
-function unusedDictationFixture(){${dictationFixture}}
+function fixtureDictation(){
+const Y=()=>({}),U={},wc=()=>({}),u6u={c:()=>[]},Eu=()=>({isLoading:false,isCapable:true});
+${dictationFixture}
+return l6u()}
+${quotaFixture.initial}
+const primaryPath='./app-primary-fixture.js';
 const defaultHost='local';
 function readIdentity(){return {authMethod:null}}
 function readRequirements(){return {data:{granted:true},isPending:false}}
 function selectAccess(value){return value}
 const dynamic=await import('./dynamic-fixture.js');
-window.fixtureResult={access:ui({}).serviceTierAccess,dependency,dynamic:dynamic.dynamic,importUrl:import.meta.url};`;
+window.fixtureDictation=fixtureDictation();
+window.fixtureResult={access:ui({}).serviceTierAccess,dictation:window.fixtureDictation,dependency,dynamic:dynamic.dynamic,importUrl:import.meta.url};`;
+  // This dependency is evaluated just like a native lazily loaded primary
+  // module; the separate completion proves both import-map entries execute.
+  const primaryModule = `const atom=()=>({}),store={},identity={},status={};\n${quotaFixture.primary}
+window.fixturePrimary={importUrl:import.meta.url};`;
   const files = new Map([
     ['/', ['text/html', html]],
-    ['/assets/index-fixture.js', ['text/javascript', 'import "./app-initial-fixture.js";']],
+    ['/assets/index-fixture.js', ['text/javascript', 'import "./app-initial-fixture.js";import "./app-primary-fixture.js";']],
     ['/assets/app-initial-fixture.js', ['text/javascript', nativeModule]],
+    ['/assets/app-primary-fixture.js', ['text/javascript', primaryModule]],
     ['/assets/dependency-fixture.js', ['text/javascript', 'export const dependency="static-relative-import-ok";']],
     ['/assets/dynamic-fixture.js', ['text/javascript', 'export const dynamic="dynamic-relative-import-ok";']],
   ]);
@@ -169,14 +191,14 @@ window.fixtureResult={access:ui({}).serviceTierAccess,dependency,dynamic:dynamic
     return response.result.value;
   };
   const waitForModule = () => evaluate(`(async()=>{
-    for(let i=0;i<200&&!window.fixtureResult;i++)await new Promise(resolve=>setTimeout(resolve,10));
-    if(!window.fixtureResult)throw Error('fixture module did not execute');
+    for(let i=0;i<200&&(!window.fixtureResult||!window.fixturePrimary);i++)await new Promise(resolve=>setTimeout(resolve,10));
+    if(!window.fixtureResult||!window.fixturePrimary)throw Error('both fixture modules must execute');
     return window.fixtureResult;
   })()`);
   await window.loadURL('app://-/');
   await send('Page.enable');
   const original = await waitForModule();
-  const bootstrap = `window.__cockpitEnhancements={nativeFast:true,quotaCompat:false,apiDictation:true,apiKeyAuthVerified:true,owner:'loader-test'};${runtime}`;
+  const bootstrap = `window.__cockpitEnhancements={nativeFast:true,quotaCompat:false,apiService:true,apiKeyAuthVerified:true,owner:'loader-test'};${runtime}`;
   await evaluate(`window.name='fixture-original-name';${bootstrap}`);
   // Reproduce the real failure: ordinary input while module preparation is
   // still pending. This is an isolated renderer, never a user's application.
@@ -192,6 +214,7 @@ window.fixtureResult={access:ui({}).serviceTierAccess,dependency,dynamic:dynamic
   releaseModuleRead();
   const prepared = await preparation;
   assert.equal(prepared.ok, true, JSON.stringify(prepared));
+  assert.equal(prepared.mode, 'full', JSON.stringify(prepared));
   assert.equal(prepared.patchedSource, undefined);
   assert.equal(await evaluate('window.name'), 'fixture-original-name');
   const injection = `${bootstrap};window.installResult=window.__cockpitNativeFast.consumeHandoff('loader-nonce');`;
@@ -220,7 +243,7 @@ window.fixtureResult={access:ui({}).serviceTierAccess,dependency,dynamic:dynamic
     }, reject);
   });
   await waitForModule();
-  const adapted = await evaluate(`({fixture:window.fixtureResult,install:window.installResult,
+  const adapted = await evaluate(`({fixture:window.fixtureResult,primary:window.fixturePrimary,install:window.installResult,
     state:window.__cockpitEnhancements,name:window.name,
     temporaryElements:document.querySelectorAll('script[type=importmap],link[rel=modulepreload]').length})`);
   const moduleErrors = [...messages];
@@ -278,10 +301,25 @@ window.fixtureResult={access:ui({}).serviceTierAccess,dependency,dynamic:dynamic
     return {fixture:window.fixtureResult,state:window.__cockpitEnhancements,name:window.name};})()`);
   await evaluate("window.__cockpitNativeFast.cancelHandoff('header-nonce')");
   await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: headerRegistration.identifier });
+  // Unsupported quota adaptation must leave the entire native module intact,
+  // including its dictation capability, rather than install a partial mode.
+  const unsupportedMessagesStart = messages.length;
+  headerCsp = false;
+  files.set('/assets/app-primary-fixture.js', ['text/javascript', primaryModule.replace('submitDisabled:disabled', 'unsupportedDisabled:disabled')]);
+  await window.loadURL('app://-/');
+  await waitForModule();
+  await evaluate(`window.name='fixture-original-name';${bootstrap}`);
+  const unsupportedPrepared = await evaluate("window.__cockpitNativeFast.prepareHandoff('unsupported-nonce')");
+  assert.equal(unsupportedPrepared.ok, false, JSON.stringify(unsupportedPrepared));
+  const unsupported = await evaluate(`({fixture:window.fixtureResult,
+    state:window.__cockpitEnhancements,name:window.name,
+    temporaryElements:document.querySelectorAll('script[type=importmap],link[rel=modulepreload]').length})`);
+  unsupported.prepared = unsupportedPrepared;
+  unsupported.moduleErrors = messages.slice(unsupportedMessagesStart);
   console.log(resultPrefix + JSON.stringify({
     versions: { electron: process.versions.electron, chrome: process.versions.chrome, v8: process.versions.v8 },
     original, waiting: menuInspection, transientProgress, resumed, adapted, inlineScriptBlocked, restored, moduleErrors,
-    repeated, canceled, hostReload, header, injectionBytes: injection.length,
+    repeated, canceled, hostReload, header, unsupported, prepared, injectionBytes: injection.length,
   }));
   window.destroy();
   app.exit(0);

@@ -383,7 +383,8 @@ pub fn restore_mixed_model_gateway_profile(profile_dir: &Path) -> Result<bool, S
     if let Some(index) = backup_index {
         let backup = backups.profiles[index].clone();
         if config_is_mixed {
-            let restored = restore_config_toml_from_takeover_backup(
+            let restored = restore_profile_config_toml_from_takeover_backup(
+                profile_dir,
                 current_config.as_deref(),
                 backup.config_toml.as_deref(),
             )?;
@@ -2764,8 +2765,6 @@ async fn spawn_provider_gateway_sidecar(
         .arg(&launch_config.config_path)
         .arg("--manifest")
         .arg(&launch_config.manifest_path)
-        .arg("--quota-reserve-state")
-        .arg(&launch_config.quota_reserve_path)
         .arg("--quota-pool-state")
         .arg(&launch_config.quota_pool_path)
         .arg("--parent-pid")

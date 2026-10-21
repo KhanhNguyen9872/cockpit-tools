@@ -1246,37 +1246,6 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
           "codex.switchAuth.reauthorizeDescription",
           "当前登录凭据无法自动更新，请重新授权后继续使用。",
         );
-      const quotaReserveStatus = localAccessState?.quotaReserveStatus ?? null;
-      const quotaReserveWarningLine =
-        quotaReserveStatus?.warning &&
-        quotaReserveStatus.effectiveWindow &&
-        quotaReserveStatus.effectiveRemainingPercent != null &&
-        quotaReserveStatus.effectiveReservePercent != null
-          ? `${
-              quotaReserveStatus.effectiveWindow === "weekly"
-                ? t(
-                    "codex.localAccess.oauthBinding.quotaReserveWeeklyLabel",
-                    "周保留",
-                  )
-                : t(
-                    "codex.localAccess.oauthBinding.quotaReserveHourlyLabel",
-                    "5 小时保留",
-                  )
-            }：${Number(quotaReserveStatus.effectiveRemainingPercent.toFixed(2))}% / ${quotaReserveStatus.effectiveReservePercent}%`
-          : null;
-      const quotaRuntimeLine = quotaReserveStatus ? [
-        (localAccessCollection?.gatewayMode ?? "native") === "native"
-          ? t("codex.localAccess.oauthBinding.quotaInFlight", { count: quotaReserveStatus.inFlight ?? 0 }) : null,
-        quotaReserveStatus.strict
-          ? `${t("codex.localAccess.oauthBinding.safetyMargin")} ${quotaReserveStatus.safetyMarginPercent} ${t("codex.localAccess.oauthBinding.safetyMarginUnit")}` : null,
-        quotaReserveStatus.awaitingConfirmation
-          ? t("codex.localAccess.oauthBinding.quotaWaiting")
-          : !quotaReserveStatus.snapshotFresh
-            ? t("codex.localAccess.oauthBinding.quotaStale")
-            : quotaReserveStatus.blocked ? t("codex.localAccess.oauthBinding.quotaProtected") : null,
-        quotaReserveStatus.snapshotUpdatedAt
-          ? t("codex.localAccess.oauthBinding.quotaUpdated", { time: new Date(quotaReserveStatus.snapshotUpdatedAt * 1000).toLocaleTimeString() }) : null,
-      ].filter(Boolean).join(" · ") : null;
       const localAccessStatusTone = resolveCodexLocalAccessRuntimeStatus(
         localAccessCollection,
         localAccessState,
@@ -1554,21 +1523,6 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                     {t("codex.api.oauthBinding.actionShort", "绑定")}
                   </button>
                 </div>
-                {quotaRuntimeLine && <div className="codex-local-access-quota-runtime">{quotaRuntimeLine}</div>}
-                {quotaReserveWarningLine && (
-                  <div
-                    className={`codex-local-access-quota-reserve-warning ${
-                      quotaReserveStatus?.blocked ? "is-blocked" : "is-near"
-                    }`}
-                    title={t(
-                      "codex.localAccess.oauthBinding.quotaReserveDesc",
-                      "API 服务仅在 5 小时和周剩余额度均高于保留值时使用该 OAuth 账号。",
-                    )}
-                  >
-                    <CircleAlert size={13} />
-                    <span>{quotaReserveWarningLine}</span>
-                  </div>
-                )}
               </div>
   
               {localAccessQuotaPreviewItems.length > 0 && (

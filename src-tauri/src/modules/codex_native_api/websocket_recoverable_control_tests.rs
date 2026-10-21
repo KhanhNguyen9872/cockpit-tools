@@ -121,12 +121,10 @@ async fn websocket_invalid_first_frames_do_not_extend_initial_absolute_deadline(
         .await
         .unwrap();
     assert_eq!(timeout["status"], 408);
+    assert_eq!(timeout["error"]["code"], "websocket_start_timeout");
     assert!(source.requests.lock().unwrap().is_empty());
-    reports(&host, 1).await;
-    assert_eq!(
-        host.reports.lock().unwrap()[0].error.as_deref(),
-        Some("websocket_start_timeout")
-    );
     handle.shutdown(Duration::from_secs(2)).await.unwrap();
+    assert!(host.reports.lock().unwrap().is_empty(),
+        "invalid first frames and local initial timeout never reached upstream");
     task.abort();
 }

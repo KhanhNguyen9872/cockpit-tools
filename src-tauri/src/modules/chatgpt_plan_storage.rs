@@ -30,6 +30,10 @@ fn record_path(id: &str) -> Result<PathBuf, String> {
     Ok(directory()?.join(format!("{id}.json")))
 }
 
+pub(super) fn official_health_path(id: &str) -> Result<PathBuf, String> {
+    Ok(record_path(id)?.with_extension("official-health"))
+}
+
 pub(super) fn load(id: &str) -> Result<Registration, String> {
     let path = record_path(id)?;
     let content = fs::read_to_string(path).map_err(|error| {

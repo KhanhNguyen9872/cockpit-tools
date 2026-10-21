@@ -115,10 +115,6 @@ pub struct UserConfig {
     pub codex_app_native_fast_enabled: bool,
     #[serde(default = "default_codex_app_enhancements_enabled")]
     pub codex_app_api_quota_compat_enabled: bool,
-    #[serde(default = "default_codex_app_enhancements_enabled")]
-    pub codex_app_api_dictation_enabled: bool,
-    #[serde(default = "default_codex_app_api_dictation_model")]
-    pub codex_app_api_dictation_model: String,
     /// Codex WSL 配置目录 (Windows Only)
     #[serde(default = "default_codex_wsl_config_dir")]
     pub codex_wsl_config_dir: String,
@@ -744,21 +740,6 @@ fn default_codex_app_enhancements_enabled() -> bool {
     true
 }
 
-pub fn default_codex_app_api_dictation_model() -> String {
-    "gpt-4o-mini-transcribe".to_string()
-}
-
-pub fn normalize_codex_app_api_dictation_model(value: &str) -> Result<String, String> {
-    let value = value.trim();
-    if value.is_empty() {
-        return Ok(default_codex_app_api_dictation_model());
-    }
-    if value.chars().count() > 128 || value.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return Err("settings.general.codexEnhancements.dictationModelInvalid".to_string());
-    }
-    Ok(value.to_string())
-}
-
 fn default_codex_wsl_config_dir() -> String {
     String::new()
 }
@@ -1241,8 +1222,6 @@ impl Default for UserConfig {
             codex_app_ui_injection_enabled: default_codex_app_ui_injection_enabled(),
             codex_app_native_fast_enabled: default_codex_app_enhancements_enabled(),
             codex_app_api_quota_compat_enabled: default_codex_app_enhancements_enabled(),
-            codex_app_api_dictation_enabled: default_codex_app_enhancements_enabled(),
-            codex_app_api_dictation_model: default_codex_app_api_dictation_model(),
             codex_wsl_config_dir: default_codex_wsl_config_dir(),
             zed_auto_refresh_minutes: default_zed_auto_refresh(),
             ghcp_auto_refresh_minutes: default_ghcp_auto_refresh(),
@@ -2831,42 +2810,65 @@ mod tests {
 
     #[test]
     fn codex_app_enhancements_default_on_and_preserve_explicit_values() {
-        for config in [UserConfig::default(), serde_json::from_value(serde_json::json!({})).unwrap()] {
+        for config in [
+            UserConfig::default(),
+            serde_json::from_value(serde_json::json!({})).unwrap(),
+        ] {
             assert!(config.codex_app_native_fast_enabled);
             assert!(config.codex_app_api_quota_compat_enabled);
-            assert!(config.codex_app_api_dictation_enabled);
-            assert_eq!(config.codex_app_api_dictation_model, "gpt-4o-mini-transcribe");
         }
         let disabled: UserConfig = serde_json::from_value(serde_json::json!({
             "codex_app_native_fast_enabled": false,
-            "codex_app_api_quota_compat_enabled": false,
-            "codex_app_api_dictation_enabled": false
-        })).unwrap();
+            "codex_app_api_quota_compat_enabled": false
+        }))
+        .unwrap();
         assert!(!disabled.codex_app_native_fast_enabled);
         assert!(!disabled.codex_app_api_quota_compat_enabled);
-        assert!(!disabled.codex_app_api_dictation_enabled);
         let config: UserConfig = serde_json::from_value(serde_json::json!({
             "codex_app_native_fast_enabled": true,
-            "codex_app_api_quota_compat_enabled": true,
-            "codex_app_api_dictation_enabled": true,
-            "codex_app_api_dictation_model": "custom/transcribe-v2"
-        })).unwrap();
-        let restored: UserConfig = serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap();
+            "codex_app_api_quota_compat_enabled": true
+        }))
+        .unwrap();
+        let restored: UserConfig =
+            serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap();
         assert!(restored.codex_app_native_fast_enabled);
         assert!(restored.codex_app_api_quota_compat_enabled);
-        assert!(restored.codex_app_api_dictation_enabled);
-        assert_eq!(restored.codex_app_api_dictation_model, "custom/transcribe-v2");
     }
 
     #[test]
-    fn codex_app_dictation_model_validation_matches_settings() {
-        use super::normalize_codex_app_api_dictation_model as normalize;
-        assert_eq!(normalize("  ").unwrap(), "gpt-4o-mini-transcribe");
-        assert_eq!(normalize("  custom/model-v2 ").unwrap(), "custom/model-v2");
-        assert!(normalize(&"x".repeat(128)).is_ok());
-        for invalid in ["two models".to_string(), "bad\u{0}model".to_string(), "bad\u{85}model".to_string(), "x".repeat(129)] {
-            assert_eq!(normalize(&invalid).unwrap_err(), "settings.general.codexEnhancements.dictationModelInvalid");
+    fn retired_codex_api_dictation_fields_are_ignored_and_not_saved() {
+        let dir = make_temp_dir("retired_codex_api_dictation_config");
+        let path = dir.join("config.json");
+        fs::write(
+            &path,
+            serde_json::json!({
+                "language": "ja",
+                "codex_app_native_fast_enabled": false,
+                "codex_app_api_quota_compat_enabled": true,
+                "codex_app_api_dictation_enabled": true,
+                "codex_app_api_dictation_model": "previously-enabled-model"
+            })
+            .to_string(),
+        )
+        .expect("write legacy configuration");
+        let legacy = load_test_config(&path);
+        assert!(!legacy.codex_app_native_fast_enabled);
+        assert!(legacy.codex_app_api_quota_compat_enabled);
+        persist_test_config(&path, &legacy).expect("save supported configuration fields");
+        let persisted: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).expect("read saved configuration"))
+                .expect("parse saved configuration");
+        for retired in [
+            "codex_app_api_dictation_enabled",
+            "codex_app_api_dictation_model",
+        ] {
+            assert!(persisted.get(retired).is_none());
         }
+        let reloaded = load_test_config(&path);
+        assert_eq!(reloaded.language, "ja");
+        assert!(!reloaded.codex_app_native_fast_enabled);
+        assert!(reloaded.codex_app_api_quota_compat_enabled);
+        fs::remove_dir_all(dir).expect("remove temporary configuration");
     }
 
     #[test]

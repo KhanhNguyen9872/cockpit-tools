@@ -11,6 +11,8 @@
   const allowExpression = (host, auth) =>
     `window.__cockpitNativeFast?.allow(${host},${auth})===true`;
   const enabled = () => root.__cockpitEnhancements?.nativeFast === true;
+  const quotaModuleEnabled = () => root.__cockpitEnhancements?.quotaCompat === true
+    || root.__cockpitEnhancements?.apiService === true;
   const allow = (host, auth) => enabled() && host === "local"
     && (auth === "apiKey" || auth === "apikey"
       // The current renderer can expose no auth method for a functioning API
@@ -92,6 +94,29 @@
       if (url.search || url.hash || url.username || url.password) return false;
       return new RegExp(`/assets/${entry ? "index" : "app-initial"}-[A-Za-z0-9_-]+\\.js$`).test(url.pathname);
     } catch { return false; }
+  }
+
+  function localPrimary(value, initialUrl) {
+    try {
+      const url = new URL(value), initial = new URL(initialUrl);
+      return localAsset(initialUrl) && url.protocol === initial.protocol && url.host === initial.host
+        && !url.search && !url.hash && !url.username && !url.password
+        && url.pathname.slice(0, url.pathname.lastIndexOf('/')) === initial.pathname.slice(0, initial.pathname.lastIndexOf('/'))
+        && /\/assets\/app-primary-[A-Za-z0-9_-]+\.js$/.test(url.pathname);
+    } catch { return false; }
+  }
+
+  const sourceLength = value => value.source.length + (value.modules || []).reduce((sum, module) => sum + module.source.length, 0);
+  function validModules(source, url, modules, mode = 'full') {
+    if (mode !== 'full' || !Array.isArray(modules)) return false;
+    // Do not reinstall a staged module produced by the retired dictation bridge
+    // or capability suppression. The original client module remains available.
+    if (typeof source !== 'string' || source.includes('__cockpitNativeDictation')
+      || source.includes('__cockpitApiDictation')) return false;
+    if (modules.length !== (quotaModuleEnabled() ? 1 : 0)) return false;
+    return typeof source === 'string' && modules.every(module => module && localPrimary(module.url, url)
+      && typeof module.source === 'string' && module.source.includes('window.__cockpitNativeFastComplete?.("quota")'))
+      && sourceLength({ source, modules }) <= LIMIT;
   }
 
   // Streaming lexical scan: no eval, no full AST and no retained token array.
@@ -189,6 +214,23 @@
     yield* code();
   }
 
+  // Locate a complete named component, including nested function declarations.
+  // Reuse the import scanner so braces in strings/regex/templates are ignored.
+  function functionRange(source, start) {
+    if (!Number.isInteger(start) || start < 0
+      || !new RegExp(`^function ${NAME}\\(${NAME}\\)\\{`).test(source.slice(start, start + 200))) return null;
+    let depth = 0, opened = false, returnAt = -1;
+    try {
+      for (const token of tokens(source.slice(start, start + 256 * 1024))) {
+        if (token.kind === 'punctuation' && token.text === '{') { depth++; opened = true; }
+        else if (token.kind === 'punctuation' && token.text === '}' && --depth === 0 && opened) {
+          return returnAt < 0 ? null : { start, end: start + token.end, returnAt: start + returnAt };
+        } else if (depth === 1 && token.kind === 'name' && token.text === 'return') returnAt = token.start;
+      }
+    } catch { /* Unsupported lexical syntax must leave the native source intact. */ }
+    return null;
+  }
+
   async function rewriteModule(source, url) {
     const iterator = tokens(source);
     const buffered = [];
@@ -262,17 +304,14 @@
     if (!localAsset(url) || typeof source !== "string" || source.length > LIMIT) return failure(source, "unsupported-module");
     let result = { ok: true, patchedSource: source };
     const fastInstalled = (source.match(/window\.__cockpitNativeFast\?\.allow\(/g) || []).length === 4;
-    const quotaInstalled = (source.match(/globalThis\.__cockpitQuotaCompat\.enabledFor\(/g) || []).length === 1;
+    const quotaInstalled = (source.match(/globalThis\.__cockpitQuotaCompat\.initialReady=true/g) || []).length === 1;
     if (enabled() && !fastInstalled) result = transform(result.patchedSource);
-    if (result.ok && root.__cockpitEnhancements?.quotaCompat === true && !quotaInstalled) {
+    if (result.ok && quotaModuleEnabled() && !quotaInstalled) {
       result = root.__cockpitQuotaCompat?.transform(result.patchedSource, url) || failure(source, "quota-unavailable");
     }
-    if (result.ok && root.__cockpitEnhancements?.apiDictation === true) {
-      result = root.__cockpitNativeDictation?.transform(result.patchedSource, url) || failure(source, "dictation-unavailable");
-    }
     if (!result.ok) return failure(source, result.diagnostics?.reason || "unsupported-gates");
-    if (!enabled() && root.__cockpitEnhancements?.quotaCompat !== true && root.__cockpitEnhancements?.apiDictation !== true) return failure(source, "disabled");
-    return { ok: true, patchedSource: result.patchedSource, url };
+    if (!enabled() && !quotaModuleEnabled()) return failure(source, "disabled");
+    return { ok: true, patchedSource: result.patchedSource, url, mode: 'full' };
   }
 
   async function prepareModule(source, url) {
@@ -280,7 +319,7 @@
     if (!result.ok) return result;
     try {
       const patchedSource = await rewriteModule(result.patchedSource, url);
-      return { ok: true, patchedSource: `${patchedSource}\n;window.__cockpitNativeFastComplete?.();\n//# sourceURL=${url}\n`, url };
+      return { ...result, patchedSource: `${patchedSource}\n;window.__cockpitNativeFastComplete?.();\n//# sourceURL=${url}\n`, url };
     } catch { return failure(source, "unsupported-module-syntax"); }
   }
 
@@ -305,15 +344,35 @@
       }
       if (candidates.size !== 1) return { ok: false, reason: "ambiguous-module" };
       const url = [...candidates][0];
-      const result = await prepareModule(await read(url), url);
-      return result.ok ? result : { ok: false, reason: result.diagnostics?.reason || "unsupported-module" };
+      const source = await read(url);
+      const result = await prepareModule(source, url);
+      if (!result.ok) return { ok: false, reason: result.diagnostics?.reason || "unsupported-module" };
+      const modules = [];
+      if (quotaModuleEnabled() && result.mode === 'full') {
+        try {
+          const primaryUrls = new Set([...source.matchAll(/["'`]\.\/app-primary-[A-Za-z0-9_-]+\.js["'`]/g)]
+            .map(match => new URL(match[0].slice(1, -1), url).href).filter(value => localPrimary(value, url)));
+          if (primaryUrls.size !== 1) throw Error('quota-primary-not-unique');
+          const primaryUrl = [...primaryUrls][0];
+          const contract = root.__cockpitQuotaCompat.transform(source, url);
+          const primary = root.__cockpitQuotaCompat.transformComposer(await read(primaryUrl), primaryUrl, url, contract.diagnostics?.bindings);
+          if (!contract.ok || !primary.ok) throw Error(primary.diagnostics?.reason || 'quota-contract-mismatch');
+          const prepared = await rewriteModule(primary.patchedSource, primaryUrl);
+          modules.push({ url: primaryUrl, source: `${prepared}\n;window.__cockpitNativeFastComplete?.("quota");\n//# sourceURL=${primaryUrl}\n` });
+        } catch (error) {
+          return failure(source, error.message || 'quota-primary-unavailable');
+        }
+      }
+      if (!validModules(result.patchedSource, url, modules, result.mode)) return { ok: false, reason: 'module-source-limit' };
+      return { ...result, modules };
     } catch { return { ok: false, reason: "asset-unavailable" }; }
   }
 
   const HANDOFF_PREFIX = "cockpit-native-handoff-v1:";
   let handoff = null, unloadHandler = null, restoreTimer = null, staged = null, preparationEpoch = 0;
-  const featureMask = config => [config?.nativeFast, config?.quotaCompat, config?.apiDictation, config?.apiKeyAuthVerified]
+  const configurationMask = config => [config?.nativeFast, config?.quotaCompat, config?.apiKeyAuthVerified, config?.apiService]
     .map(flag => flag === true ? "1" : "0").join("");
+  const featureMask = (config, mode = 'full') => mode === 'full' ? configurationMask(config) : 'invalid';
   const validNonce = nonce => typeof nonce === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(nonce);
   const localPage = () => root.location?.protocol === "app:" && root.location?.hostname === "-";
   const setState = (value, reason) => {
@@ -347,7 +406,8 @@
   function stageHandoff(nonce) {
     const config = root.__cockpitEnhancements;
     if (!handoff || handoff.nonce !== nonce || !localPage()
-      || handoff.owner !== config?.owner || handoff.features !== featureMask(config))
+      || handoff.owner !== config?.owner || handoff.features !== featureMask(config, handoff.mode)
+      || handoff.requestedFeatures !== configurationMask(config))
       return { ok: false, reason: "handoff-unavailable" };
     restoreStagedName();
     restoreInheritedName(nonce);
@@ -388,41 +448,50 @@
     restoreInheritedName();
     const config = root.__cockpitEnhancements;
     if (handoff?.nonce === nonce && handoff.owner === config?.owner
-      && handoff.features === featureMask(config))
-      return { ok: true, url: handoff.url, sourceLength: handoff.source.length };
+      && handoff.features === featureMask(config, handoff.mode)
+      && handoff.requestedFeatures === configurationMask(config))
+      return { ok: true, url: handoff.url, sourceLength: sourceLength(handoff), mode: handoff.mode };
     const epoch = preparationEpoch;
     const result = await prepareDocument();
     if (epoch !== preparationEpoch || config?.owner !== root.__cockpitEnhancements?.owner
-      || featureMask(config) !== featureMask(root.__cockpitEnhancements))
+      || configurationMask(config) !== configurationMask(root.__cockpitEnhancements))
       return { ok: false, reason: "handoff-canceled" };
     if (!result.ok) return result;
-    retainHandoff({ nonce, owner: config?.owner, features: featureMask(config),
-      url: result.url, source: result.patchedSource });
-    return { ok: true, url: result.url, sourceLength: result.patchedSource.length };
+    retainHandoff({ nonce, owner: config?.owner, requestedFeatures: configurationMask(config),
+      features: featureMask(config, result.mode), mode: result.mode,
+      url: result.url, source: result.patchedSource, modules: result.modules });
+    return { ok: true, url: result.url, sourceLength: sourceLength(handoff), mode: handoff.mode };
   }
 
-  function installModule(source, url) {
+  function installModule(source, url, modules = [], mode = 'full') {
     const doc = root.document;
-    if (!localAsset(url) || !doc || doc.documentElement || typeof source !== "string" || source.length > LIMIT) {
+    if (!localAsset(url) || !doc || doc.documentElement || !validModules(source, url, modules, mode)) {
       setState("unsupported", "document-start-required");
       return { ok: false, reason: "document-start-required" };
     }
-    let container, blob;
+    let container;
+    const blobs = [], preloads = [];
     try {
       if (root.HTMLScriptElement?.supports?.("importmap") !== true) throw Error("unsupported-importmap");
-      const preload = doc.createElement("link");
-      if (preload.relList?.supports?.("modulepreload") !== true) throw Error("unsupported-modulepreload");
-      blob = root.URL.createObjectURL(new root.Blob([source], { type: "text/javascript" }));
+      const imports = {};
+      for (const module of [{ source, url }, ...modules]) {
+        const preload = doc.createElement("link");
+        if (preload.relList?.supports?.("modulepreload") !== true) throw Error("unsupported-modulepreload");
+        const blob = root.URL.createObjectURL(new root.Blob([module.source], { type: "text/javascript" }));
+        blobs.push(blob); imports[module.url] = blob;
+        preload.rel = "modulepreload"; preload.href = blob; preloads.push(preload);
+      }
       const map = doc.createElement("script");
-      map.type = "importmap"; map.textContent = JSON.stringify({ imports: { [url]: blob } });
-      preload.rel = "modulepreload"; preload.href = blob;
-      const owner = root.__cockpitEnhancements?.owner, features = featureMask(root.__cockpitEnhancements);
+      map.type = "importmap"; map.textContent = JSON.stringify({ imports });
+      const owner = root.__cockpitEnhancements?.owner, features = featureMask(root.__cockpitEnhancements, mode);
+      const requestedFeatures = configurationMask(root.__cockpitEnhancements);
+      const evaluated = new Set();
       let completed = false, timer;
       const detach = () => {
         if (timer) root.clearTimeout(timer);
         doc.removeEventListener("DOMContentLoaded", watch);
-        preload.onerror = null;
-        root.URL.revokeObjectURL(blob);
+        preloads.forEach(preload => { preload.onerror = null; });
+        blobs.forEach(blob => root.URL.revokeObjectURL(blob));
       };
       const fail = () => {
         if (completed) return;
@@ -430,15 +499,21 @@
         setState("unsupported", "module-preload-failed");
       };
       const watch = () => { if (!completed) timer = root.setTimeout(fail, 30000); };
-      root.__cockpitNativeFastComplete = () => {
+      root.__cockpitNativeFastComplete = (kind = 'initial') => {
         const config = root.__cockpitEnhancements;
-        if (!config || config.owner !== owner || featureMask(config) !== features) return;
+        if (completed || !config || config.owner !== owner || featureMask(config, mode) !== features || configurationMask(config) !== requestedFeatures) return;
+        if (kind !== 'initial' && !(modules.length && kind === 'quota')) return;
+        evaluated.add(kind);
+        if (evaluated.size !== 1 + modules.length) return;
         completed = true; detach();
-        setState("active", "module-evaluated"); config.nativePatchFeatures = features;
+        config.nativePatchMode = mode;
+        config.nativePatchFeatures = features;
+        config.nativePatchRequestedFeatures = requestedFeatures;
+        setState('active', 'module-evaluated');
       };
-      preload.onerror = fail;
+      preloads.forEach(preload => { preload.onerror = fail; });
       container = doc.createElement("html"); doc.appendChild(container);
-      container.appendChild(map); container.appendChild(preload);
+      container.appendChild(map); preloads.forEach(preload => container.appendChild(preload));
       setState("preloading", "module-preloaded");
       doc.addEventListener("DOMContentLoaded", watch, { once: true });
       root.__cockpitNativeFastDispose = () => {
@@ -447,7 +522,7 @@
       };
       return { ok: true };
     } catch {
-      if (blob) root.URL.revokeObjectURL(blob);
+      blobs.forEach(blob => root.URL.revokeObjectURL(blob));
       cancelHandoff(handoff?.nonce); setState("unsupported", "module-preload-failed");
       return { ok: false, reason: "module-preload-failed" };
     } finally {
@@ -469,12 +544,14 @@
       return fail("handoff-invalid");
     root.name = value.previousName;
     const config = root.__cockpitEnhancements, age = Date.now() - value.createdAt;
-    if (value.owner !== config?.owner || value.features !== featureMask(config)
+    if (value.owner !== config?.owner || value.features !== featureMask(config, value.mode)
+      || value.requestedFeatures !== configurationMask(config)
       || !Number.isFinite(age) || age < 0 || age > 30000 || !localAsset(value.url)
-      || typeof value.source !== "string" || value.source.length > LIMIT
+      || !validModules(value.source, value.url, value.modules || [], value.mode)
       || !value.source.includes("window.__cockpitNativeFastComplete?.()")) return fail("handoff-invalid");
-    retainHandoff({ nonce, owner: value.owner, features: value.features, url: value.url, source: value.source });
-    return installModule(value.source, value.url);
+    retainHandoff({ nonce, owner: value.owner, features: value.features, requestedFeatures: value.requestedFeatures,
+      mode: value.mode, url: value.url, source: value.source, modules: value.modules });
+    return installModule(value.source, value.url, value.modules || [], value.mode);
   }
 
   function reloadPreparedDocument(nonce) {
@@ -489,12 +566,13 @@
     return result;
   }
 
-  const api = { allow, transform, localAsset, rewriteModule, prepareLive, prepareModule, prepareDocument, installModule, prepareHandoff, consumeHandoff, cancelHandoff, reloadPreparedDocument,
+  const api = { allow, transform, localAsset, functionRange, rewriteModule, prepareLive, prepareModule, prepareDocument, installModule, prepareHandoff, consumeHandoff, cancelHandoff, reloadPreparedDocument,
     inspectStartupReload: () => {
       const guard = root.__cockpitStartupGuard;
       if (!guard) return { ok: false, reason: "startup-guard-unavailable" };
       const reason = guard.inspect();
-      return reason ? { ok: false, reason } : { ok: true, reason: "clean-startup" };
+      return reason ? { ok: false, reason, ...(reason === 'draft-present' ? { draft: guard.snapshotDraft?.() } : {}) }
+        : { ok: true, reason: "clean-startup" };
     } };
   root.__cockpitNativeFast = api;
   if (typeof module === "object" && module.exports) module.exports = api;

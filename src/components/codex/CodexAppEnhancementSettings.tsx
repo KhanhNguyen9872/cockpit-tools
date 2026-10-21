@@ -6,29 +6,17 @@ import './CodexAppEnhancementSettings.css';
 interface EnhancementConfig {
   codex_app_native_fast_enabled: boolean;
   codex_app_api_quota_compat_enabled: boolean;
-  codex_app_api_dictation_enabled: boolean;
-  codex_app_api_dictation_model: string;
 }
 
-const DEFAULT_MODEL = 'gpt-4o-mini-transcribe';
 const DEFAULTS: EnhancementConfig = {
   codex_app_native_fast_enabled: true,
   codex_app_api_quota_compat_enabled: true,
-  codex_app_api_dictation_enabled: true,
-  codex_app_api_dictation_model: DEFAULT_MODEL,
 };
 const KEY = 'settings.general.codexEnhancements.';
 const SWITCHES = [
   ['codex_app_native_fast_enabled', 'nativeFast'],
   ['codex_app_api_quota_compat_enabled', 'quotaCompat'],
-  ['codex_app_api_dictation_enabled', 'dictation'],
 ] as const;
-
-export function normalizeDictationModel(value: string): string | null {
-  const normalized = value.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, '') || DEFAULT_MODEL;
-  return [...normalized].length <= 128 && !/[\p{White_Space}\p{Cc}]/u.test(normalized)
-    ? normalized : null;
-}
 
 async function boundedInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -52,19 +40,15 @@ export function CodexAppEnhancementSettings({ variant = 'settings', onError }: {
 }) {
   const { t } = useTranslation();
   const [config, setConfig] = useState(DEFAULTS);
-  const [model, setModel] = useState(DEFAULT_MODEL);
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [modelError, setModelError] = useState(false);
-  const modelDirty = useRef(false);
   const busy = useRef(false);
   const revision = useRef(0);
   const alive = useRef(true);
   const reportedError = useRef(false);
   const errorRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   const quick = variant === 'quick';
 
   const load = useCallback(async () => {
@@ -77,7 +61,6 @@ export function CodexAppEnhancementSettings({ variant = 'settings', onError }: {
       if (!alive.current || current !== revision.current) return;
       const next = { ...DEFAULTS, ...value };
       setConfig(next);
-      if (!modelDirty.current) setModel(next.codex_app_api_dictation_model);
       setLoaded(true);
     } catch (cause) {
       if (alive.current && current === revision.current) setError(String(cause));
@@ -111,11 +94,7 @@ export function CodexAppEnhancementSettings({ variant = 'settings', onError }: {
 
   useEffect(() => {
     if (error && !onError) errorRef.current?.scrollIntoView({ block: 'nearest' });
-    if (modelError) {
-      inputRef.current?.scrollIntoView({ block: 'nearest' });
-      inputRef.current?.focus();
-    }
-  }, [error, modelError, onError]);
+  }, [error, onError]);
 
   const save = async (updates: Partial<EnhancementConfig>) => {
     if (!loaded || busy.current || loading) return;
@@ -123,15 +102,10 @@ export function CodexAppEnhancementSettings({ variant = 'settings', onError }: {
     revision.current += 1;
     setSaving(true);
     setError('');
-    setModelError(false);
     try {
       await boundedInvoke('patch_general_config', { updates });
       if (!alive.current) return;
       setConfig(previous => ({ ...previous, ...updates }));
-      if (updates.codex_app_api_dictation_model !== undefined) {
-        modelDirty.current = false;
-        setModel(updates.codex_app_api_dictation_model);
-      }
       window.dispatchEvent(new Event('config-updated'));
     } catch (cause) {
       if (alive.current) setError(String(cause));
@@ -141,20 +115,6 @@ export function CodexAppEnhancementSettings({ variant = 'settings', onError }: {
     }
   };
 
-  const saveModel = () => {
-    const normalized = normalizeDictationModel(model);
-    setError('');
-    if (normalized === null) {
-      setModelError(true);
-      return;
-    }
-    if (normalized === config.codex_app_api_dictation_model) {
-      modelDirty.current = false;
-      setModel(normalized);
-      return;
-    }
-    void save({ codex_app_api_dictation_model: normalized });
-  };
   const disabled = !loaded || loading || saving;
 
   return (
@@ -178,23 +138,7 @@ export function CodexAppEnhancementSettings({ variant = 'settings', onError }: {
           {quick && <div className="qs-hint">{t(KEY + label + 'Desc')}</div>}
         </div>
       ))}
-      <div className={quick ? 'qs-row' : 'settings-row'}>
-        <div className={quick ? 'qs-row-label' : 'row-label'}>
-          <label className={quick ? undefined : 'row-title'}>
-            {t(KEY + 'dictationModel')}
-          </label>
-          {!quick && <div className="row-desc">{t(KEY + 'restartHint')}</div>}
-        </div>
-        <div className={quick ? 'qs-row-control' : 'row-control'}>
-          <input ref={inputRef} type="text" className={quick ? 'qs-path-input' : 'settings-input'}
-            value={model} placeholder={DEFAULT_MODEL} disabled={disabled || !config.codex_app_api_dictation_enabled}
-            aria-label={t(KEY + 'dictationModel')} aria-invalid={modelError}
-            onChange={event => { modelDirty.current = true; setModel(event.target.value); setModelError(false); setError(''); }}
-            onBlur={saveModel} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); saveModel(); } }} />
-          {modelError && <div className="codex-app-enhancements-error" role="alert">{t(KEY + 'dictationModelInvalid')}</div>}
-        </div>
-      </div>
-      {quick && <div className="qs-hint">{t(KEY + 'restartHint')}</div>}
+      <div className={quick ? 'qs-hint' : 'row-desc'}>{t(KEY + 'restartHint')}</div>
       {(loading || saving) && <div className="codex-app-enhancements-status" role="status">{t(saving ? 'common.saving' : 'common.loading')}</div>}
       {error && <div ref={errorRef} className="codex-app-enhancements-error" role="alert">
         {!onError && <span>{errorMessage}</span>}

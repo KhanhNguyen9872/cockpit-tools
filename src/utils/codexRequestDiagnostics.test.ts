@@ -1,7 +1,22 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { formatRequestPayloadBody, hasRequestFirstResponse, requestAuthorizationRouteKey, requestDiagnosticErrorSource, requestDiagnosticPhaseKey, requestServiceTierPresentation, requestedServiceTierLabelKey } from './codexRequestDiagnostics';
+import { authorizationFallbackReasonKey, authorizationFallbackSummaryKey, formatRequestPayloadBody, hasRequestFirstResponse, recordedServiceTierAdaptation, requestAuthorizationRouteKey, requestDiagnosticErrorSource, requestDiagnosticPhaseKey, requestServiceTierPresentation, requestedServiceTierLabelKey } from './codexRequestDiagnostics';
 import type { CodexLocalAccessRequestDetail } from '../types/codexLocalAccess';
+
+test('authorization fallback labels require recorded same-account route evidence', () => {
+  const trace = { reason: 'eligibility_rejected', fromAccountId: 'source-a', toAccountId: 'source-a', fromRoute: 'official', toRoute: 'local_gateway' };
+  assert.equal(authorizationFallbackSummaryKey(trace), 'codex.requestDiagnostics.authorizationFallback.summary');
+  assert.equal(authorizationFallbackSummaryKey(null), null);
+  assert.equal(authorizationFallbackSummaryKey({ ...trace, toAccountId: 'another-account' }), null);
+  assert.equal(authorizationFallbackSummaryKey({ ...trace, fromRoute: 'local_gateway' }), null);
+  assert.equal(authorizationFallbackSummaryKey({ ...trace, fromAccountId: '', toAccountId: '' }), null);
+  for (const [reason, expected] of [
+    ['eligibility_rejected', 'notEligible'], ['authorization_failed', 'authorization'],
+    ['capability_unsupported', 'unsupported'], ['official_throttled', 'limited'],
+    ['official_unavailable', 'unavailable'], ['circuit_open', 'paused'],
+    ['constructor', 'unavailable'], ['secrets.other', 'unavailable'],
+  ]) assert.equal(authorizationFallbackReasonKey(reason), `codex.requestDiagnostics.authorizationFallback.reasons.${expected}`);
+});
 
 test('historical access routes use the recorded endpoint identity, including each retry attempt', () => {
   assert.equal(requestAuthorizationRouteKey('original-account', 'official'), 'codex.requestDiagnostics.routeOfficial');
@@ -63,4 +78,16 @@ test('displaying a truncated or non-JSON snapshot preserves exactly the captured
   assert.equal(formatRequestPayloadBody({ body: '{"input":', truncated: true }), '{"input":');
   assert.equal(formatRequestPayloadBody({ body: 'raw data', truncated: false }), 'raw data');
   assert.equal(formatRequestPayloadBody({ body: '{"input":"hello"}', truncated: false }), '{\n  "input": "hello"\n}');
+});
+
+
+test('speed adjustment requires explicit recorded evidence, independent of default upstream feedback', () => {
+  const adaptation = { requestedTier: 'priority', sentTier: 'default', reason: 'official_default_only' } as const;
+  assert.equal(recordedServiceTierAdaptation(adaptation), adaptation);
+  assert.equal(recordedServiceTierAdaptation(), null);
+  assert.equal(recordedServiceTierAdaptation(null), null);
+  assert.equal(recordedServiceTierAdaptation({ ...adaptation, requestedTier: '' }), null);
+  assert.equal(recordedServiceTierAdaptation({ ...adaptation, requestedTier: '  ' }), null);
+  const event = { requestedServiceTier: 'priority', responseServiceTier: 'default' };
+  assert.equal(requestServiceTierPresentation(event).requested, 'priority');
 });

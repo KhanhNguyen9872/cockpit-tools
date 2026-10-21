@@ -123,7 +123,6 @@ func main() {
 	ignoreBrokenPipeSignal()
 	configPath := flag.String("config", "", "CLIProxyAPI config file")
 	manifestPath := flag.String("manifest", "", "Cockpit sidecar manifest file")
-	quotaReserveStatePath := flag.String("quota-reserve-state", "", "Cockpit OAuth quota reserve state file")
 	quotaPoolStatePath := flag.String("quota-pool-state", "", "Cockpit account-pool quota state file")
 	parentPID := flag.Int("parent-pid", 0, "Cockpit Tools parent process id")
 	controlStdin := flag.Bool("control-stdin", false, "Read private gateway lifecycle commands from the parent pipe")
@@ -159,14 +158,6 @@ func main() {
 	if err := m.quotaCooldowns.load(); err != nil {
 		emitter.emit(map[string]any{"type": "quota_cooldown_state_error", "message": err.Error()})
 	}
-	quotaState := newQuotaReserveStateStore(*quotaReserveStatePath, m)
-	if err := quotaState.load(); err != nil {
-		emitter.emit(map[string]any{
-			"type":    "quota_reserve_state_error",
-			"message": err.Error(),
-		})
-	}
-
 	usageTracker := newRequestUsageTracker()
 	tokenLimiter := newAPIKeyTokenLimiter(m)
 	policy := &requestPolicy{
@@ -183,14 +174,14 @@ func main() {
 	hook := &authHook{manifest: m, emitter: emitter}
 	priorityState := newAPIKeyPriorityStateStore(*manifestPath)
 	selector := &cockpitSelector{
-		manifest:   m,
-		emitter:    emitter,
-		locale:     normalizeCockpitLocale(m.Locale),
-		quota:      quotaState,
+		manifest: m,
+		emitter:  emitter,
+		locale:   normalizeCockpitLocale(m.Locale),
+
 		priorities: priorityState,
 		tracker:    usageTracker,
 	}
-	coreManager := buildCoreAuthManager(cfg, selector, hook, m, quotaState, usageTracker)
+	coreManager := buildCoreAuthManager(cfg, selector, hook, m, usageTracker)
 	m.authManager = coreManager
 
 	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -211,7 +202,6 @@ func main() {
 		}
 		defer m.continuityClient.Close()
 	}
-	quotaState.start(runtimeCtx, emitter)
 	m.quotaCooldowns.start(runtimeCtx, emitter)
 	monitorParentProcess(ctx, *parentPID, cancel, emitter)
 
@@ -240,7 +230,7 @@ func main() {
 	liveHandler := codexlive.NewHandler(coreManager, cfg)
 	defer liveHandler.Close()
 	relay := &relayServer{
-		automaticSelector:  buildCoreAuthSelectorWithConcurrency(nil, selector, m, quotaState, usageTracker),
+		automaticSelector:  buildCoreAuthSelectorWithConcurrency(nil, selector, m, usageTracker),
 		runtime:            runtime,
 		cfg:                cfg,
 		manifest:           m,

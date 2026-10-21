@@ -1,10 +1,9 @@
 //! Optional desktop enhancements, scoped to a launched Codex profile and its CDP port.
 //! Slow credential reads and all network work stay outside the launch transaction.
 
-mod dictation;
 mod fast;
 
-use crate::modules::{app_lifecycle, codex_account, config, i18n, logger};
+use crate::modules::{app_lifecycle, codex_account, config, logger};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -24,14 +23,18 @@ fn runtimes() -> &'static Mutex<HashMap<PathBuf, watch::Sender<bool>>> {
 
 pub fn enabled() -> bool {
     let cfg = config::get_user_config();
-    cfg.codex_app_native_fast_enabled
-        || cfg.codex_app_api_quota_compat_enabled
-        || cfg.codex_app_api_dictation_enabled
+    cfg.codex_app_native_fast_enabled || cfg.codex_app_api_quota_compat_enabled
 }
 
-pub fn start_for_profile(profile: PathBuf, instance: String, port: u16, fresh_launch: bool) {
+pub fn start_for_profile(
+    profile: PathBuf,
+    instance: String,
+    port: u16,
+    fresh_launch: bool,
+    api_service: bool,
+) {
     stop_for_profile(&profile);
-    if !enabled() {
+    if !enabled() && !api_service {
         return;
     }
     let (stop, receiver) = watch::channel(false);
@@ -39,7 +42,9 @@ pub fn start_for_profile(profile: PathBuf, instance: String, port: u16, fresh_la
         active.insert(profile.clone(), stop);
     }
     let startup = fresh_launch.then(|| Arc::new(fast::StartupReload::new()));
-    tauri::async_runtime::spawn(run_profile(profile, instance, port, startup, receiver));
+    tauri::async_runtime::spawn(run_profile(
+        profile, instance, port, startup, api_service, receiver,
+    ));
 }
 
 pub fn stop_for_profile(profile: &Path) {
@@ -58,25 +63,16 @@ pub fn stop_all() {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 struct Profile {
     native_fast: bool,
     api_key_auth_verified: bool,
     quota_compat: bool,
-    dictation: Option<Transport>,
-    model: String,
-    locale: String,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-struct Transport {
-    endpoint: String,
-    api_key: String,
 }
 
 impl Profile {
     fn active(&self) -> bool {
-        self.native_fast || self.quota_compat || self.dictation.is_some()
+        self.native_fast || self.quota_compat
     }
 }
 
@@ -120,24 +116,16 @@ fn profile_from_values(
     let custom_api = provider_id != "openai"
         && bearer.is_some()
         && bearer != auth.pointer("/tokens/access_token").and_then(Value::as_str);
-    let transport = base.zip(bearer.or(api_auth)).and_then(|(base, key)| {
-        let mut url = url::Url::parse(base).ok()?;
-        if !matches!(url.scheme(), "http" | "https")
-            || url.host_str().is_none()
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.query().is_some()
-            || url.fragment().is_some()
-        {
-            return None;
-        }
-        url.set_path(&format!(
-            "{}/audio/transcriptions",
-            url.path().trim_end_matches('/')
-        ));
-        Some(Transport {
-            endpoint: url.to_string(),
-            api_key: key.to_owned(),
+    // Quota compatibility still requires a real configured API route. No audio
+    // endpoint or transcription credential transport is prepared here.
+    let valid_api_base = base.is_some_and(|base| {
+        url::Url::parse(base).is_ok_and(|url| {
+            matches!(url.scheme(), "http" | "https")
+                && url.host_str().is_some()
+                && url.username().is_empty()
+                && url.password().is_none()
+                && url.query().is_none()
+                && url.fragment().is_none()
         })
     });
     Profile {
@@ -147,13 +135,7 @@ fn profile_from_values(
             && requires_auth == Some(true)
             && oauth
             && custom_api
-            && transport.is_some(),
-        dictation: cfg
-            .codex_app_api_dictation_enabled
-            .then_some(transport)
-            .flatten(),
-        model: cfg.codex_app_api_dictation_model.clone(),
-        locale: cfg.language.clone(),
+            && valid_api_base,
     }
 }
 
@@ -226,62 +208,10 @@ impl Child {
     }
 }
 
-fn labels(locale: &str) -> Value {
-    let mut labels = serde_json::Map::new();
-    for key in [
-        "start",
-        "stop",
-        "cancel",
-        "requesting",
-        "recording",
-        "transcribing",
-        "failed",
-        "unsupported",
-        "microphoneDenied",
-        "microphoneMissing",
-        "textReady",
-        "tooLarge",
-        "insertFailed",
-        "timedOut",
-    ] {
-        let suffix = format!("{}{}", key[..1].to_uppercase(), &key[1..]);
-        labels.insert(
-            key.to_owned(),
-            Value::String(i18n::translate(
-                locale,
-                &format!("settings.general.codexEnhancements.dictation{suffix}"),
-                &[],
-            )),
-        );
-    }
-    Value::Object(labels)
-}
-
-fn dictation_client(endpoint: &str) -> Option<reqwest::Client> {
-    let url = url::Url::parse(endpoint).ok()?;
-    let mut builder = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(90))
-        .redirect(reqwest::redirect::Policy::none());
-    let loopback = url.host_str().is_some_and(|host| {
-        host == "localhost"
-            || host
-                .parse::<std::net::IpAddr>()
-                .is_ok_and(|ip| ip.is_loopback())
-    });
-    if loopback {
-        builder = builder.no_proxy();
-    } else {
-        // API transports use the application's global proxy, never an OAuth account's egress binding.
-        let cfg = config::get_user_config();
-        if cfg.global_proxy_enabled {
-            let proxy = reqwest::Proxy::all(&cfg.global_proxy_url)
-                .ok()?
-                .no_proxy(reqwest::NoProxy::from_string(&cfg.global_proxy_no_proxy));
-            builder = builder.proxy(proxy);
-        }
-    }
-    builder.build().ok()
+// APIService capability denial must not wait on, or be revoked by, a slow
+// keyring/config read. Optional Fast/quota adaptations fail closed meanwhile.
+fn profile_or_api_fallback(profile: Option<Profile>, api_service: bool) -> Option<Profile> {
+    profile.or_else(|| api_service.then(Profile::default))
 }
 
 async fn run_profile(
@@ -289,6 +219,7 @@ async fn run_profile(
     instance: String,
     port: u16,
     startup: Option<Arc<fast::StartupReload>>,
+    api_service: bool,
     mut stop: watch::Receiver<bool>,
 ) {
     let Ok(client) = reqwest::Client::builder()
@@ -301,7 +232,7 @@ async fn run_profile(
     };
     let mut children: HashMap<String, Child> = HashMap::new();
     let mut retry_at: HashMap<String, Instant> = HashMap::new();
-    let mut current: Option<Profile> = None;
+    let mut current = profile_or_api_fallback(None, api_service);
     let mut read: Option<JoinHandle<Result<Profile, ()>>> = None;
     let mut read_started = Instant::now();
     // New launches discover the first completed credential read promptly, before
@@ -321,7 +252,9 @@ async fn run_profile(
             break;
         }
         if read.as_ref().is_some_and(JoinHandle::is_finished) {
-            let next = read.take().unwrap().await.ok().and_then(Result::ok);
+            let next = profile_or_api_fallback(
+                read.take().unwrap().await.ok().and_then(Result::ok), api_service,
+            );
             if initial_polling {
                 initial_polling = false;
                 tick = tokio::time::interval(POLL);
@@ -337,17 +270,20 @@ async fn run_profile(
         } else if read.is_some() && read_started.elapsed() > Duration::from_secs(10) {
             // A stalled keyring probe remains single-flight; revoke active adapters
             // while waiting rather than launching more blocking credential reads.
-            for (_, child) in children.drain() {
-                child.stop();
+            let safe = profile_or_api_fallback(None, api_service);
+            if current != safe {
+                for (_, child) in children.drain() {
+                    child.stop();
+                }
+                current = safe;
             }
-            current = None;
         }
         if read.is_none() {
             let path = profile_dir.clone();
             read_started = Instant::now();
             read = Some(tokio::task::spawn_blocking(move || read_profile(&path)));
         }
-        let Some(profile) = current.as_ref().filter(|profile| profile.active()) else {
+        let Some(profile) = current.as_ref().filter(|profile| profile.active() || api_service) else {
             continue;
         };
         let Some(available) = targets(&client, port).await else {
@@ -367,73 +303,34 @@ async fn run_profile(
             retry_at.insert(key, Instant::now() + RETRY);
         }
         for socket in available {
-            for kind in ["controls", "dictation"] {
-                if kind == "controls"
-                    && !profile.native_fast
-                    && !profile.quota_compat
-                    && profile.dictation.is_none()
-                {
-                    continue;
-                }
-                if kind == "dictation" && profile.dictation.is_none() {
-                    continue;
-                }
-                let key = format!("{kind}:{socket}");
-                if children.contains_key(&key)
-                    || retry_at.get(&key).is_some_and(|at| *at > Instant::now())
-                {
-                    continue;
-                }
-                let (child_stop, receiver) = watch::channel(false);
-                let socket = socket.clone();
-                let profile = profile.clone();
-                let instance = instance.clone();
-                let startup = startup.clone();
-                let task = tokio::spawn(async move {
-                    let result = if kind == "controls" {
-                        fast::run(
-                            socket,
-                            profile.native_fast,
-                            profile.quota_compat,
-                            profile.dictation.is_some(),
-                            profile.api_key_auth_verified,
-                            startup,
-                            receiver,
-                        )
-                        .await
-                    } else if let Some(transport) = profile.dictation {
-                        match dictation_client(&transport.endpoint) {
-                            Some(client) => {
-                                dictation::run(
-                                    socket,
-                                    dictation::DictationConfig {
-                                        endpoint: transport.endpoint,
-                                        api_key: transport.api_key,
-                                        model: profile.model,
-                                        labels: labels(&profile.locale),
-                                        client,
-                                    },
-                                    receiver,
-                                )
-                                .await
-                            }
-                            None => Err("dictation transport unavailable".into()),
-                        }
-                    } else {
-                        Ok(())
-                    };
-                    if result.is_err() {
-                        logger::log_warn(&format!("[Codex enhancements] setup_failed: instance={instance}, component={kind}"));
-                    }
-                });
-                children.insert(
-                    key,
-                    Child {
-                        stop: child_stop,
-                        task,
-                    },
-                );
+            let key = format!("controls:{socket}");
+            if children.contains_key(&key)
+                || retry_at.get(&key).is_some_and(|at| *at > Instant::now())
+            {
+                continue;
             }
+            let (child_stop, receiver) = watch::channel(false);
+            let profile = profile.clone();
+            let instance = instance.clone();
+            let startup = startup.clone();
+            let draft_profile = profile_dir.clone();
+            let task = tokio::spawn(async move {
+                let result = fast::run(
+                    socket,
+                    draft_profile,
+                    profile.native_fast,
+                    profile.quota_compat,
+                    profile.api_key_auth_verified,
+                    api_service,
+                    startup,
+                    receiver,
+                )
+                .await;
+                if result.is_err() {
+                    logger::log_warn(&format!("[Codex enhancements] setup_failed: instance={instance}, component=controls"));
+                }
+            });
+            children.insert(key, Child { stop: child_stop, task });
         }
     }
     for (_, child) in children {
@@ -447,21 +344,16 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn enhancement_scope_requires_actual_auth_and_separate_api_transport() {
+    fn enhancement_scope_requires_actual_auth_and_separate_api_route() {
         let mut cfg = config::UserConfig::default();
         cfg.codex_app_native_fast_enabled = true;
         cfg.codex_app_api_quota_compat_enabled = true;
-        cfg.codex_app_api_dictation_enabled = true;
         let doc: toml_edit::Document = "model_provider='relay'\n[model_providers.relay]\nbase_url='http://127.0.0.1:8000/v1'\nexperimental_bearer_token='local-key'\nrequires_openai_auth=true\n".parse().unwrap();
         let oauth = json!({"tokens":{"id_token":"id", "access_token":"access"}});
         let profile = profile_from_values(&doc, &oauth, &cfg);
         assert!(!profile.native_fast);
         assert!(!profile.api_key_auth_verified);
         assert!(profile.quota_compat);
-        assert_eq!(
-            profile.dictation.unwrap().endpoint,
-            "http://127.0.0.1:8000/v1/audio/transcriptions"
-        );
         let api = json!({"auth_mode":"apikey","OPENAI_API_KEY":"api-key"});
         let profile = profile_from_values(&doc, &api, &cfg);
         assert!(profile.native_fast);
@@ -519,18 +411,27 @@ mod tests {
     }
 
     #[test]
-    fn dictation_does_not_accept_embedded_credentials_or_url_queries() {
+    fn quota_route_does_not_accept_embedded_credentials_or_url_queries() {
         let mut cfg = config::UserConfig::default();
-        cfg.codex_app_api_dictation_enabled = true;
+        cfg.codex_app_api_quota_compat_enabled = true;
+        let auth = json!({"tokens":{"id_token":"id", "access_token":"access"}});
         for base in [
             "https://user:secret@example.test/v1",
             "https://example.test/v1?key=secret",
             "file:///tmp/audio",
         ] {
-            let doc: toml_edit::Document = format!("model_provider='relay'\n[model_providers.relay]\nbase_url='{base}'\nexperimental_bearer_token='api-key'\n").parse().unwrap();
-            assert!(profile_from_values(&doc, &Value::Null, &cfg)
-                .dictation
-                .is_none());
+            let doc: toml_edit::Document = format!("model_provider='relay'\n[model_providers.relay]\nbase_url='{base}'\nexperimental_bearer_token='api-key'\nrequires_openai_auth=true\n").parse().unwrap();
+            assert!(!profile_from_values(&doc, &auth, &cfg).quota_compat);
         }
     }
+    #[test]
+    fn api_service_banner_scope_survives_missing_or_stalled_profile_reads() {
+        let safe = profile_or_api_fallback(None, true).unwrap();
+        assert!(!safe.active());
+        assert!(!safe.api_key_auth_verified);
+        assert!(profile_or_api_fallback(None, false).is_none());
+        let configured = Profile { native_fast: true, ..Profile::default() };
+        assert!(profile_or_api_fallback(Some(configured), true).unwrap().native_fast);
+    }
+
 }

@@ -42,6 +42,16 @@ pub(super) fn validate_event(event: &Value) -> Result<(), ServiceError> {
     Ok(())
 }
 
+/// Plan usage has no public speed override. Adapt only the per-route copy;
+/// the logical source remains unchanged for a later local fallback.
+pub(super) fn adapt_service_tier(body: &mut Value) {
+    if body.get("service_tier").and_then(Value::as_str)
+        .is_some_and(|tier| !matches!(tier, "" | "auto" | "default"))
+    {
+        body.as_object_mut().expect("field implies object").remove("service_tier");
+    }
+}
+
 /// Validate the original request before host policies can remove tools. HTTP
 /// continuation IDs are rejected explicitly; discarding one would lose history.
 pub(super) fn validate(body: &Value, compact: bool) -> Result<(), ServiceError> {

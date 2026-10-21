@@ -557,6 +557,34 @@ fn request_logs_proxy_route_select(conn: &Connection) -> Result<String, String> 
     Ok(projection.join(", "))
 }
 
+fn request_logs_authorization_fallback_select(conn: &Connection) -> Result<String, String> {
+    if !diagnostics_table_exists(conn).map_err(|error| error.to_string())? {
+        return Ok("'' AS authorization_attempts_json".into());
+    }
+    // Primary-key lookup per visible row only. Never read payloads, wait for an in-flight
+    // diagnostic, or scan all diagnostics merely to decorate a paginated list.
+    Ok("(SELECT CASE WHEN length(CAST(attempts_json AS BLOB)) <= 65536 THEN attempts_json ELSE '[]' END FROM request_diagnostics WHERE request_id=request_logs.request_id) AS authorization_attempts_json".into())
+}
+
+fn authorization_fallback_from_attempts_json(raw: &str) -> Option<crate::models::codex_local_access::CodexLocalAccessAuthorizationFallbackTrace> {
+    if raw.is_empty() || raw.len() > 65536 { return None; }
+    let attempts: Vec<CodexLocalAccessRequestAttempt> = serde_json::from_str(raw).ok()?;
+    attempts.into_iter().take(REQUEST_DIAGNOSTICS_MAX_ATTEMPTS).find_map(|mut attempt| {
+        normalize_authorization_fallback_trace(&mut attempt);
+        attempt.authorization_fallback
+    })
+}
+
+fn service_tier_adaptation_from_attempts_json(raw: &str) -> Option<crate::models::codex_local_access::CodexLocalAccessServiceTierAdaptation> {
+    if raw.is_empty() || raw.len() > 65536 { return None; }
+    let attempts: Vec<CodexLocalAccessRequestAttempt> = serde_json::from_str(raw).ok()?;
+    let mut final_attempt = attempts.into_iter().take(REQUEST_DIAGNOSTICS_MAX_ATTEMPTS)
+        .filter(|attempt| attempt.authorization_route.is_some() && attempt.transport != "preflight")
+        .last()?;
+    normalize_service_tier_adaptation(&mut final_attempt);
+    final_attempt.service_tier_adaptation
+}
+
 fn official_stats_account_id(local_account_id: &str) -> Option<String> {
     let local_account_id = local_account_id.trim();
     if local_account_id.is_empty() {
@@ -1691,7 +1719,13 @@ fn usage_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodexLocalA
         Ok(value.max(0) as u64)
     };
     Ok(CodexLocalAccessUsageEvent {
+        service_tier_adaptation: row.get::<_, String>("authorization_route").ok()
+            .filter(|route| route == "official")
+            .and_then(|_| row.get::<_, Option<String>>("authorization_attempts_json").ok().flatten())
+            .as_deref().and_then(service_tier_adaptation_from_attempts_json),
         authorization_route: row.get::<_, String>("authorization_route").ok().filter(|route| matches!(route.as_str(), "official" | "local_gateway")),
+        authorization_fallback: row.get::<_, Option<String>>("authorization_attempts_json").ok().flatten()
+            .as_deref().and_then(authorization_fallback_from_attempts_json),
         timestamp: row.get("timestamp")?,
         request_id: row.get("request_id")?,
         account_id: row.get("account_id")?,
@@ -2198,6 +2232,7 @@ fn query_local_access_usage_events_blocking(
     let proxy_route_select = request_logs_proxy_route_select(&conn)?;
     let first_response_select = request_logs_first_response_select(&conn)?;
     let output_generation_select = request_logs_output_generation_select(&conn)?;
+    let authorization_fallback_select = request_logs_authorization_fallback_select(&conn)?;
     let list_sql = format!(
         r#"
         SELECT
@@ -2217,6 +2252,7 @@ fn query_local_access_usage_events_blocking(
             {reasoning_effort_select},
             {service_tier_evidence_select},
             {proxy_route_select},
+            {authorization_fallback_select},
             {first_response_select}, {output_generation_select},
             turn_state_length,
             turn_state_class,
@@ -2734,6 +2770,8 @@ fn append_usage_event_with_meta(
     let model_id = model_id.unwrap_or_default().trim().to_string();
     let event = CodexLocalAccessUsageEvent {
         authorization_route: None,
+        authorization_fallback: None,
+        service_tier_adaptation: None,
         timestamp: now,
         request_id: request_id.unwrap_or_default().trim().to_string(),
         account_id: account_id.unwrap_or_default().trim().to_string(),
@@ -3169,3 +3207,33 @@ fn apply_reprice_changes_to_stats(
 #[cfg(test)]
 #[path = "codex_local_access_tests_proxy_route_storage.rs"]
 mod proxy_route_storage_tests;
+
+#[cfg(test)]
+mod official_service_tier_adaptation_tests {
+    use super::*;
+
+    fn attempt(route: &str, adaptation: bool) -> CodexLocalAccessRequestAttempt {
+        CodexLocalAccessRequestAttempt {
+            authorization_route: Some(route.into()),
+            transport: "http".into(),
+            service_tier_adaptation: adaptation.then(|| crate::models::codex_local_access::CodexLocalAccessServiceTierAdaptation {
+                requested_tier: "priority".into(), sent_tier: "default".into(), reason: "official_default_only".into(),
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn official_service_tier_summary_uses_final_route_and_validates_recorded_metadata() {
+        let official = attempt("official", true);
+        let local = attempt("local_gateway", false);
+        let encode = |items: Vec<CodexLocalAccessRequestAttempt>| serde_json::to_string(&items).unwrap();
+        assert!(service_tier_adaptation_from_attempts_json(&encode(vec![official.clone()])).is_some());
+        assert!(service_tier_adaptation_from_attempts_json(&encode(vec![official.clone(), local])).is_none());
+        let mut invalid = official.clone();
+        invalid.service_tier_adaptation.as_mut().unwrap().sent_tier = "priority".into();
+        assert!(service_tier_adaptation_from_attempts_json(&encode(vec![invalid])).is_none());
+        let mut skipped_local = attempt("local_gateway", false); skipped_local.transport = "preflight".into();
+        assert!(service_tier_adaptation_from_attempts_json(&encode(vec![official, skipped_local])).is_some());
+    }
+}

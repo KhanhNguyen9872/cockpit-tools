@@ -1,6 +1,6 @@
 // Deliberately separate from wakeup: bounded streaming, no tools, no model fallback,
 // no API-service startup and no automatic generation retries.
-pub const PELICAN_DELIVERY_INSTRUCTIONS: &str = "Return a complete standalone HTML document in your response. Do not use Markdown fences or external dependencies.";
+pub const PELICAN_DELIVERY_INSTRUCTIONS: &str = "Follow the output format requested by the user. For HTML or SVG creation tasks, return a complete standalone HTML document without Markdown fences or external dependencies. For other tasks, answer directly in the requested format; do not wrap plain text or JSON in HTML. Do not use external tools or search.";
 const PELICAN_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const PELICAN_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 const PELICAN_TOTAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);

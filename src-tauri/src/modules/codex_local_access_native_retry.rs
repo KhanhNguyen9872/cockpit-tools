@@ -32,19 +32,37 @@ async fn native_retry_cooldown_wait(
         }
         plan.account_ids.clone()
     };
-    let accounts = host.load_routing_accounts(ids, caller.id != NATIVE_INTERNAL_CALLER && !plan.provider).await?;
+    let mut accounts = host
+        .load_routing_accounts(ids, caller.id != NATIVE_INTERNAL_CALLER && !plan.provider)
+        .await?;
+    let _ = native_official_preflight_fallbacks(
+        host,
+        caller,
+        &collection,
+        key,
+        &plan,
+        &request,
+        &mut accounts,
+    )
+    .await;
     let states = host
         .cooldowns
         .lock()
         .map_err(|_| native_error(503, "service_unavailable", "Account state is unavailable"))?;
     let mut closest = None;
     for account in accounts {
-        if (caller.id != NATIVE_INTERNAL_CALLER && service_account_paused(&collection, &account.id)) || !native_eligible(&account)
+        if (caller.id != NATIVE_INTERNAL_CALLER && service_account_paused(&collection, &account.id))
+            || !native_eligible(&account)
             || !native_auxiliary_eligible(&account, request.auxiliary.as_deref())
-            || request
-                .preferred_account_id
-                .as_ref()
-                .is_some_and(|id| id != &account.id && account.official_registration_id.as_ref().is_none_or(|grant| id != &format!("{}{grant}", codex_account::CHATGPT_PLAN_ACCOUNT_PREFIX)))
+            || request.preferred_account_id.as_ref().is_some_and(|id| {
+                id != &account.id
+                    && account
+                        .official_registration_id
+                        .as_ref()
+                        .is_none_or(|grant| {
+                            id != &format!("{}{grant}", codex_account::CHATGPT_PLAN_ACCOUNT_PREFIX)
+                        })
+            })
             || (plan.oauth_only && !native_is_oauth_authorization_account(&account))
             || native_xai_base_denied(&collection, key, &plan, &account)
             || (collection.restrict_free_accounts
@@ -73,14 +91,18 @@ async fn native_retry_cooldown_wait(
         {
             continue;
         }
-        let wait = native_cooldown_wait(
-            &states,
-            &account.id,
-            &upstream,
-            collection.disable_cooling,
-            Instant::now(),
-        )
-        .unwrap_or(Duration::ZERO);
+        let wait = if native_is_chatgpt_plan_account(&account) {
+            Duration::ZERO
+        } else {
+            native_cooldown_wait(
+                &states,
+                &account.id,
+                &upstream,
+                collection.disable_cooling,
+                Instant::now(),
+            )
+            .unwrap_or(Duration::ZERO)
+        };
         closest = Some(closest.map_or(wait, |current: Duration| current.min(wait)));
     }
     Ok(closest.filter(|wait| *wait <= max_wait))
@@ -127,7 +149,13 @@ async fn native_image_retry_cooldown_wait(
             collection.image_generation_account_ids.clone()
         }
     };
-    let accounts = host.load_routing_accounts(ids, caller.id != NATIVE_INTERNAL_CALLER && collection.image_generation_account_ids.is_empty()).await?;
+    let accounts = host
+        .load_routing_accounts(
+            ids,
+            caller.id != NATIVE_INTERNAL_CALLER
+                && collection.image_generation_account_ids.is_empty(),
+        )
+        .await?;
     let states = host
         .cooldowns
         .lock()

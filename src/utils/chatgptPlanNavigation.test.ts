@@ -35,6 +35,6 @@ test('service pages retire the standalone grant tab and use the shared account g
   const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
   assert.doesNotMatch(page, /CHATGPT_PLAN_OPEN_REQUEST|hasPendingChatgptPlanAuthorization/);
   assert.doesNotMatch(view, /<ChatGptPlanAccounts/);
-  assert.match(page, /requestCodexOfficialAuthorizationCheck\(\{ running:/);
+  assert.doesNotMatch(page, /requestCodexOfficialAuthorizationCheck/);
   assert.match(app, /<CodexAccountServiceHost activePage=/);
 });

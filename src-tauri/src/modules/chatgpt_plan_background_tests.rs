@@ -70,7 +70,11 @@ fn assert_original_unchanged(source: &CodexAccount) {
 }
 
 async fn service_snapshot() -> Value {
-    let state = access::get_local_access_state().await.unwrap();
+    let mut state = access::get_local_access_state().await.unwrap();
+    // Background statistics maintenance can advance this refresh timestamp
+    // without a service request. Keep every config field, window and counter
+    // in the equality assertion; ignore only the aggregate refresh time.
+    state.stats.updated_at = 0;
     json!({
         "collection": state.collection,
         "running": state.running,

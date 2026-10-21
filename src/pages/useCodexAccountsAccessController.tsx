@@ -1,6 +1,6 @@
 import { prepareCodexServiceJoins } from "../utils/codexServiceJoin";
-import { listChatGptPlanAccounts } from "../services/chatgptPlanService";
-import { canChooseCodexServiceAuthorization, requestCodexServiceAuthorizations } from "../utils/codexAccountServiceNavigation";
+import { chatGptPlanErrorKey, listChatGptPlanAccounts } from "../services/chatgptPlanService";
+import { canChooseCodexServiceAuthorization } from "../utils/codexAccountServiceNavigation";
 import { resolveCodexAccountDisplayName } from "../utils/codexAccountDisplayName";
 import { listenSafely as listen } from "../utils/tauriEventListener";
 import { useState, useEffect, useMemo, useCallback, useRef, type ReactElement } from "react";
@@ -46,11 +46,10 @@ import { CODEX_API_KEY_USAGE_REFRESHED_EVENT, readCodexApiKeyUsageCache, writeCo
 import { isModelProviderUsageUnavailableError, listModelProviderModels } from "../services/modelProviderUsageService";
 import { upsertSavedMfaRecord } from "../utils/mfaVault";
 import md5 from "blueimp-md5";
-import { CODEX_BATCH_IMPORT_SESSION_STORAGE_KEY, DEFAULT_CODEX_API_BASE_URL, DEFAULT_CODEX_API_PROVIDER_ID, inferCodexAccountProviderMode, isRelayApiProviderTemplateId, isSameHttpBaseUrl, joinFilePath, maskCodexApiKey, normalizeHttpBaseUrl, normalizePathForCompare, OPENAI_OFFICIAL_PRESET_ID, parseApiModelCatalogText, parseOAuthQuotaReservePercent, persistLastCodexCliWorkingDir, readLastCodexCliWorkingDir, sanitizeCodexCliInstanceName, type CodexCliInstanceDraft, type CodexCliLaunchModalState, type OAuthBindingQuotaReserveFieldErrors } from "./codexAccountsControllerModel";
+import { CODEX_BATCH_IMPORT_SESSION_STORAGE_KEY, DEFAULT_CODEX_API_BASE_URL, DEFAULT_CODEX_API_PROVIDER_ID, inferCodexAccountProviderMode, isRelayApiProviderTemplateId, isSameHttpBaseUrl, joinFilePath, maskCodexApiKey, normalizeHttpBaseUrl, normalizePathForCompare, OPENAI_OFFICIAL_PRESET_ID, parseApiModelCatalogText, persistLastCodexCliWorkingDir, readLastCodexCliWorkingDir, sanitizeCodexCliInstanceName, type CodexCliInstanceDraft, type CodexCliLaunchModalState } from "./codexAccountsControllerModel";
 import { useCodexApiKeyUsageFormatting } from "./codexApiKeyUsageFormatting";
 import { renderCodexApiKeyUsagePanel } from "./codexApiKeyUsagePanel";
 import type { CodexAccountsAccessControllerContext } from "./codexAccountsAccessControllerContract";
-import { DEFAULT_OAUTH_HOURLY_QUOTA_RESERVE_PERCENT, DEFAULT_OAUTH_WEEKLY_QUOTA_RESERVE_PERCENT, resolveOAuthBindingQuotaReserve } from "./codexAccountsControllerModel";
 
 /** 封装 useCodexAccountsPageController 的 useCodexAccountsAccessController 业务域状态与动作。 */
 export function useCodexAccountsAccessController(context: CodexAccountsAccessControllerContext) {
@@ -121,13 +120,8 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
     oauthAccounts,
     oauthBindingAccount,
     oauthBindingAutoSwitch,
-    oauthBindingHourlyReserveDraft,
-    oauthBindingHourlyReserveInputRef,
-    oauthBindingQuotaReserve,
     oauthBindingSaving,
     oauthBindingTargetKind,
-    oauthBindingWeeklyReserveDraft,
-    oauthBindingWeeklyReserveInputRef,
     openCodexAddModal,
     page,
     pendingApiKeyFunCodexPrefillRef,
@@ -201,14 +195,9 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
     setOauthBindingAccountId,
     setOauthBindingAutoSwitch,
     setOauthBindingError,
-    setOauthBindingHourlyReserveDraft,
-    setOauthBindingQuotaReserve,
-    setOauthBindingQuotaReserveEditorOpen,
-    setOauthBindingQuotaReserveFieldErrors,
     setOauthBindingSaving,
     setOauthBindingSelectedAccountId,
     setOauthBindingTargetKind,
-    setOauthBindingWeeklyReserveDraft,
     setPendingWebSessionImport,
     setQuickSwitchAccountId,
     setQuickSwitchApiKeyId,
@@ -287,11 +276,6 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
       setOauthBindingAccountId(null);
       setOauthBindingSelectedAccountId("");
       setOauthBindingAutoSwitch(false);
-      setOauthBindingQuotaReserve(null);
-      setOauthBindingQuotaReserveEditorOpen(false);
-      setOauthBindingHourlyReserveDraft("");
-      setOauthBindingWeeklyReserveDraft("");
-      setOauthBindingQuotaReserveFieldErrors({});
       setOauthBindingError(null);
     }, [setOauthBindingError]);
   
@@ -312,11 +296,6 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
             : "",
         );
         setOauthBindingAutoSwitch(options?.autoSwitch ?? false);
-        setOauthBindingQuotaReserve(null);
-        setOauthBindingQuotaReserveEditorOpen(false);
-        setOauthBindingHourlyReserveDraft("");
-        setOauthBindingWeeklyReserveDraft("");
-        setOauthBindingQuotaReserveFieldErrors({});
         setOauthBindingError(null);
       },
       [resolveBoundOAuthAccount, setOauthBindingError],
@@ -324,7 +303,6 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
   
     const openLocalAccessOAuthBindingModal = useCallback(
       (options?: { autoSwitch?: boolean }) => {
-        const quotaReserve = resolveOAuthBindingQuotaReserve(localAccessCollection);
         setOauthBindingTargetKind("local_access");
         setOauthBindingAccountId(null);
         setOauthBindingSelectedAccountId(
@@ -334,107 +312,14 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
             : "",
         );
         setOauthBindingAutoSwitch(options?.autoSwitch ?? false);
-        setOauthBindingQuotaReserve(quotaReserve);
-        setOauthBindingQuotaReserveEditorOpen(false);
-        setOauthBindingHourlyReserveDraft("");
-        setOauthBindingWeeklyReserveDraft("");
-        setOauthBindingQuotaReserveFieldErrors({});
         setOauthBindingError(null);
       },
       [
         boundLocalAccessOAuthAccount,
         localAccessCollection?.boundOauthAccountId,
-        localAccessCollection?.boundOauthQuotaReserve,
         setOauthBindingError,
       ],
     );
-  
-    const openOAuthBindingQuotaReserveEditor = useCallback(() => {
-      setOauthBindingHourlyReserveDraft(
-        oauthBindingQuotaReserve
-          ? String(oauthBindingQuotaReserve.hourlyPercent)
-          : String(DEFAULT_OAUTH_HOURLY_QUOTA_RESERVE_PERCENT),
-      );
-      setOauthBindingWeeklyReserveDraft(
-        oauthBindingQuotaReserve
-          ? String(oauthBindingQuotaReserve.weeklyPercent)
-          : String(DEFAULT_OAUTH_WEEKLY_QUOTA_RESERVE_PERCENT),
-      );
-      setOauthBindingQuotaReserveFieldErrors({});
-      setOauthBindingQuotaReserveEditorOpen(true);
-      window.requestAnimationFrame(() => {
-        oauthBindingHourlyReserveInputRef.current?.focus();
-      });
-    }, [oauthBindingQuotaReserve]);
-  
-    const closeOAuthBindingQuotaReserveEditor = useCallback(() => {
-      setOauthBindingQuotaReserveEditorOpen(false);
-      setOauthBindingQuotaReserveFieldErrors({});
-    }, []);
-  
-    const handleOAuthBindingQuotaReserveToggle = useCallback(
-      (checked: boolean) => {
-        setOauthBindingError(null);
-        if (!checked) {
-          setOauthBindingQuotaReserve(null);
-          setOauthBindingQuotaReserveEditorOpen(false);
-          setOauthBindingQuotaReserveFieldErrors({});
-          return;
-        }
-        openOAuthBindingQuotaReserveEditor();
-      },
-      [openOAuthBindingQuotaReserveEditor, setOauthBindingError],
-    );
-  
-    const validateOAuthBindingQuotaReserveField = useCallback(
-      (field: keyof OAuthBindingQuotaReserveFieldErrors, rawValue: string) => {
-        const valid = parseOAuthQuotaReservePercent(rawValue) !== null;
-        setOauthBindingQuotaReserveFieldErrors((prev) => ({
-          ...prev,
-          [field]: valid
-            ? undefined
-            : t(
-                "codex.localAccess.oauthBinding.quotaReserveInvalid",
-                "请输入 1 到 100 的整数",
-              ),
-        }));
-      },
-      [t],
-    );
-  
-    const confirmOAuthBindingQuotaReserveEditor = useCallback((protection?: { safetyMarginPercent: number }) => {
-      const hourlyPercent = parseOAuthQuotaReservePercent(
-        oauthBindingHourlyReserveDraft,
-      );
-      const weeklyPercent = parseOAuthQuotaReservePercent(
-        oauthBindingWeeklyReserveDraft,
-      );
-      const invalidMessage = t(
-        "codex.localAccess.oauthBinding.quotaReserveInvalid",
-        "请输入 1 到 100 的整数",
-      );
-      const fieldErrors: OAuthBindingQuotaReserveFieldErrors = {};
-      if (hourlyPercent === null) {
-        fieldErrors.hourlyPercent = invalidMessage;
-      }
-      if (weeklyPercent === null) {
-        fieldErrors.weeklyPercent = invalidMessage;
-      }
-      if (hourlyPercent === null || weeklyPercent === null) {
-        setOauthBindingQuotaReserveFieldErrors(fieldErrors);
-        window.requestAnimationFrame(() => {
-          const target = fieldErrors.hourlyPercent
-            ? oauthBindingHourlyReserveInputRef.current
-            : oauthBindingWeeklyReserveInputRef.current;
-          target?.scrollIntoView({ behavior: "smooth", block: "center" });
-          target?.focus();
-        });
-        return;
-      }
-      setOauthBindingQuotaReserve({ hourlyPercent, weeklyPercent, ...protection, strict: true });
-      setOauthBindingQuotaReserveEditorOpen(false);
-      setOauthBindingQuotaReserveFieldErrors({});
-    }, [oauthBindingHourlyReserveDraft, oauthBindingWeeklyReserveDraft, t]);
   
     const formatCodexAuthFailureMessage = useCallback(
       (rawError: unknown) => {
@@ -818,7 +703,6 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
       }
       if (!oauthBindingTargetKind) return;
       setOauthBindingError(null);
-      setOauthBindingQuotaReserveFieldErrors({});
       if (!selectedOAuthBindingAccount) {
         setOauthBindingError(
           t("codex.api.oauthBinding.validationRequired", "请选择 OAuth 账号"),
@@ -853,18 +737,12 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
         return;
       }
   
-      const quotaReserve =
-        oauthBindingTargetKind === "local_access"
-          ? oauthBindingQuotaReserve
-          : null;
-  
       setOauthBindingSaving(true);
       try {
         if (oauthBindingTargetKind === "local_access") {
           const nextState =
             await codexLocalAccessService.updateCodexLocalAccessBoundOAuthAccount(
               selectedOAuthBindingAccount.id,
-              quotaReserve,
             );
           setLocalAccessState(nextState);
         } else if (oauthBindingAccount) {
@@ -897,7 +775,6 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
       executeCodexAccountSwitch,
       oauthBindingAccount,
       oauthBindingAutoSwitch,
-      oauthBindingQuotaReserve,
       oauthBindingTargetKind,
       selectedOAuthBindingAccount,
       setMessage,
@@ -956,10 +833,6 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
         ? {
             targetKind: oauthBindingTargetKind,
             targetAccountId: oauthBindingAccount?.id?.trim() || undefined,
-            quotaReserve:
-              oauthBindingTargetKind === "local_access"
-                ? oauthBindingQuotaReserve
-                : null,
           }
         : undefined;
       setReauthRetryOAuthBinding(retryOAuthBinding ?? null);
@@ -971,7 +844,6 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
       });
     }, [
       oauthBindingAccount,
-      oauthBindingQuotaReserve,
       oauthBindingTargetKind,
       resetOAuthBindingModal,
       selectedOAuthBindingAccount,
@@ -1977,7 +1849,6 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
           try {
             const grants = result.imported.some(canChooseCodexServiceAuthorization) ? await listChatGptPlanAccounts() : [];
             const prepared = await prepareCodexServiceJoins(result.imported, grants, localAccessCollection?.accountIds ?? [], setLocalAccessState);
-            if (prepared.choiceIds.length) requestCodexServiceAuthorizations(prepared.choiceIds);
             if (prepared.resumedIds.length) { await ensureLocalAccessEntryVisible(); setImportApiServiceGuideCount(prepared.resumedIds.length); }
             if (prepared.localIds.length > 0) {
               const appended = await codexLocalAccessService.appendCodexLocalAccessAccounts(prepared.localIds);
@@ -1988,6 +1859,12 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
               }
             }
             window.dispatchEvent(new Event("codex-local-access-state-updated"));
+            if (prepared.failures.length) throw new Error(prepared.failures.map(({ accountId, error }) => {
+              const account = result.imported.find((candidate) => candidate.id === accountId);
+              const label = maskAccountText(account ? resolveCodexAccountDisplayName(account, t("common.apiKeyAccount")) : accountId);
+              const raw = String(error).replace(/^Error:\s*/, "");
+              return `${label}: ${raw.startsWith("CHATGPT_PLAN_") ? t(chatGptPlanErrorKey(error)) : raw}`;
+            }).join("\n"));
           } catch (apiError) {
             apiServiceError = t("codex.batchImport.addToApiServiceFailed",
               "账号已导入，但添加到 API 服务失败: {{error}}")
@@ -3786,9 +3663,7 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
     clearInlineRename,
     closeApiKeyCredentialsModal,
     closeOAuthBindingModal,
-    closeOAuthBindingQuotaReserveEditor,
     closeQuickSwitchModal,
-    confirmOAuthBindingQuotaReserveEditor,
     findApiKeyUsageDetail,
     formatApiKeyUsageDetailByKey,
     formatApiKeyUsageDetailLabel,
@@ -3821,7 +3696,6 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
     handleImportFromLocal,
     handleLaunchCodexCli,
     handleLaunchLocalAccessCli,
-    handleOAuthBindingQuotaReserveToggle,
     handleOpenProviderLink,
     handleReauthorizeOAuthBinding,
     handleResumeBatchImport,
@@ -3851,7 +3725,6 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
     openApiKeyCredentialsModal,
     openLocalAccessOAuthBindingModal,
     openOAuthBindingModal,
-    openOAuthBindingQuotaReserveEditor,
     openQuickSwitchProviderModal,
     performTokenImport,
     prepareCodexCliLaunch,
@@ -3874,6 +3747,5 @@ export function useCodexAccountsAccessController(context: CodexAccountsAccessCon
     toggleAccountApiKeyVisible,
     toggleBatchImportItem,
     updateCodexCliWorkingDir,
-    validateOAuthBindingQuotaReserveField,
   };
 }

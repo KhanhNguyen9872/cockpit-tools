@@ -1,4 +1,4 @@
-import { requestCodexOfficialAuthorizationManagement, requestCodexOfficialAuthorizationCheck } from "../utils/codexAccountServiceNavigation";
+import { requestCodexOfficialAuthorizationManagement } from "../utils/codexAccountServiceNavigation";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useModalScrollLock } from "../hooks/useModalScrollLock";
@@ -34,9 +34,6 @@ import { PELICAN_GROUPS_CHANGED } from "../components/codex/pelican/PelicanResul
 
 /** 渲染 CodexAccountsView 的 activeTab === "overview" 业务面板。 */
 export function CodexAccountsOverviewPanel(props: CodexAccountsViewProps) {
-  useEffect(() => {
-    if (props.localAccessState) requestCodexOfficialAuthorizationCheck({ running: Boolean(props.localAccessState.running && props.localAccessCollection?.enabled) });
-  }, [props.localAccessState?.running, props.localAccessCollection?.enabled]);
   const {
     accountNoteCopiedKey,
     accountNoteError,

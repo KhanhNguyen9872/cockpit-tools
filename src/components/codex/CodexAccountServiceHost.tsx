@@ -6,16 +6,15 @@ import { useCodexAccountStore } from '../../stores/useCodexAccountStore';
 import { getCodexLocalAccessState } from '../../services/codexLocalAccessService';
 import { chatGptPlanErrorKey, listChatGptPlanAccounts, setChatGptPlanServiceMode, isChatGptPlanServiceModeApplied, checkChatGptPlanAuthorization,
   releaseChatGptPlanAuthorization, type ChatGptPlanReleaseDisposition, type ChatGptPlanReleaseResult, type ChatGptPlanAccount } from '../../services/chatgptPlanService';
-import { CODEX_ACCOUNT_SERVICE_REQUEST, CODEX_OFFICIAL_AUTHORIZATION_CHECK, takeCodexServiceAuthorizationRequests, takeCodexOfficialAuthorizationCheck, isCodexOfficialAuthorizationCheckCurrent, retryCodexOfficialAuthorizationCheck, isCodexOfficialAuthorizationStartup, deferCodexOfficialAuthorizationCheck, announceCodexServiceAuthorizationApplied, type CodexAccountServiceRequest } from '../../utils/codexAccountServiceNavigation';
-import { codexOfficialAuthorizationRows, codexOfficialAuthorizationDeadline, needsCodexOfficialAuthorizationReview,
+import { CODEX_ACCOUNT_SERVICE_REQUEST, takeCodexServiceAuthorizationRequests, announceCodexServiceAuthorizationApplied, type CodexAccountServiceRequest } from '../../utils/codexAccountServiceNavigation';
+import { codexOfficialAuthorizationRows, codexOfficialAuthorizationDeadline,
   codexOfficialAuthorizationState, codexOfficialAuthorizationStateKey, type CodexOfficialAuthorizationRow } from '../../utils/codexOfficialAuthorization';
 import { CODEX_ACCOUNT_SERVICE_DRAFT_CANCEL, announceCodexServiceDraftResult, cancelCodexServiceDraftAuthorizations, isCodexServiceDraftRequestActive, requeueCodexServiceAuthorizationRequests } from '../../utils/codexAccountServiceNavigation';
 import type { CodexServiceMemberAccess } from '../../types/codexLocalAccess';
 import type { CodexAccount } from '../../types/codex';
 import { CodexOfficialAuthorizationDialog } from './CodexOfficialAuthorizationDialog';
 import { CodexOfficialBadge } from './CodexOfficialBadge';
-import { CODEX_OFFICIAL_AUTHORIZATION_MANAGE, requestCodexOfficialAuthorizationManagement, takeCodexOfficialAuthorizationManagement, snoozeCodexOfficialAuthorizationPrompts } from '../../utils/codexAccountServiceNavigation';
-import { CODEX_OFFICIAL_REMINDERS_CHANGED, readCodexOfficialReminders, setCodexOfficialRemindersEnabled, areCodexOfficialRemindersEnabled } from '../../utils/codexOfficialReminders';
+import { CODEX_OFFICIAL_AUTHORIZATION_MANAGE, requestCodexOfficialAuthorizationManagement, takeCodexOfficialAuthorizationManagement } from '../../utils/codexAccountServiceNavigation';
 import { ModalErrorMessage, useModalErrorState } from '../ModalErrorMessage';
 import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
 import { useModalScrollLock } from '../../hooks/useModalScrollLock';
@@ -24,7 +23,7 @@ import { CodexOfficialManagementDialog } from './CodexOfficialManagementDialog';
 import './CodexAccountServiceHost.css';
 
 interface Snapshot { running: boolean; accounts: CodexAccount[]; members: string[]; paused: string[]; serviceMembers?: CodexServiceMemberAccess[]; grants: ChatGptPlanAccount[] }
-interface Request { kind: 'join' | 'draft' | 'review' | 'manage'; items: CodexAccountServiceRequest[]; draftRequestId?: string }
+interface Request { kind: 'join' | 'draft' | 'manage'; items: CodexAccountServiceRequest[]; draftRequestId?: string }
 type AfterAuthorization = 'none' | 'joinOfficial' | 'switchOfficial' | 'draftOfficial';
 interface Selection { source: CodexAccount; after: AfterAuthorization; reauthorize?: boolean; draftRequestId?: string }
 interface Confirmation { row: CodexOfficialAuthorizationRow; disposition: ChatGptPlanReleaseDisposition }
@@ -43,19 +42,17 @@ function changed() {
   window.dispatchEvent(new Event('codex-local-access-state-updated'));
 }
 
-/** One prompt owner for all pages and add-account entry points. No startup I/O. */
+/** Handles explicit authorization actions only; service startup never opens this dialog. */
 export function CodexAccountServiceHost({ activePage = true }: { activePage?: boolean }) {
   const { t } = useTranslation();
   const [request, setRequest] = useState<Request | null>(null);
   const requestRef = useRef(request); requestRef.current = request;
-  const activePageRef = useRef(activePage); activePageRef.current = activePage;
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const selectionRef = useRef(selection); selectionRef.current = selection;
   const deferredRequests = useRef<CodexAccountServiceRequest[]>([]);
   const deferredManage = useRef(false);
   const resumeDeferredRef = useRef(() => {});
-  const [preferences, setPreferences] = useState(readCodexOfficialReminders);
   const [done, setDone] = useState<Set<string>>(new Set());
   const doneRef = useRef(done); doneRef.current = done;
   const [busy, setBusy] = useState(false);
@@ -84,18 +81,11 @@ export function CodexAccountServiceHost({ activePage = true }: { activePage?: bo
   const visible = Boolean(request && !selection && !expandedId);
   const dismissGuide = useCallback(() => {
     if (confirmationRef.current) { setConfirmation(null); error.clear(); return; }
-    if (requestRef.current?.kind === 'review') snoozeCodexOfficialAuthorizationPrompts();
     close();
   }, [close, error.clear]);
   useModalFocusTrap(dialog, visible);
   useModalScrollLock(visible);
   useEscCloseTopmost(visible, dismissGuide, dialog);
-  useEffect(() => {
-    const update = () => setPreferences(readCodexOfficialReminders());
-    window.addEventListener(CODEX_OFFICIAL_REMINDERS_CHANGED, update);
-    window.addEventListener('storage', update);
-    return () => { window.removeEventListener(CODEX_OFFICIAL_REMINDERS_CHANGED, update); window.removeEventListener('storage', update); };
-  }, []);
   useEffect(() => () => {
     epoch.current++;
     const ids = new Set([requestRef.current?.draftRequestId, ...deferredRequests.current.map((item) => item.draftRequestId)]);
@@ -146,32 +136,14 @@ export function CodexAccountServiceHost({ activePage = true }: { activePage?: bo
       if (requestRef.current?.draftRequestId === requestId) close();
     };
 
-    const inspect = () => {
-      const run = takeCodexOfficialAuthorizationCheck(activePageRef.current);
-      if (run === null || requestRef.current) return;
-      const revision = epoch.current;
-      const startup = isCodexOfficialAuthorizationStartup(run);
-      void readSnapshot().then((next) => {
-        if (revision !== epoch.current || requestRef.current || !isCodexOfficialAuthorizationCheckCurrent(run)) return;
-        if (!next.running) { retryCodexOfficialAuthorizationCheck(run); return; }
-        if (!startup && !activePageRef.current) { deferCodexOfficialAuthorizationCheck(run); return; }
-        if (!codexOfficialAuthorizationRows(next.accounts, next.grants, next.members, next.paused, next.serviceMembers).some((row) =>
-          needsCodexOfficialAuthorizationReview(row) && areCodexOfficialRemindersEnabled())) return;
-        const review: Request = { kind: 'review', items: [] };
-        requestRef.current = review;
-        setSnapshot(next); setDone(new Set()); setMode('official'); error.clear(); setRequest(review);
-      }).catch(() => retryCodexOfficialAuthorizationCheck(run));
-    };
-    manage(); receive(); inspect();
+    manage(); receive();
     window.addEventListener(CODEX_OFFICIAL_AUTHORIZATION_MANAGE, manage);
     window.addEventListener(CODEX_ACCOUNT_SERVICE_REQUEST, receive);
     window.addEventListener(CODEX_ACCOUNT_SERVICE_DRAFT_CANCEL, cancelDraft);
-    window.addEventListener(CODEX_OFFICIAL_AUTHORIZATION_CHECK, inspect);
     return () => {
       window.removeEventListener(CODEX_OFFICIAL_AUTHORIZATION_MANAGE, manage);
       window.removeEventListener(CODEX_ACCOUNT_SERVICE_REQUEST, receive);
       window.removeEventListener(CODEX_ACCOUNT_SERVICE_DRAFT_CANCEL, cancelDraft);
-      window.removeEventListener(CODEX_OFFICIAL_AUTHORIZATION_CHECK, inspect);
     };
   }, [activePage]);
 
@@ -185,7 +157,7 @@ export function CodexAccountServiceHost({ activePage = true }: { activePage?: bo
   };
 
   useEffect(() => {
-    if (!request || request.kind === 'review') return;
+    if (!request) return;
     const revision = ++epoch.current;
     setSnapshot(null); error.clear();
     void (async () => {
@@ -227,10 +199,7 @@ export function CodexAccountServiceHost({ activePage = true }: { activePage?: bo
   const rows = snapshot ? codexOfficialAuthorizationRows(snapshot.accounts, snapshot.grants, snapshot.members, snapshot.paused, snapshot.serviceMembers)
     .filter((row) => request?.kind === 'join' || request?.kind === 'draft'
       ? request.items.some((item) => item.accountId === row.account.id)
-      : request?.kind === 'manage' || needsCodexOfficialAuthorizationReview(row)) : [];
-  useEffect(() => {
-    if (request?.kind === 'review' && snapshot && !selection && (!snapshot.running || rows.length === 0)) close();
-  }, [request?.kind, snapshot, selection, rows.length, close]);
+      : request?.kind === 'manage') : [];
   const completeDraft = (sourceAccountId: string, nextMode: 'codex' | 'official', registrationId?: string, draftRequestId = requestRef.current?.draftRequestId) => {
     if (!draftRequestId || !isCodexServiceDraftRequestActive(draftRequestId, sourceAccountId)) return;
     if (nextMode === 'official' && !registrationId) return;
@@ -311,7 +280,6 @@ export function CodexAccountServiceHost({ activePage = true }: { activePage?: bo
       return;
     }
     if (request?.kind === 'join') return applyMode(row, 'official', 'join');
-    if (request?.kind === 'review' && row.joined) return applyMode(row, 'official', 'switch');
     openAuthorization(row, Boolean(row.grant?.needs_reauth || row.grant?.source_binding_error));
   };
 
@@ -398,11 +366,6 @@ export function CodexAccountServiceHost({ activePage = true }: { activePage?: bo
     if (busyRef.current) return;
     error.clear(); setMode(value);
   };
-  const setReminders = (enabled: boolean) => {
-    error.clear();
-    try { setCodexOfficialRemindersEnabled(enabled); setPreferences(readCodexOfficialReminders()); }
-    catch { error.report(t('chatgptPlan.officialFlow.reminderSaveFailed')); }
-  };
   const navigateTabs = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || busyRef.current) return;
     event.preventDefault();
@@ -430,7 +393,7 @@ export function CodexAccountServiceHost({ activePage = true }: { activePage?: bo
   const pendingIds = rows.filter((row) => !done.has(row.account.id)).map((row) => row.account.id);
   return createPortal(<div className="modal-overlay codex-official-guide-overlay">
     <div ref={dialog} className={`modal codex-official-guide${request.kind === 'manage' ? ' is-management' : ''}`} role="dialog" aria-modal="true" aria-labelledby="codex-official-guide-title" tabIndex={-1}>
-      <div className="modal-header"><div><h2 id="codex-official-guide-title">{t(request.kind === 'manage' ? 'chatgptPlan.officialFlow.manageTitle' : 'chatgptPlan.officialFlow.guideTitle')}</h2><p>{t(request.kind === 'review' ? 'chatgptPlan.officialFlow.detected' : request.kind === 'manage' ? 'chatgptPlan.officialFlow.manageHint' : 'chatgptPlan.officialFlow.beforeJoin')}</p></div>
+      <div className="modal-header"><div><h2 id="codex-official-guide-title">{t(request.kind === 'manage' ? 'chatgptPlan.officialFlow.manageTitle' : 'chatgptPlan.officialFlow.guideTitle')}</h2><p>{t(request.kind === 'manage' ? 'chatgptPlan.officialFlow.manageHint' : 'chatgptPlan.officialFlow.beforeJoin')}</p></div>
       </div>
       {choosing && <div className="codex-official-mode-tabs" role="tablist" aria-label={t('chatgptPlan.serviceMode.title')}>
         {(['codex', 'official'] as const).map((value) => <button key={value} type="button" role="tab"
@@ -473,7 +436,6 @@ export function CodexAccountServiceHost({ activePage = true }: { activePage?: bo
                   {choosing ? done.has(row.account.id) ? <span className="codex-official-complete"><CheckCircle2 size={16} />{t('chatgptPlan.officialFlow.completed')}</span>
                     : mode === 'official' ? <button type="button" className="btn btn-primary btn-sm" disabled={disabled} onClick={() => void runOfficial(row)}>{t(row.authorized ? 'chatgptPlan.officialFlow.useOfficial' : request.kind === 'draft' ? 'chatgptPlan.officialFlow.authorize' : 'chatgptPlan.officialFlow.authorizeJoin')}</button>
                       : <button type="button" className="btn btn-primary btn-sm" disabled={disabled} onClick={() => void runLocal([row.account.id])}>{t('chatgptPlan.officialFlow.useLocal')}</button>
-                    : request.kind === 'review' && row.joined ? <button type="button" className="btn btn-primary btn-sm" disabled={disabled} onClick={() => void runOfficial(row)}>{t('chatgptPlan.officialFlow.authorizeUse')}</button>
                     : row.grant || row.paused ? <button type="button" className="btn btn-secondary btn-sm" disabled={disabled} onClick={() => expand(row)}>{t('chatgptPlan.officialFlow.manageAccount')}</button>
                       : <button type="button" className="btn btn-primary btn-sm" disabled={disabled} onClick={() => openAuthorization(row)}>{t('chatgptPlan.officialFlow.authorize')}</button>}
                 </div>
@@ -485,10 +447,8 @@ export function CodexAccountServiceHost({ activePage = true }: { activePage?: bo
         {busy && <p role="status" className="codex-official-loading"><Loader2 size={16} className="codex-official-spin" />{t(managementAction === 'check' ? 'chatgptPlan.officialFlow.checkingAuthorization' : 'chatgptPlan.officialFlow.applying')}</p>}
       </div>
       <div className="modal-footer codex-official-guide-footer">
-        {request.kind !== 'draft' && <div className="codex-official-reminder-preference"><label><input type="checkbox" checked={preferences.disabled}
-          onChange={(event) => setReminders(!event.target.checked)} />{t('chatgptPlan.officialFlow.dontRemind')}</label><p>{t('chatgptPlan.officialFlow.reminderEntryHint')}</p></div>}
         <div className="codex-official-guide-footer-actions">
-        <button type="button" className="btn btn-secondary" onClick={dismissGuide}>{t(request.kind === 'review' ? 'chatgptPlan.officialFlow.later' : request.kind === 'manage' ? 'common.close' : 'common.cancel')}</button>
+        <button type="button" className="btn btn-secondary" onClick={dismissGuide}>{t(request.kind === 'manage' ? 'common.close' : 'common.cancel')}</button>
         {error.message && !snapshot && <button type="button" className="btn btn-primary" onClick={() => { error.clear(); setRetry((value) => value + 1); }}>{t('common.refresh')}</button>}
         {choosing && mode === 'codex' && rows.length > 1 && pendingIds.length > 0 && <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void runLocal(pendingIds)}>{t('chatgptPlan.officialFlow.continueLocal')}</button>}
         </div>

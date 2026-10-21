@@ -2552,7 +2552,7 @@ func TestCoreAuthSelectorFiltersNewModelExclusionsBeforeSessionAffinity(t *testi
 	cfg := &config.Config{}
 	cfg.Routing.SessionAffinity = true
 	cfg.Routing.SessionAffinityTTL = "1h"
-	selector := buildCoreAuthSelector(cfg, &coreauth.RoundRobinSelector{}, &manifest{}, nil)
+	selector := buildCoreAuthSelector(cfg, &coreauth.RoundRobinSelector{}, &manifest{})
 	if stoppable, ok := selector.(coreauth.StoppableSelector); ok {
 		t.Cleanup(stoppable.Stop)
 	}
@@ -2642,7 +2642,7 @@ func TestSidecarRuntimeDoesNotSelectAccountWithExcludedModel(t *testing.T) {
 	}
 
 	cfg := &config.Config{AuthDir: authDir}
-	manager := buildCoreAuthManager(cfg, &cockpitSelector{manifest: m}, &authHook{manifest: m}, m, nil, newRequestUsageTracker())
+	manager := buildCoreAuthManager(cfg, &cockpitSelector{manifest: m}, &authHook{manifest: m}, m, newRequestUsageTracker())
 	runtime, err := newSidecarRuntime(context.Background(), configPath, cfg, m, manager)
 	if err != nil {
 		t.Fatalf("newSidecarRuntime: %v", err)

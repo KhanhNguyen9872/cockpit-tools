@@ -18,13 +18,12 @@ use crate::models::codex_local_access::{
     CodexLocalAccessModelStats, CodexLocalAccessPortCleanupResult,
     CodexLocalAccessProfileAttachment, CodexLocalAccessProviderGateway,
     CodexLocalAccessProviderGatewayModelCapability, CodexLocalAccessProxyRoute,
-    CodexLocalAccessQuotaReserve, CodexLocalAccessQuotaReserveStatus, CodexLocalAccessRequestKind,
-    CodexLocalAccessRoutingStrategy, CodexLocalAccessScope, CodexLocalAccessState,
-    CodexLocalAccessStats, CodexLocalAccessStatsWindow, CodexLocalAccessTestFailure,
-    CodexLocalAccessTestResult, CodexLocalAccessTimeoutPreset, CodexLocalAccessTimeouts,
-    CodexLocalAccessUsageEvent, CodexLocalAccessUsageEventPage, CodexLocalAccessUsageStats,
-    CodexLocalAccessUsageTrendPoint, CodexTokenBreakdown, DEFAULT_CODEX_IMAGE_GENERATION_MODEL,
-    DEFAULT_MAX_ACCOUNT_CONCURRENCY,
+    CodexLocalAccessRequestKind, CodexLocalAccessRoutingStrategy, CodexLocalAccessScope,
+    CodexLocalAccessState, CodexLocalAccessStats, CodexLocalAccessStatsWindow,
+    CodexLocalAccessTestFailure, CodexLocalAccessTestResult, CodexLocalAccessTimeoutPreset,
+    CodexLocalAccessTimeouts, CodexLocalAccessUsageEvent, CodexLocalAccessUsageEventPage,
+    CodexLocalAccessUsageStats, CodexLocalAccessUsageTrendPoint, CodexTokenBreakdown,
+    DEFAULT_CODEX_IMAGE_GENERATION_MODEL, DEFAULT_MAX_ACCOUNT_CONCURRENCY,
 };
 use crate::models::{CodexInstanceApiRoute, CodexInstanceModelRouting};
 use crate::modules::atomic_write::{
@@ -263,8 +262,13 @@ const CODEX_PROVIDER_MODEL_SHELL_POOL: &[&str] = &["gpt-5.6-sol", "gpt-5.6-terra
 // Keep the GPT-6 family available as identity-preserving shells when an upstream
 // account already exposes those exact models, without assigning them to unrelated
 // overflow models. The retired model remains valid only for explicit API providers.
-const CODEX_PROVIDER_IDENTITY_ONLY_MODEL_IDS: &[&str] =
-    &["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.5"];
+const CODEX_PROVIDER_IDENTITY_ONLY_MODEL_IDS: &[&str] = &[
+    "gpt-6.1-sol",
+    "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
+    "gpt-5.5",
+];
 const CODEX_PROVIDER_GATEWAY_STATE_FILE: &str = "state.json";
 const CODEX_LOCAL_ACCESS_SIDECAR_CONFIG_FILE: &str = "config.json";
 const CODEX_LOCAL_ACCESS_SIDECAR_MANIFEST_FILE: &str = "manifest.json";
@@ -273,7 +277,6 @@ const SIDECAR_MESSAGE_LOCALES: &[&str] = &[
     "vi", "zh-cn", "zh-tw",
 ];
 const CODEX_LOCAL_ACCESS_SIDECAR_API_KEY_PRIORITY_FILE: &str = "api-key-priorities.json";
-const CODEX_LOCAL_ACCESS_SIDECAR_QUOTA_RESERVE_FILE: &str = "quota-reserve.json";
 const CODEX_LOCAL_ACCESS_SIDECAR_QUOTA_POOL_FILE: &str = "quota-pool-state.json";
 const CODEX_LOCAL_ACCESS_SIDECAR_AUTHS_DIR: &str = "auths";
 const CODEX_LOCAL_ACCESS_SIDECAR_BIN_NAME: &str = "cockpit-cliproxy";
@@ -367,12 +370,6 @@ const CUSTOM_ROUTING_PRIORITY_MIN: i32 = 0;
 const CUSTOM_ROUTING_PRIORITY_MAX: i32 = 100;
 const CUSTOM_ROUTING_WEIGHT_MIN: u32 = 1;
 const CUSTOM_ROUTING_WEIGHT_MAX: u32 = 100;
-const BOUND_OAUTH_QUOTA_RESERVE_MIN_PERCENT: i32 = 1;
-const BOUND_OAUTH_QUOTA_RESERVE_MAX_PERCENT: i32 = 100;
-const BOUND_OAUTH_QUOTA_RESERVE_MAX_SNAPSHOT_AGE_SECONDS: i64 = 3 * 60;
-const BOUND_OAUTH_QUOTA_RESERVE_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
-const BOUND_OAUTH_QUOTA_RESERVE_MONITOR_TICK: Duration = Duration::from_secs(1);
-const BOUND_OAUTH_QUOTA_RESERVE_REQUEST_REFRESH_MIN_INTERVAL: Duration = Duration::from_secs(2);
 const GATEWAY_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const GATEWAY_PORT_RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
 const GATEWAY_PORT_RELEASE_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -483,12 +480,8 @@ static PROVIDER_GATEWAY_LIFECYCLE_LOCK: OnceLock<TokioMutex<()>> = OnceLock::new
 static LOCAL_ACCESS_RECOVERY_LOCK: OnceLock<TokioMutex<()>> = OnceLock::new();
 static GATEWAY_ROUND_ROBIN_CURSOR: AtomicUsize = AtomicUsize::new(0);
 static UPSTREAM_HTTP_CLIENT: OnceLock<Mutex<Option<CachedUpstreamHttpClient>>> = OnceLock::new();
-static BOUND_OAUTH_QUOTA_REFRESH_FAILURES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-static BOUND_OAUTH_QUOTA_REFRESH_CONTROL: OnceLock<TokioMutex<BoundOauthQuotaRefreshControl>> =
-    OnceLock::new();
 static SIDECAR_AUTO_RESTART_CONTROL: OnceLock<Mutex<SidecarAutoRestartControl>> = OnceLock::new();
 static SIDECAR_CRASH_RECOVERY_CONTROL: OnceLock<Mutex<SidecarAutoRestartControl>> = OnceLock::new();
-static BOUND_OAUTH_QUOTA_MONITOR_STARTED: AtomicBool = AtomicBool::new(false);
 static MODEL_PROVIDER_CHAT_TEST_CANCELLATION: OnceLock<ModelProviderChatTestCancellationState> =
     OnceLock::new();
 
@@ -624,15 +617,6 @@ mod model_provider_chat_test_cancellation_tests {
         assert!(!is_model_provider_chat_test_cancelled(&run_id));
         assert!(!cancel_model_provider_chat_test_run(&run_id));
     }
-}
-
-#[derive(Default)]
-struct BoundOauthQuotaRefreshControl {
-    failures: u32,
-    retry_at: Option<Instant>,
-    in_flight: bool,
-    last_account_id: Option<String>,
-    last_started_at: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -881,7 +865,6 @@ struct RuntimeAccountPoolHealth {
     available_auths: usize,
     unavailable_auths: usize,
     model_excluded_auths: usize,
-    quota_reserved_auths: usize,
     image_policy_blocked_auths: usize,
     account_statuses: Vec<RuntimeAccountPoolMemberHealth>,
     scope_diagnostics: Vec<CodexLocalAccessAccountPoolScopeDiagnostic>,
@@ -1176,10 +1159,6 @@ fn update_gateway_preparation_progress(context: GatewayPreparationContext, compl
 
 fn upstream_http_client_cache() -> &'static Mutex<Option<CachedUpstreamHttpClient>> {
     UPSTREAM_HTTP_CLIENT.get_or_init(|| Mutex::new(None))
-}
-
-fn bound_oauth_quota_refresh_failures() -> &'static Mutex<HashSet<String>> {
-    BOUND_OAUTH_QUOTA_REFRESH_FAILURES.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
 fn duration_to_millis(duration: Duration) -> u64 {
@@ -1692,9 +1671,6 @@ fn prune_prepared_account_cache(runtime: &mut GatewayRuntime, now: i64) {
 fn prune_runtime_account_state(runtime: &mut GatewayRuntime) {
     let Some(collection) = runtime.collection.as_ref() else {
         runtime.prepared_accounts.clear();
-        if let Ok(mut failures) = bound_oauth_quota_refresh_failures().lock() {
-            failures.clear();
-        }
         runtime.account_health.clear();
         runtime.account_quota_cooldowns.clear();
         runtime.account_pool_health.clear();
@@ -1711,14 +1687,6 @@ fn prune_runtime_account_state(runtime: &mut GatewayRuntime) {
     runtime
         .prepared_accounts
         .retain(|account_id, _| allowed_account_ids.contains(account_id));
-    let bound_reserve_account_id = collection
-        .bound_oauth_quota_reserve
-        .as_ref()
-        .and_then(|_| normalize_optional_account_ref(collection.bound_oauth_account_id.as_deref()));
-    if let Ok(mut failures) = bound_oauth_quota_refresh_failures().lock() {
-        failures
-            .retain(|account_id| bound_reserve_account_id.as_deref() == Some(account_id.as_str()));
-    }
     runtime
         .account_health
         .retain(|account_id, _| allowed_account_ids.contains(account_id));
@@ -1795,7 +1763,6 @@ fn sync_runtime_collection(
             collection.gateway_mode = current.gateway_mode;
         }
     }
-    sync_quota_reserve_policy(&collection);
     REQUEST_PAYLOAD_LOGGING_ENABLED.store(collection.request_payload_logging, Ordering::SeqCst);
     if let Some(handle) = runtime.native_handle.as_ref() {
         handle.set_cooling_disabled(collection.disable_cooling);
@@ -1805,6 +1772,7 @@ fn sync_runtime_collection(
     let _ = request_diagnostics_writer();
     ensure_request_diagnostics_poller_started();
     runtime.collection = Some(collection);
+    cleanup_retired_oauth_reserve_in_background();
     runtime.loaded = true;
     runtime.last_error = None;
     prune_runtime_account_state(runtime);
@@ -1843,135 +1811,8 @@ fn validate_loaded_local_access_bound_oauth_account(
     Ok(oauth_account)
 }
 
-fn validate_bound_oauth_quota_reserve(
-    reserve: Option<CodexLocalAccessQuotaReserve>,
-    has_bound_oauth_account: bool,
-) -> Result<Option<CodexLocalAccessQuotaReserve>, String> {
-    let Some(mut reserve) = reserve else {
-        return Ok(None);
-    };
-    if !has_bound_oauth_account {
-        return Err("设置 OAuth 保留额度前必须先绑定 OAuth 账号".to_string());
-    }
-    if !(BOUND_OAUTH_QUOTA_RESERVE_MIN_PERCENT..=BOUND_OAUTH_QUOTA_RESERVE_MAX_PERCENT)
-        .contains(&reserve.hourly_percent)
-    {
-        return Err("5 小时 OAuth 保留额度必须在 1% 到 100% 之间".to_string());
-    }
-    if !(BOUND_OAUTH_QUOTA_RESERVE_MIN_PERCENT..=BOUND_OAUTH_QUOTA_RESERVE_MAX_PERCENT)
-        .contains(&reserve.weekly_percent)
-    {
-        return Err("周 OAuth 保留额度必须在 1% 到 100% 之间".to_string());
-    }
-    if !(1..=20).contains(&reserve.safety_margin_percent) {
-        return Err("OAUTH_QUOTA_INVALID_MARGIN".to_string());
-    }
-    reserve.strict = true;
-    Ok(Some(reserve))
-}
-
-fn normalize_bound_oauth_quota_reserve(
-    reserve: &mut Option<CodexLocalAccessQuotaReserve>,
-    has_bound_oauth_account: bool,
-) -> bool {
-    let original = reserve.clone();
-    if !has_bound_oauth_account {
-        *reserve = None;
-        return *reserve != original;
-    }
-    if let Some(reserve) = reserve.as_mut() {
-        reserve.strict = true;
-        reserve.safety_margin_percent = reserve.safety_margin_percent.clamp(1, 20);
-        reserve.hourly_percent = reserve.hourly_percent.clamp(
-            BOUND_OAUTH_QUOTA_RESERVE_MIN_PERCENT,
-            BOUND_OAUTH_QUOTA_RESERVE_MAX_PERCENT,
-        );
-        reserve.weekly_percent = reserve.weekly_percent.clamp(
-            BOUND_OAUTH_QUOTA_RESERVE_MIN_PERCENT,
-            BOUND_OAUTH_QUOTA_RESERVE_MAX_PERCENT,
-        );
-    }
-    *reserve != original
-}
-
 fn valid_quota_remaining_percent(value: i32) -> Option<i32> {
     (0..=100).contains(&value).then_some(value)
-}
-
-fn quota_refresh_fail_closed_for_account(account_id: &str) -> bool {
-    bound_oauth_quota_refresh_failures()
-        .lock()
-        .map(|failures| failures.contains(account_id))
-        .unwrap_or(true)
-}
-
-fn fresh_quota_for_bound_oauth_reserve(
-    account: &CodexAccount,
-) -> Option<&crate::models::codex::CodexQuota> {
-    if account.quota_error.is_some() || quota_refresh_fail_closed_for_account(&account.id) {
-        return None;
-    }
-    let updated_at = account.usage_updated_at?;
-    let now = chrono::Utc::now().timestamp();
-    if updated_at <= 0
-        || updated_at > now
-        || now.saturating_sub(updated_at) > BOUND_OAUTH_QUOTA_RESERVE_MAX_SNAPSHOT_AGE_SECONDS
-    {
-        return None;
-    }
-    account.quota.as_ref()
-}
-
-fn bound_oauth_quota_reserve_blocks_account(
-    reserve: &CodexLocalAccessQuotaReserve,
-    account: Option<&CodexAccount>,
-) -> bool {
-    account.is_none_or(|account| !quota_reserve_allows(reserve, account))
-}
-
-fn quota_reserve_warning_threshold(reserve_percent: i32) -> i32 {
-    20.max(reserve_percent.saturating_add(5)).min(100)
-}
-
-
-fn apply_bound_oauth_quota_reserve(
-    collection: &CodexLocalAccessCollection,
-    scoped_account_ids: Vec<String>,
-) -> Vec<String> {
-    let Some(reserve) = collection.bound_oauth_quota_reserve.as_ref() else {
-        return scoped_account_ids;
-    };
-    let Some(bound_account_id) =
-        normalize_optional_account_ref(collection.bound_oauth_account_id.as_deref())
-    else {
-        return scoped_account_ids;
-    };
-    if !scoped_account_ids
-        .iter()
-        .any(|account_id| account_id == &bound_account_id)
-    {
-        return scoped_account_ids;
-    }
-
-    let account = codex_account::load_account(&bound_account_id);
-    filter_bound_oauth_quota_reserve_account(
-        scoped_account_ids,
-        &bound_account_id,
-        reserve,
-        account.as_ref(),
-    )
-}
-
-fn filter_bound_oauth_quota_reserve_account(
-    mut scoped_account_ids: Vec<String>,
-    bound_account_id: &str,
-    reserve: &CodexLocalAccessQuotaReserve,
-    account: Option<&CodexAccount>,
-) -> Vec<String> {
-    if bound_oauth_quota_reserve_blocks_account(reserve, account) {
-        scoped_account_ids.retain(|account_id| account_id != bound_account_id);
-    }
-    scoped_account_ids
 }
 
 async fn cache_prepared_account(account: &CodexAccount) {

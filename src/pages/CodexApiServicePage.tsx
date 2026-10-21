@@ -1,5 +1,4 @@
 import { codexServiceOriginalAccounts } from "../utils/chatgptPlanOverview";
-import { requestCodexOfficialAuthorizationCheck } from "../utils/codexAccountServiceNavigation";
 import { useChatGptPlanOverview } from "../hooks/useChatGptPlanOverview";
 import { codexServiceRelatedEndpointIds } from "../utils/chatgptPlanOverview";
 import {
@@ -701,9 +700,6 @@ export function useCodexApiServicePageController() {
     fetchCurrentAccount,
   } = useCodexAccountStore();
   const [state, setState] = useState<CodexLocalAccessState | null>(null);
-  useEffect(() => {
-    if (state) requestCodexOfficialAuthorizationCheck({ running: Boolean(state.running && state.collection?.enabled) });
-  }, [state?.running, state?.collection?.enabled]);
   const [groups, setGroups] = useState<CodexAccountGroup[]>([]);
   const [activeTab, setActiveTab] = useState<ServiceTab>("overview");
   const [statsLogTab, setStatsLogTab] = useState<StatsLogTab>("logs");

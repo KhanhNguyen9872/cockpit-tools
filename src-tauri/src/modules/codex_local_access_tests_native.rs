@@ -377,84 +377,7 @@ fn native_test_account_with_quota(hourly: i32, weekly: i32) -> CodexAccount {
     account
 }
 
-#[test]
-fn native_quota_reservation_applies_only_to_bound_account_and_present_windows() {
-    let account_with_quota = |hourly, weekly| {
-        let mut account = native_test_account_with_quota(hourly, weekly);
-        account.id = "quota-reservation-present-windows".into();
-        account
-    };
-    let mut collection = native_test_collection();
-    collection.bound_oauth_account_id = Some("quota-reservation-present-windows".into());
-    collection.bound_oauth_quota_reserve = Some(CodexLocalAccessQuotaReserve {
-        hourly_percent: 20,
-        weekly_percent: 10,
-        strict: false, safety_margin_percent: 3,
-});
-    let available = account_with_quota(24, 14);
-    {
-        let mut runtime = quota_reserve_coordinator().lock().unwrap();
-        runtime.accounts.entry(available.id.clone()).or_default();
-    }
-    confirm_gateway_quota_refresh(&available.id, available.quota.as_ref().unwrap(), Instant::now());
-    assert!(native_quota_allows(&collection, &available));
-    let hourly_blocked = account_with_quota(23, 14);
-    confirm_gateway_quota_refresh(&hourly_blocked.id, hourly_blocked.quota.as_ref().unwrap(), Instant::now());
-    assert!(!native_quota_allows(&collection, &hourly_blocked));
-    let weekly_blocked = account_with_quota(24, 13);
-    confirm_gateway_quota_refresh(&weekly_blocked.id, weekly_blocked.quota.as_ref().unwrap(), Instant::now());
-    assert!(!native_quota_allows(&collection, &weekly_blocked));
-    let mut unrelated = account_with_quota(5, 5);
-    unrelated.id = "unrelated-account".into();
-    assert!(native_quota_allows(&collection, &unrelated));
-    let mut absent_window = account_with_quota(0, 14);
-    absent_window.quota.as_mut().unwrap().hourly_window_present = Some(false);
-    confirm_gateway_quota_refresh(&absent_window.id, absent_window.quota.as_ref().unwrap(), Instant::now());
-    assert!(native_quota_allows(&collection, &absent_window));
-    collection.bound_oauth_quota_reserve = None;
-    assert!(native_quota_allows(
-        &collection,
-        &account_with_quota(5, 5)
-    ));
-    assert!(!native_quota_allows(
-        &collection,
-        &account_with_quota(0, 5)
-    ));
-}
 
-#[test]
-fn native_reserved_quota_fails_closed_for_missing_stale_or_invalid_evidence() {
-    let mut collection = native_test_collection();
-    collection.bound_oauth_account_id = Some("fixture-account".into());
-    collection.bound_oauth_quota_reserve = Some(CodexLocalAccessQuotaReserve {
-        hourly_percent: 20,
-        weekly_percent: 10,
-        strict: false, safety_margin_percent: 3,
-});
-    assert!(!native_quota_allows(&collection, &native_test_account()));
-    let now = chrono::Utc::now().timestamp();
-    for timestamp in [None, Some(0), Some(now - 181), Some(now + 60)] {
-        let mut account = native_test_account_with_quota(90, 90);
-        account.usage_updated_at = timestamp;
-        assert!(
-            !native_quota_allows(&collection, &account),
-            "timestamp={timestamp:?}"
-        );
-    }
-    let mut error_account = native_test_account_with_quota(90, 90);
-    error_account.quota_error = Some(crate::models::codex::CodexQuotaErrorInfo {
-        code: Some("quota_refresh_failed".into()),
-        message: "fixture failure".into(),
-        timestamp: now,
-    });
-    assert!(!native_quota_allows(&collection, &error_account));
-    for (hourly, weekly) in [(101, 90), (90, 101), (-1, 90), (90, -1)] {
-        assert!(!native_quota_allows(
-            &collection,
-            &native_test_account_with_quota(hourly, weekly)
-        ));
-    }
-}
 
 #[test]
 fn native_hosted_image_policy_obeys_service_and_account_controls() {
@@ -1080,4 +1003,15 @@ async fn native_context_rebuild_preserves_existing_retry_limits() {
         assert_eq!(policy.credential_retries, credentials);
         assert_eq!(policy.retry_max_delay, Duration::from_millis(720));
     }
+}
+
+#[test]
+fn native_bound_oauth_has_no_reserved_floor_but_exhaustion_still_blocks() {
+    let mut collection = native_test_collection();
+    collection.bound_oauth_account_id = Some("fixture-account".into());
+    for percent in [1, 3, 10, 20, 30, 99] {
+        assert!(native_quota_allows(&collection, &native_test_account_with_quota(percent, percent)));
+    }
+    assert!(!native_quota_allows(&collection, &native_test_account_with_quota(0, 50)));
+    assert!(!native_quota_allows(&collection, &native_test_account_with_quota(50, 0)));
 }

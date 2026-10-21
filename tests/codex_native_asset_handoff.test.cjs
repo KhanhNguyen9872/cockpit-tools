@@ -46,6 +46,7 @@ if (!process.versions.electron) {
       const result = JSON.parse(line.slice(resultPrefix.length));
       assert.ok(result.sourceLength > 1_000_000, 'exercise the full installed module');
       assert.ok(result.moduleExports > 1000, 'module and its real dependencies must actually instantiate');
+      assert.ok(result.primaryExports > 0, 'the real primary module must also instantiate before activation');
       assert.equal(result.state.nativePatchState, 'active');
       assert.equal(result.state.nativePatchFeatures, '1111');
       assert.equal(result.install.ok, true);
@@ -128,6 +129,13 @@ async function runFixture() {
   const asset = archive.names.find(name => /^app-initial-[\w-]+\.js$/.test(name));
   assert.ok(asset);
   const moduleUrl = `app://-/assets/${asset}`;
+  const initialSource = archive.read(`webview/assets/${asset}`).toString();
+  const primaryNames = new Set([...initialSource.matchAll(/["'`]\.\/app-primary-[A-Za-z0-9_-]+\.js["'`]/g)]
+    .map(match => match[0].slice(3, -1)));
+  assert.equal(primaryNames.size, 1, 'the native initial module must reference one primary contract');
+  const primaryAsset = [...primaryNames][0];
+  assert.ok(archive.names.includes(primaryAsset));
+  const primaryUrl = `app://-/assets/${primaryAsset}`;
   const originalHtml = archive.read('webview/index.html').toString();
   const cspMatch = originalHtml.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/);
   assert.ok(cspMatch);
@@ -136,9 +144,9 @@ async function runFixture() {
   // replace the application initializer with an import-only probe entry.
   const html = originalHtml.replace(/<script\b[^>]*type="module"/g, '<script type="application/cockpit-inert"')
     .replace('</body>', '<textarea aria-label="Fixture composer"></textarea></body>');
-  const runtime = ['startup_guard.js', 'fast.js', 'quota.js', 'native_dictation.js']
+  const runtime = ['startup_guard.js', 'fast.js', 'quota.js']
     .map(name => fs.readFileSync(path.join(repository, 'src-tauri/src/modules/codex_app_enhancements', name), 'utf8')).join('\n;');
-  const bootstrap = 'window.__cockpitEnhancements={nativeFast:true,quotaCompat:true,apiDictation:true,apiKeyAuthVerified:true,owner:"asset-test"};' + runtime;
+  const bootstrap = 'window.__cockpitEnhancements={nativeFast:true,quotaCompat:true,apiService:true,apiKeyAuthVerified:true,owner:"asset-test"};' + runtime;
   let serveEntry = false;
   const errors = [], blockedExternalRequests = [], messages = [];
   await app.whenReady();
@@ -149,7 +157,8 @@ async function runFixture() {
       const data = pathname === '/' ? Buffer.from(serveEntry
         ? html.replace('</head>', '<script type="module" src="/assets/fixture-entry.js"></script></head>') : html)
         : pathname === '/assets/fixture-entry.js'
-          ? Buffer.from(`import * as mod from ${JSON.stringify(moduleUrl)};window.fixtureModuleExports=Object.keys(mod).length;`)
+          ? Buffer.from(`import * as mod from ${JSON.stringify(moduleUrl)};import * as primary from ${JSON.stringify(primaryUrl)};
+window.fixtureModuleExports=Object.keys(mod).length;window.fixturePrimaryExports=Object.keys(primary).length;`)
           : archive.read(`webview${pathname}`);
       const type = pathname === '/' ? 'text/html' : pathname.endsWith('.js') ? 'text/javascript'
         : pathname.endsWith('.css') ? 'text/css' : 'application/octet-stream';
@@ -182,6 +191,7 @@ async function runFixture() {
   await evaluate(`window.name='asset-fixture-original-name';${bootstrap}`);
   const prepared = await evaluate("window.__cockpitNativeFast.prepareHandoff('asset-nonce')");
   assert.equal(prepared.ok, true, JSON.stringify(prepared));
+  assert.equal(prepared.mode, 'full', JSON.stringify(prepared));
   assert.equal(await evaluate('window.name'), 'asset-fixture-original-name');
   const injection = `${bootstrap};window.fixtureInstall=window.__cockpitNativeFast.consumeHandoff('asset-nonce');`;
   const registered = await send('Page.addScriptToEvaluateOnNewDocument', { source: injection });
@@ -193,8 +203,8 @@ async function runFixture() {
     }, reject);
   });
   const result = await evaluate(`(async()=>{
-    for(let i=0;i<1000&&!window.fixtureModuleExports;i++)await new Promise(resolve=>setTimeout(resolve,10));
-    return {moduleExports:window.fixtureModuleExports,state:window.__cockpitEnhancements,install:window.fixtureInstall,name:window.name,
+    for(let i=0;i<1000&&(!window.fixtureModuleExports||!window.fixturePrimaryExports);i++)await new Promise(resolve=>setTimeout(resolve,10));
+    return {moduleExports:window.fixtureModuleExports,primaryExports:window.fixturePrimaryExports,state:window.__cockpitEnhancements,install:window.fixtureInstall,name:window.name,
       csp:document.querySelector('meta[http-equiv="Content-Security-Policy"]').content,
       temporaryElements:document.querySelectorAll('script[type=importmap],link[href^="blob:"]').length};
   })()`);

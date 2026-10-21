@@ -42,6 +42,21 @@ fn native_diagnostic_detail(
             .take(REQUEST_DIAGNOSTICS_MAX_ATTEMPTS)
             .map(|item| CodexLocalAccessRequestAttempt {
                 authorization_route: item.authorization_route,
+                service_tier_adaptation: item.service_tier_adaptation,
+                authorization_fallback: item.authorization_fallback.map(|trace| {
+                    crate::models::codex_local_access::CodexLocalAccessAuthorizationFallbackTrace {
+                        reason: trace.reason,
+                        trigger_stage: trace.trigger_stage,
+                        from_account_id: trace.from_account_id,
+                        to_account_id: trace.to_account_id,
+                        from_route: trace.from_route,
+                        to_route: trace.to_route,
+                        status: trace.status,
+                        error_code: trace.error_code,
+                        error_message: trace.error_message,
+                    }
+                }),
+                upstream_request_id: item.upstream_request_id,
                 sequence: item.sequence,
                 transport_error: item.transport_error,
                 transport_pool_retired: item.transport_pool_retired,
@@ -391,6 +406,7 @@ fn native_quota_summary(
         (0, 0, 0, 0, 0, 0);
     let (mut total, mut weekly, mut hourly): (Option<i64>, Option<i64>, Option<i64>) =
         (None, None, None);
+    let (mut weekly_capacity, mut hourly_capacity): (Option<i64>, Option<i64>) = (None, None);
     let mut updated_at = 0;
     let mut stale = false;
     let mut plans: std::collections::BTreeMap<String, Value> = std::collections::BTreeMap::new();
@@ -509,14 +525,15 @@ fn native_quota_summary(
         };
         total = Some(total.unwrap_or(0) + value);
         for (value, minutes) in [first, second].into_iter().flatten() {
-            let (field, aggregate) = if minutes >= 5 * 24 * 60 {
-                ("weeklyRemainingPercent", &mut weekly)
+            let (field, aggregate, capacity) = if minutes >= 5 * 24 * 60 {
+                ("weeklyRemainingPercent", &mut weekly, &mut weekly_capacity)
             } else if minutes > 0 && minutes <= 6 * 60 {
-                ("fiveHourRemainingPercent", &mut hourly)
+                ("fiveHourRemainingPercent", &mut hourly, &mut hourly_capacity)
             } else {
                 continue;
             };
             *aggregate = Some(aggregate.unwrap_or(0) + value);
+            *capacity = Some(capacity.unwrap_or(0) + 100);
             plan[field] = json!(plan[field].as_i64().unwrap_or(0) + value);
         }
         included += 1;
@@ -552,10 +569,16 @@ fn native_quota_summary(
     ] {
         response[field] = json!(value);
     }
+    if count == 0 {
+        weekly_capacity = Some(0);
+        hourly_capacity = Some(0);
+    }
     for (field, value) in [
         ("remainingPercent", total),
         ("weeklyRemainingPercent", weekly),
         ("fiveHourRemainingPercent", hourly),
+        ("weeklyCapacityPercent", weekly_capacity),
+        ("fiveHourCapacityPercent", hourly_capacity),
     ] {
         if let Some(value) = value {
             response[field] = json!(value);

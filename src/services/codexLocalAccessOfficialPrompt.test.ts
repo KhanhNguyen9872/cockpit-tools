@@ -17,7 +17,7 @@ function harness(invoke: (command: string) => Promise<unknown>) {
   return { service: exports, checks };
 }
 const state = { running: true, collection: { enabled: true } };
-test('startup completes before requesting a prompt and does not wait for authorization', async () => {
+test('startup completes without requesting or waiting for authorization', async () => {
   let resolve!: (value: unknown) => void;
   const pending = new Promise((next) => { resolve = next; });
   const ctx = harness(() => pending);
@@ -25,23 +25,22 @@ test('startup completes before requesting a prompt and does not wait for authori
   assert.equal(ctx.checks.length, 0);
   resolve(state);
   assert.equal(await started, state);
-  assert.equal(JSON.stringify(ctx.checks), JSON.stringify([{ running: true, restarted: true }]));
+  assert.deepEqual(ctx.checks, []);
 });
-test('explicit restart and launch-preview activation prompt again; ordinary status reads do not', async () => {
+test('restart, launch-preview activation and status reads never request authorization', async () => {
   const ctx = harness(async () => state);
   await ctx.service.restartCodexLocalAccessSidecar();
   await ctx.service.getCodexLocalAccessState();
   await ctx.service.activateCodexLocalAccess();
-  assert.equal(JSON.stringify(ctx.checks), JSON.stringify([{ running: true, restarted: true }, { running: true, restarted: true }]));
+  assert.deepEqual(ctx.checks, []);
 });
-test('failed startup never prompts and stopping updates the run boundary', async () => {
+test('failed startup and stopping never request authorization', async () => {
   const failed = harness(async () => { throw new Error('startup failure'); });
   await assert.rejects(failed.service.setCodexLocalAccessEnabled(true), /startup failure/);
   assert.equal(failed.checks.length, 0);
   const stopped = harness(async () => ({ running: false, collection: { enabled: false } }));
   await stopped.service.setCodexLocalAccessEnabled(false);
-  assert.equal(stopped.checks[0].running, false);
-  assert.equal(stopped.checks[0].stopped, true);
+  assert.deepEqual(stopped.checks, []);
 });
 test('instance gateway restarts never trigger the global API-service authorization guide', async () => {
   const ctx = harness(async () => state);

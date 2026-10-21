@@ -42,7 +42,7 @@ export function useCodexServiceMemberDraft(options: {
     if (current.bindings[id]) return { mode: 'official', registrationId: current.bindings[id] };
     const account = current.accounts.find((row) => row.id === id);
     if (!account || current.collection?.accountIds.includes(id)) return { mode: 'codex' };
-    const plan = resolveCodexServiceJoinPlan(account, current.grants, [], false);
+    const plan = resolveCodexServiceJoinPlan(account, current.grants);
     return plan.kind === 'saved' ? plan : { mode: 'codex' };
   };
   useEffect(() => {

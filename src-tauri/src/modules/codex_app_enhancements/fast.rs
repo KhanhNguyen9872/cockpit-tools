@@ -4,6 +4,7 @@
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant as StdInstant};
@@ -16,24 +17,32 @@ use tokio_tungstenite::{connect_async_with_config, MaybeTlsStream, WebSocketStre
 const GUARD_SCRIPT: &str = include_str!("startup_guard.js");
 const SCRIPT: &str = include_str!("fast.js");
 const QUOTA_SCRIPT: &str = include_str!("quota.js");
-const DICTATION_SCRIPT: &str = include_str!("native_dictation.js");
 const STATE_SCRIPT: &str = r#";(() => {
   const previous = window.__cockpitEnhancements;
   const next = __COCKPIT_STATE_OPTIONS__;
-  const features = [next.nativeFast, next.quotaCompat, next.apiDictation, next.apiKeyAuthVerified].map(Number).join('');
+  // Revoke retired bridges without reloading a page with an unsent draft.
+  // Keep old hook objects alive: an already evaluated client module may still
+  // call them until its next normal navigation. Its native policies now apply.
+  if (previous) previous.apiDictation = false;
+  try { window.__cockpitApiDictation?.dispose?.(); } catch {}
+  if (typeof window.__cockpitNativeDictation?.capability === 'function')
+    window.__cockpitNativeDictation.capability = nativeValue => nativeValue;
+  const features = [next.nativeFast, next.quotaCompat, next.apiKeyAuthVerified, next.apiService].map(Number).join('');
   const active = previous?.nativePatchState === 'active'
+    && previous.nativePatchMode === 'full'
+    && previous.nativePatchRequestedFeatures === features
     && previous.nativePatchFeatures === features;
   const sameOwnerAndConfig = previous?.owner === next.owner
     && previous.nativeFast === next.nativeFast
     && previous.quotaCompat === next.quotaCompat
-    && previous.apiDictation === next.apiDictation
-    && previous.apiKeyAuthVerified === next.apiKeyAuthVerified;
+    && previous.apiKeyAuthVerified === next.apiKeyAuthVerified
+    && previous.apiService === next.apiService;
   const preserveLoadingState = sameOwnerAndConfig
     && ['preloading', 'unsupported'].includes(previous.nativePatchState);
   window.__cockpitEnhancements = {
-    ...previous, ...next,
-    nativePatchState: active ? 'active' : preserveLoadingState ? previous.nativePatchState : 'pending',
-    nativePatchReason: preserveLoadingState ? previous.nativePatchReason : undefined,
+    ...previous, ...next, apiDictation: false,
+    nativePatchState: active ? previous.nativePatchState : preserveLoadingState ? previous.nativePatchState : 'pending',
+    nativePatchReason: active || preserveLoadingState ? previous.nativePatchReason : undefined,
   };
 })();"#;
 const SOURCE_LIMIT: usize = 24 * 1024 * 1024;
@@ -44,6 +53,8 @@ const ACTIVATION_TIMEOUT: Duration = Duration::from_secs(35);
 const RETRY_DELAYS: [u64; 5] = [1, 2, 5, 10, 15];
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type ContextKey = (u64, i64);
+#[path = "startup_draft.rs"]
+mod startup_draft;
 
 /// Shared by every target/worker of one explicit profile launch. Reconnection
 /// and configuration changes must not create another startup permission.
@@ -287,10 +298,12 @@ struct Registration {
     runtime: String,
     nonce: String,
     startup: Option<Arc<StartupReload>>,
+    draft_file: PathBuf,
     context: Option<ContextKey>,
     document: Attempt,
     bootstrapped: bool,
     active: bool,
+    capability_only: bool,
     activation_until: Option<Instant>,
     next_state_read: Option<Instant>,
     next_startup_check: Option<Instant>,
@@ -317,7 +330,9 @@ impl Registration {
     }
 
     async fn report(&mut self, phase: &str, reason: &str) {
-        let state = if self.active {
+        let state = if self.active && self.capability_only {
+            "active-capability"
+        } else if self.active {
             "active"
         } else if self.script_id.is_some() {
             "next-document"
@@ -371,7 +386,7 @@ impl Drop for Registration {
 async fn cleanup(session: &mut Session, script_id: Option<String>, owner: &str, nonce: &str) {
     let _ = timeout(CLEANUP_TIMEOUT, async {
         if let Some(context) = session.context() {
-            let expression = format!("(()=>{{const s=window.__cockpitEnhancements;if(s?.owner==={}){{window.__cockpitNativeFast?.cancelHandoff?.({});s.nativeFast=false;s.quotaCompat=false;s.apiDictation=false;window.__cockpitNativeFastDispose?.();}}return true;}})()", json!(owner), json!(nonce));
+            let expression = format!("(()=>{{const s=window.__cockpitEnhancements;if(s?.owner==={}){{window.__cockpitNativeFast?.cancelHandoff?.({});s.nativeFast=false;s.quotaCompat=false;s.apiService=false;window.__cockpitNativeFastDispose?.();}}return true;}})()", json!(owner), json!(nonce));
             let _ = session.evaluate(expression, context, Duration::from_millis(500)).await;
         }
         if let Some(identifier) = script_id { session.registrations.insert(identifier); }
@@ -426,13 +441,13 @@ fn command_reason(error: &str) -> String {
 fn bootstrap(
     native_fast: bool,
     quota_compat: bool,
-    api_dictation: bool,
     api_key_auth_verified: bool,
+    api_service: bool,
     owner: &str,
 ) -> String {
-    let options = json!({"nativeFast":native_fast,"quotaCompat":quota_compat,"apiDictation":api_dictation,"apiKeyAuthVerified":api_key_auth_verified,"owner":owner});
+    let options = json!({"nativeFast":native_fast,"quotaCompat":quota_compat,"apiKeyAuthVerified":api_key_auth_verified,"apiService":api_service,"owner":owner});
     let state = STATE_SCRIPT.replace("__COCKPIT_STATE_OPTIONS__", &options.to_string());
-    format!("{state}\n{GUARD_SCRIPT}\n{SCRIPT}\n{QUOTA_SCRIPT}\n{DICTATION_SCRIPT}\n;true;")
+    format!("{state}\n{GUARD_SCRIPT}\n{SCRIPT}\n{QUOTA_SCRIPT}\n;true;")
 }
 
 async fn rollback_preparation(registration: &mut Registration) {
@@ -574,7 +589,7 @@ async fn try_startup_reload(registration: &mut Registration, context: ContextKey
         return;
     }
     registration.next_startup_check = Some(Instant::now() + Duration::from_millis(500));
-    let readiness = registration
+    let mut readiness = registration
         .session()
         .evaluate(
             "window.__cockpitNativeFast.inspectStartupReload()".to_string(),
@@ -582,6 +597,37 @@ async fn try_startup_reload(registration: &mut Registration, context: ContextKey
             COMMAND_TIMEOUT,
         )
         .await;
+    if registration.session().context() != Some(context) {
+        return;
+    }
+    if let Ok(value) = &readiness {
+        if value.get("reason").and_then(Value::as_str) == Some("draft-present") {
+            if let Some(snapshot) = value.get("draft").filter(|v| v.is_object()) {
+                let snapshot = snapshot.clone();
+                match startup_draft::persisted(&registration.draft_file, &snapshot).await {
+                    Ok(true) if registration.session().context() == Some(context) => {
+                        // This proof is only good for the exact renderer document
+                        // that was read. The atomic final guard rechecks the PM
+                        // document, idle state, attachments and activity again.
+                        let expression =
+                            format!("window.__cockpitStartupGuard.approveSavedDraft({snapshot})");
+                        readiness = registration
+                            .session()
+                            .evaluate(expression, context, COMMAND_TIMEOUT)
+                            .await;
+                    }
+                    Err(()) => {
+                        registration.startup = None;
+                        registration
+                            .report("document", "draft-storage-timeout")
+                            .await;
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
     if registration.session().context() != Some(context) {
         return;
     }
@@ -677,8 +723,17 @@ async fn read_activation(
     match result.get("state").and_then(Value::as_str) {
         Some("active") => {
             registration.active = true;
+            registration.capability_only = false;
             registration.activation_until = None;
             registration.report("activation", "module-evaluated").await;
+        }
+        Some("active-capability") => {
+            registration.active = true;
+            registration.capability_only = true;
+            registration.activation_until = None;
+            registration
+                .report("activation", &safe_reason(&result, "capability-only"))
+                .await;
         }
         Some("unsupported") => {
             registration.activation_until = None;
@@ -717,6 +772,7 @@ async fn maintain(registration: &mut Registration) -> Result<(), String> {
         registration.document = Attempt::default();
         registration.bootstrapped = false;
         registration.active = false;
+        registration.capability_only = false;
         registration.next_state_read = None;
         registration.last_diagnostic = None;
         registration.activation_until = registration
@@ -816,14 +872,15 @@ async fn initialize(registration: &mut Registration) -> Result<(), String> {
 /// launch from restoring an already-running target before supplying startup.
 pub(super) async fn run(
     websocket_url: String,
+    profile_dir: PathBuf,
     native_fast: bool,
     quota_compat: bool,
-    api_dictation: bool,
     api_key_auth_verified: bool,
+    api_service: bool,
     startup: Option<Arc<StartupReload>>,
     mut stop: watch::Receiver<bool>,
 ) -> Result<(), String> {
-    if !native_fast && !quota_compat && !api_dictation || *stop.borrow() {
+    if !native_fast && !quota_compat && !api_service || *stop.borrow() {
         return Ok(());
     }
     if !local_websocket(&websocket_url) {
@@ -848,8 +905,8 @@ pub(super) async fn run(
     let runtime = bootstrap(
         native_fast,
         quota_compat,
-        api_dictation,
         api_key_auth_verified,
+        api_service,
         &owner,
     );
     let mut registration = Registration {
@@ -868,10 +925,12 @@ pub(super) async fn run(
         runtime,
         nonce: uuid::Uuid::new_v4().to_string(),
         startup,
+        draft_file: profile_dir.join(".codex-global-state.json"),
         context: None,
         document: Attempt::default(),
         bootstrapped: false,
         active: false,
+        capability_only: false,
         activation_until: None,
         next_state_read: None,
         next_startup_check: None,

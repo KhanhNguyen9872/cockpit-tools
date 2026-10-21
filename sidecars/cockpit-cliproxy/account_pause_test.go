@@ -17,7 +17,7 @@ func TestPausedManifestRetainsMembersAndExplicitScope(t *testing.T) {
 		t.Fatalf("pause changed membership or explicit scope: %#v", m)
 	}
 	base := &cockpitSelector{manifest: m}
-	selector := buildCoreAuthSelector(nil, base, m, nil)
+	selector := buildCoreAuthSelector(nil, base, m)
 	auths := []*coreauth.Auth{testAuth("a.json"), testAuth("b.json")}
 	ctx := context.WithValue(context.Background(), clientAPIKeyContextKey, &m.APIKeys[0])
 	selected, err := selector.Pick(ctx, "codex", "", cliproxyexecutor.Options{}, auths)
@@ -40,7 +40,7 @@ func TestPausedAccountIDsKeepCaseSensitiveIdentity(t *testing.T) {
 func TestPausedAccountTerminalMarkerRequiresExplicitMatchingScope(t *testing.T) {
 	base, auths := rotationSelectorForTest()
 	base.manifest.PausedAccountIDs = []string{"a", "b", "c"}
-	selector := buildCoreAuthSelector(nil, base, base.manifest, nil)
+	selector := buildCoreAuthSelector(nil, base, base.manifest)
 	for name, ctx := range map[string]context.Context{
 		"unrestricted":   rotationContextForTest("key"),
 		"scope mismatch": rotationContextForTest("key", "missing"),
@@ -58,7 +58,7 @@ func TestPausedAccountPrecedesBackupAndAffinity(t *testing.T) {
 	m.CustomRoutingRules = []customRoutingRule{{AccountID: "b", IsBackup: true}}
 	cfg := &config.Config{}
 	cfg.Routing.SessionAffinity = true
-	selector := buildCoreAuthSelector(cfg, &orderedAuthSelector{order: []string{"a.json", "b.json"}}, m, nil)
+	selector := buildCoreAuthSelector(cfg, &orderedAuthSelector{order: []string{"a.json", "b.json"}}, m)
 	t.Cleanup(func() { selector.(coreauth.StoppableSelector).Stop() })
 	ctx := rotationContextForTest("scope", "a", "b")
 	opts := cliproxyexecutor.Options{OriginalRequest: []byte(`{"model":"gpt-5.4","prompt_cache_key":"pause-affinity"}`)}
@@ -77,9 +77,9 @@ func TestPausedAccountPrecedesBackupAndAffinity(t *testing.T) {
 func TestPausedAccountIsServiceLocalAndInternalCallsRemainAvailable(t *testing.T) {
 	base, auths := rotationSelectorForTest()
 	base.manifest.PausedAccountIDs = []string{"a"}
-	paused := buildCoreAuthSelector(nil, base, base.manifest, nil)
+	paused := buildCoreAuthSelector(nil, base, base.manifest)
 	other, _ := rotationSelectorForTest()
-	active := buildCoreAuthSelector(nil, other, other.manifest, nil)
+	active := buildCoreAuthSelector(nil, other, other.manifest)
 	ctx := rotationContextForTest("scope", "a")
 	if selected, err := paused.Pick(ctx, "codex", "", cliproxyexecutor.Options{}, auths); selected != nil || err == nil {
 		t.Fatalf("service pause ignored: %#v %v", selected, err)

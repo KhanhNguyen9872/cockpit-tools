@@ -12,7 +12,6 @@ export type CodexAddAccountTab =
 export type CodexOAuthBindingRetryDetail = {
   targetKind: 'local_access' | 'api_key_account';
   targetAccountId?: string;
-  quotaReserve?: { hourlyPercent: number; weeklyPercent: number } | null;
 };
 
 export type CodexOpenAddAccountDetail = {
@@ -49,7 +48,6 @@ export function requestCodexOpenAddAccount(detail: CodexOpenAddAccountDetail = {
     ? {
         targetKind: detail.retryOAuthBinding.targetKind,
         targetAccountId: detail.retryOAuthBinding.targetAccountId?.trim() || undefined,
-        quotaReserve: detail.retryOAuthBinding.quotaReserve ?? null,
       }
     : undefined;
   const tab = detail.tab ?? 'tempLogin';

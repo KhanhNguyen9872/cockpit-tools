@@ -780,6 +780,9 @@ func isStaleExecutionResult(result Result, current *Auth) bool {
 
 // MarkResult records an execution result and notifies hooks.
 func (m *Manager) MarkResult(ctx context.Context, result Result) {
+	if skipUnsentExecutionResult(ctx, result) {
+		return
+	}
 	if result.AuthID == "" {
 		return
 	}
@@ -1061,6 +1064,9 @@ func (m *Manager) recordExecutionResult(ctx context.Context, result Result, auth
 
 // reportHomeResult only observes a Home dispatch result and never updates local auth state.
 func (m *Manager) reportHomeResult(ctx context.Context, result Result, auth *Auth) {
+	if skipUnsentExecutionResult(ctx, result) {
+		return
+	}
 	if m == nil || result.AuthID == "" {
 		return
 	}
@@ -1073,6 +1079,9 @@ func (m *Manager) reportHomeResult(ctx context.Context, result Result, auth *Aut
 }
 
 func (m *Manager) recordAvailabilityNeutralResult(ctx context.Context, result Result) {
+	if skipUnsentExecutionResult(ctx, result) {
+		return
+	}
 	if result.AuthID == "" {
 		return
 	}

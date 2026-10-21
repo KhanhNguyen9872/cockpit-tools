@@ -140,6 +140,12 @@ pub struct Route {
     /// SIWC authorization epoch used for this attempt; internal only.
     pub official_authorization_revision: Option<String>,
     pub official_registration_id: Option<String>,
+    /// Persistent official binding which authorized this same-source local fallback.
+    pub official_fallback_registration_id: Option<String>,
+    pub official_fallback_authorization_revision: Option<String>,
+    /// Opaque snapshot of the caller ACL and official route authorization.
+    pub authorization_scope_fingerprint: Option<String>,
+    pub official_fallback_failure: Option<OfficialFallbackFailure>,
     /// Responses base: e.g. https://chatgpt.com/backend-api/codex or https://api.openai.com/v1.
     pub base_url: String,
     pub model: String,
@@ -161,7 +167,11 @@ pub struct Route {
 }
 
 impl Route {
-    pub fn continuity_id(&self) -> &str { self.continuity_account_id.as_deref().unwrap_or(&self.account_id) }
+    pub fn continuity_id(&self) -> &str {
+        self.continuity_account_id
+            .as_deref()
+            .unwrap_or(&self.account_id)
+    }
 }
 
 #[derive(Clone)]
@@ -214,6 +224,9 @@ pub struct ServiceError {
     pub credential_scope: bool,
     /// Local, typed transport evidence; never inferred from an upstream message.
     pub transport_failure: Option<TransportFailureKind>,
+    /// Proven local build/connect failure before an HTTP request reached upstream.
+    /// Timeouts, read failures and WebSocket upgrade failures do not establish this.
+    pub upstream_not_sent: bool,
 }
 
 impl ServiceError {
@@ -226,6 +239,7 @@ impl ServiceError {
             retry_after: None,
             credential_scope: false,
             transport_failure: None,
+            upstream_not_sent: false,
         }
     }
 
@@ -241,6 +255,11 @@ impl ServiceError {
 
     pub fn with_credential_scope(mut self, credential_scope: bool) -> Self {
         self.credential_scope = credential_scope;
+        self
+    }
+
+    pub fn with_upstream_not_sent(mut self, upstream_not_sent: bool) -> Self {
+        self.upstream_not_sent = upstream_not_sent;
         self
     }
 }
@@ -260,6 +279,9 @@ pub struct RequestReport {
     pub official_access_fingerprint: Option<String>,
     pub official_authorization_revision: Option<String>,
     pub official_registration_id: Option<String>,
+    /// Persistent official binding which authorized this same-source local fallback.
+    pub official_fallback_registration_id: Option<String>,
+    pub official_fallback_authorization_revision: Option<String>,
     /// Classified authorization evidence for this attempt, never public payload data.
     pub official_authorization_error: Option<String>,
     pub operation: &'static str,
@@ -281,10 +303,22 @@ pub struct RequestReport {
     pub reasoning_effort: Option<String>,
 }
 
+/// A proven pre-output official rejection, or a transport connection failure.
+#[derive(Clone, Debug)]
+pub struct OfficialFallbackFailure {
+    pub trigger_stage: &'static str,
+    pub status: u16,
+    pub code: String,
+    pub message: Option<String>,
+    pub retry_after: Option<Duration>,
+}
+
 pub trait Host: Send + Sync + 'static {
     /// Retire only the failed client generation. Fast in-memory work only;
     /// existing streams keep their client clones and must not be cancelled.
-    fn invalidate_transport(&self, _identity: &str) -> bool { false }
+    fn invalidate_transport(&self, _identity: &str) -> bool {
+        false
+    }
     /// Caller-visible model profiles and protocol-derived multi-agent policy.
     /// Before routing only boundary/tool preparation is requested; a selected
     /// route determines whether its protocol needs portable message input.
@@ -297,10 +331,13 @@ pub trait Host: Send + Sync + 'static {
         Box::pin(async { Ok(MultiAgentPolicy::default()) })
     }
     /// Fast in-memory observations only; implementations must not wait for disk or network.
-    fn observe_rate_limits(&self, _account_id: &str, _snapshot: super::rate_limits::QuotaSnapshot,
-        _request_started: std::time::Instant) {}
-    fn quota_request_started(&self, _account_id: &str) {}
-    fn check_quota_before_send(&self, _account_id: &str) -> Result<(), ServiceError> { Ok(()) }
+    fn observe_rate_limits(
+        &self,
+        _account_id: &str,
+        _snapshot: super::rate_limits::QuotaSnapshot,
+        _request_started: std::time::Instant,
+    ) {
+    }
     /// A runtime policy notification; must not perform blocking I/O.
     fn set_cooling_disabled(&self, _disabled: bool) {}
     /// Disabling affinity clears only the transient routing preference cache.
@@ -366,10 +403,22 @@ pub trait Host: Send + Sync + 'static {
         self.route_failed_for_model(account_id, model, status, retry_after, credential_scope)
     }
     fn route_failed_attempt<'a>(
-        &'a self, route: &'a Route, model: &'a str, status: u16,
-        retry_after: Option<Duration>, credential_scope: bool, message: Option<&'a str>,
+        &'a self,
+        route: &'a Route,
+        model: &'a str,
+        status: u16,
+        retry_after: Option<Duration>,
+        credential_scope: bool,
+        message: Option<&'a str>,
     ) -> BoxFuture<'a, ()> {
-        self.route_failed_with_context(&route.account_id, model, status, retry_after, credential_scope, message)
+        self.route_failed_with_context(
+            &route.account_id,
+            model,
+            status,
+            retry_after,
+            credential_scope,
+            message,
+        )
     }
     fn retry_cooldown_wait<'a>(
         &'a self,
@@ -398,6 +447,39 @@ pub trait Host: Send + Sync + 'static {
         caller: &'a Caller,
         request: RouteRequest,
     ) -> BoxFuture<'a, Result<Route, ServiceError>>;
+    /// Refresh credentials or transport inside the previous credential namespace.
+    /// Hosts with request-local route overrides must preserve those overrides
+    /// and recheck their authorization instead of applying the default selector.
+    fn refresh_route<'a>(
+        &'a self,
+        caller: &'a Caller,
+        _previous: &'a Route,
+        request: RouteRequest,
+    ) -> BoxFuture<'a, Result<Route, ServiceError>> {
+        self.route(caller, request)
+    }
+    /// Persist an observed upstream rejection before deciding whether history
+    /// can be replayed. Candidate selection and local preflight are not attempts.
+    fn observe_official_failure<'a>(
+        &'a self,
+        _route: &'a Route,
+        _model: &'a str,
+        _failure: &'a OfficialFallbackFailure,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async {})
+    }
+    /// Resolve a same-source local route after an official failure. The host
+    /// rechecks caller scope and the current authorization revision. Never
+    /// mutate the durable official binding or select another source here.
+    fn fallback_to_local<'a>(
+        &'a self,
+        _caller: &'a Caller,
+        _failed: &'a Route,
+        _request: RouteRequest,
+        _failure: OfficialFallbackFailure,
+    ) -> BoxFuture<'a, Result<Option<Route>, ServiceError>> {
+        Box::pin(async { Ok(None) })
+    }
     fn capability_fallback_decision<'a>(
         &'a self,
         _caller: &'a Caller,

@@ -29,7 +29,7 @@ const health = (accountId: string, patch: Partial<CodexLocalAccessAccountHealth>
 const pool = (accountStatuses: CodexLocalAccessAccountPoolHealth['accountStatuses']): CodexLocalAccessAccountPoolHealth => ({
   apiKeyId: 'key', apiKeyLabel: 'Client', provider: 'codex', model: 'test', requestKind: 'text',
   errorCode: 'unavailable', errorMessage: '', diagnosticAvailable: true, candidateAuths: 0, scopedAuths: 0,
-  availableAuths: 0, unavailableAuths: 0, modelExcludedAuths: 0, quotaReservedAuths: 0, imagePolicyBlockedAuths: 0,
+  availableAuths: 0, unavailableAuths: 0, modelExcludedAuths: 0, imagePolicyBlockedAuths: 0,
   accountStatuses, lastFailureAt: 1,
 });
 const translate = ((key: string, options: unknown) => typeof options === 'string' ? options : JSON.stringify({ key, ...options as object })) as TFunction;

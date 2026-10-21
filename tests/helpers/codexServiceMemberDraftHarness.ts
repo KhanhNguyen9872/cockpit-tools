@@ -8,12 +8,11 @@ export function createCodexServiceMemberDraftHarness(options: {
   accounts: CodexAccount[];
   list?: () => Promise<any[]>;
   grants?: any[];
-  recommend?: boolean;
   collection?: { accountIds: string[]; officialAccountBindings: Record<string, string> };
 }) {
   const window = new EventTarget();
   const calls = { lists: 0, mutations: 0, choices: [] as { ids: string[]; requestId: string }[], cancelled: [] as string[], errors: [] as unknown[] };
-  let active = true, dirty = false, recommend = options.recommend ?? true;
+  let active = true, dirty = false;
   const collection = options.collection ?? { accountIds: [], officialAccountBindings: {} };
   let selected = new Set<string>(collection.accountIds);
   let bindings: Record<string, string> = { ...collection.officialAccountBindings };
@@ -27,8 +26,8 @@ export function createCodexServiceMemberDraftHarness(options: {
     },
     '../utils/codexOfficialAuthorization': { codexOfficialAuthorizationDeadline: (promise: unknown) => promise },
     '../utils/codexServiceJoin': {
-      resolveCodexServiceJoinPlan: (account: CodexAccount, grants: any[], members: string[], _recommend: boolean | undefined, saved: Record<string, string>) =>
-        resolveCodexServiceJoinPlan(account, grants, members, recommend, saved),
+      resolveCodexServiceJoinPlan: (account: CodexAccount, grants: any[], members: string[], saved?: Record<string, string>) =>
+        resolveCodexServiceJoinPlan(account, grants, members, saved),
       reuseCodexServiceJoin: async () => { calls.mutations++; throw new Error('draft must not reuse an immediate join'); },
     },
     '../utils/codexAccountServiceNavigation': {
@@ -54,7 +53,6 @@ export function createCodexServiceMemberDraftHarness(options: {
     mode: (id = options.accounts[0].id): string => hook.flush().modeFor(id),
     bindings: (): Record<string, string> => JSON.parse(JSON.stringify(bindings)), dirty: () => dirty,
     error: () => calls.errors[calls.errors.length - 1],
-    setRecommend: (value: boolean) => { recommend = value; },
     open: (value: boolean) => { active = value; hook.flush(); },
     add: async (rows = options.accounts) => { const ids = await addRows(rows); selected = new Set([...selected, ...ids]); hook.flush(); return ids; },
     emit: (detail: unknown) => { window.dispatchEvent(new CustomEvent('draft-result', { detail })); hook.flush(); },

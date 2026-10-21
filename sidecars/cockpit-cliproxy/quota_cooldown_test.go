@@ -147,8 +147,8 @@ func TestPoolMemberRecoverableReasonAllowsQuotaCooldown(t *testing.T) {
 	if !poolMemberRecoverableReason("account_cooldown") {
 		t.Fatal("account_cooldown should be recoverable")
 	}
-	if poolMemberRecoverableReason("disabled") || poolMemberRecoverableReason("quota_reserved") {
-		t.Fatal("disabled and quota_reserved must stay unrecoverable")
+	if poolMemberRecoverableReason("disabled") {
+		t.Fatal("disabled must stay unrecoverable")
 	}
 }
 

@@ -59,7 +59,7 @@ func TestCoreAuthSelectorForwardsSessionAffinityResults(t *testing.T) {
 		cfg,
 		&cockpitSelector{manifest: m},
 		m,
-		nil,
+
 		newRequestUsageTracker(),
 	)
 	if stoppable, ok := selector.(coreauth.StoppableSelector); ok {

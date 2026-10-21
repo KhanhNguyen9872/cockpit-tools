@@ -350,6 +350,7 @@ impl Execution {
         let mut open_attempts = 1u8;
         let mut bootstrap_attempts = 0u8;
         let mut credential_attempts = 0usize;
+        let mut last_upstream_failure: Option<ServiceError> = None;
         let mut round_attempted = false;
         let policy = self.budget.policy.clone();
         let deadline = self
@@ -367,7 +368,6 @@ impl Execution {
                 self.budget = self.budget.renew_open();
             }
             previous_open_deadline = Some(self.budget.open_deadline);
-            self.tracker.begin_attempt("http");
             let mut headers = outbound_headers(&self.headers);
             headers.extend(self.selected.route.headers.clone());
             headers.remove(header::CONTENT_LENGTH);
@@ -434,8 +434,6 @@ impl Execution {
                 self.selected.route.base_url.trim_end_matches('/'),
                 path
             );
-            self.tracker
-                .payload("upstream_request", "http", &headers, &payload.to_string());
             let mut outgoing = self.selected.route.client.post(url).headers(headers);
             if !oauth {
                 if let Some(parts) = self.request.native_parts(&self.selected.image_model) {
@@ -465,21 +463,39 @@ impl Execution {
             }
             let mut stop = self.state.stop.clone();
             let (client, built) = outgoing.build_split();
-            if let Ok(request) = &built {
-                self.tracker.upstream_headers(request.headers());
-                self.tracker.check_quota_before_send()?;
-            }
-            let outgoing = async move { client.execute(built?).await };
+            let built = built.map_err(|error| super::super::diagnostics::transport_failure(
+                502, "upstream_request_invalid", "Unable to prepare the image upstream request", &error,
+            ).with_upstream_not_sent(true));
+            let open_deadline = self.budget.prepare_deadline().min(deadline);
+            let outgoing = async {
+                let built = built?;
+                if tokio::time::Instant::now() >= open_deadline {
+                    return Err(ServiceError::new(504,"upstream_connect_timeout","Image upstream response headers timed out"));
+                }
+                self.tracker.begin_attempt("http");
+                self.tracker.payload("upstream_request", "http", built.headers(), &payload.to_string());
+                self.tracker.upstream_headers(built.headers());
+                client.execute(built).await.map_err(|error| {
+                    super::super::diagnostics::transport_failure(502,"upstream_unavailable","Unable to connect to the image upstream",&error)
+                        .with_upstream_not_sent(error.is_connect() || error.is_builder())
+                })
+            };
             let result = tokio::select! {
+                biased;
                 _ = stop.wait() => return Err(stopping_error()),
-                result = tokio::time::timeout_at(self.budget.prepare_deadline().min(deadline), outgoing) =>
+                result = tokio::time::timeout_at(open_deadline, outgoing) =>
                     result.map_err(|_| ServiceError::new(504,"upstream_connect_timeout","Image upstream response headers timed out"))
-                        .and_then(|value|value.map_err(|error| super::super::diagnostics::transport_failure(502,"upstream_unavailable","Unable to connect to the image upstream",&error))),
+                        .and_then(|value| value),
             };
             let mut response = match result {
                 Ok(response) => response,
                 Err(error) => {
-                    self.tracker.attempt_error(&error);
+                    if error.upstream_not_sent {
+                        self.tracker.discard_unsent_attempt();
+                    } else {
+                        self.tracker.attempt_error(&error);
+                        last_upstream_failure = Some(error.clone());
+                    }
                     if tokio::time::Instant::now() >= deadline {
                         return Err(super::super::retry::total_timeout());
                     }
@@ -490,13 +506,13 @@ impl Execution {
                             continue;
                         }
                     }
-                    if stream_open_timeout || send_attempts >= policy.send_retries {
-                        if super::super::retry::credential_limit_allows(
+                    if error.upstream_not_sent || stream_open_timeout || send_attempts >= policy.send_retries {
+                        if (error.upstream_not_sent || super::super::retry::credential_limit_allows(
                             &policy,
                             credential_attempts,
-                        ) && self.alternate_source(None, deadline).await?
+                        )) && self.alternate_source(None, deadline).await?
                         {
-                            credential_attempts += 1;
+                            if !error.upstream_not_sent { credential_attempts += 1; }
                             send_attempts = 0;
                             status_attempts = 0;
                             open_attempts = 1;
@@ -514,7 +530,9 @@ impl Execution {
                             refreshed = false;
                             continue;
                         }
-                        return Err(error);
+                        return Err(if error.upstream_not_sent {
+                            last_upstream_failure.clone().unwrap_or(error)
+                        } else { error });
                     }
                     send_attempts += 1;
                     super::super::retry::delay(
@@ -531,6 +549,7 @@ impl Execution {
                 }
             };
             self.tracker.upstream_http_version(response.version());
+            self.tracker.upstream_response_headers(response.headers());
             self.tracker.quota_headers(response.headers());
             if oauth && response.status().is_success() {
                 // The shared probe stops at the first business event or its
@@ -599,11 +618,34 @@ impl Execution {
                     false,
                     Some("image_upstream_error"),
                 );
+                // inspect_status_error has already bounded and buffered this
+                // body. Keep only the structured error, not a response/stream.
+                let status = response.status();
+                let version = response.version();
+                let headers = response.headers().clone();
+                let bytes = response.bytes().await.map_err(|error| {
+                    super::super::diagnostics::transport_failure(status.as_u16(),
+                        "upstream_http_error", "Unable to read the image upstream error", &error)
+                })?;
+                let detail = serde_json::from_slice::<Value>(&bytes).ok()
+                    .map(|value| super::super::diagnostics::error_object(&value).clone());
+                let mut saved = ServiceError::new(status.as_u16(), "image_upstream_error",
+                    failure_message.clone().unwrap_or_else(|| "Image upstream rejected the request".into()))
+                    .with_credential_scope(credential_scope)
+                    .with_retry_after(retry_after_headers(&headers).max(body_retry_after));
+                if let Some(detail) = detail { saved = saved.with_error_details(detail); }
+                last_upstream_failure = Some(saved);
+                let mut rebuilt = axum::http::Response::new(bytes);
+                *rebuilt.status_mut() = status;
+                *rebuilt.version_mut() = version;
+                *rebuilt.headers_mut() = headers;
+                response = reqwest::Response::from(rebuilt);
             }
             let retry_after = match (retry_after_headers(response.headers()), body_retry_after) {
                 (Some(headers), Some(body)) => Some(headers.max(body)),
                 (headers, body) => headers.or(body),
             };
+            self.tracker.set_retry_after(retry_after);
             if request_scoped {
                 self.tracker.set_retry_after(retry_after);
                 return Ok((response, binding));

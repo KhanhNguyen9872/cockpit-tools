@@ -72,7 +72,9 @@ pub(super) async fn record_result(
             }
         }
         apply_result(&mut record, &result);
-        if let Some(models) = model_catalog { record.model_catalog = models; }
+        if let Some(models) = model_catalog {
+            record.model_catalog = models;
+        }
         save_record(&record)?;
         Ok(record.summary)
     })
@@ -100,8 +102,14 @@ pub(crate) async fn observe_inference_result(
         _ => None,
     };
     if let Some(error) = error {
-        if let Err(error) =
-            record_result(id, Some(revision), Some(fingerprint), Err(error.into()), None).await
+        if let Err(error) = record_result(
+            id,
+            Some(revision),
+            Some(fingerprint),
+            Err(error.into()),
+            None,
+        )
+        .await
         {
             crate::modules::logger::log_warn(&format!(
                 "[ChatGPT Plan] Cannot save authorization health: {error}"
@@ -113,7 +121,23 @@ pub(crate) async fn observe_inference_result(
 /// GET /models is a non-generating permission check. Failure is returned as
 /// saved state so the dialog can distinguish retryable checks from reauth.
 pub async fn check_authorization(id: &str) -> Result<ChatgptPlanAccountSummary, String> {
+    let started_at_ms = chrono::Utc::now().timestamp_millis();
+    let starting = storage::read(id).await?;
+    let authorization_revision = starting.authorization_revision.clone();
+    let fingerprint = starting
+        .credentials()
+        .ok()
+        .map(|credentials| token_fingerprint(&credentials.access_token));
     let result = super::list_models(id).await.map(|_| ());
+    if result.is_ok() {
+        super::official_health::reset_after_check(
+            id,
+            &authorization_revision,
+            fingerprint.as_deref(),
+            started_at_ms,
+        )
+        .await?;
+    }
     // list_models and refresh persist exactly once using the actual token and
     // authorization epoch. Never re-save their error without that token fence.
     let summary = super::get_account(id).await?;

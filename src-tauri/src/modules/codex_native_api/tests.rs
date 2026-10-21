@@ -125,6 +125,10 @@ impl Host for TestHost {
                 installation_profile: None,
                 official_authorization_revision: None,
                 official_registration_id: None,
+                official_fallback_registration_id: None,
+                official_fallback_authorization_revision: None,
+                authorization_scope_fingerprint: None,
+                official_fallback_failure: None,
                 transport_identity: None,
                 account_id: if self.route_by_model.load(Ordering::SeqCst) {
                     format!("account-{}", request.model)
@@ -910,7 +914,7 @@ async fn compressed_body_is_decoded_with_a_decompressed_size_limit() {
 }
 
 #[tokio::test]
-async fn websocket_disabled_handshake_is_diagnostic_only_and_http_fallback_is_counted_once() {
+async fn websocket_disabled_handshake_is_local_and_http_fallback_is_counted_once() {
     let app = Router::new().route(
         "/v1/responses",
         post(|| async {
@@ -937,6 +941,8 @@ async fn websocket_disabled_handshake_is_diagnostic_only_and_http_fallback_is_co
         _ => panic!("disabled WebSocket must reject before upgrading"),
     }
     assert!(host.selections.lock().unwrap().is_empty());
+    assert!(host.diagnostics.lock().unwrap().is_empty(),
+        "local protocol negotiation is not an upstream request");
     let response = client()
         .post(format!("http://{}/v1/responses", service.addr))
         .bearer_auth("local-test-key")
@@ -958,22 +964,14 @@ async fn websocket_disabled_handshake_is_diagnostic_only_and_http_fallback_is_co
     assert_eq!(reports[0].status, 200);
     assert_eq!(reports[0].account_id, "account-a");
     let diagnostics = host.diagnostics.lock().unwrap();
-    let fallback = diagnostics
-        .iter()
-        .find(|context| context.failure_phase.as_deref() == Some("transport_fallback"))
-        .expect("the disabled handshake retains its diagnostic");
-    assert_eq!(fallback.method, "GET");
-    assert_eq!(fallback.attempts.len(), 1);
-    let attempt = &fallback.attempts[0];
-    assert_eq!(attempt.status, Some(426));
-    assert_eq!(attempt.transport, "websocket");
-    assert_eq!(
-        attempt.error_category.as_deref(),
-        Some("websockets_disabled")
-    );
-    assert_eq!(attempt.failure_phase.as_deref(), Some("transport_fallback"));
-    assert!(attempt.account_id.is_empty());
-    assert!(!attempt.success);
+    assert_eq!(diagnostics.len(), 1, "only the actual HTTP send is diagnostic");
+    assert_eq!(diagnostics[0].method, "POST");
+    assert_eq!(diagnostics[0].attempts.len(), 1);
+    let attempt = &diagnostics[0].attempts[0];
+    assert_eq!(attempt.status, Some(200));
+    assert_eq!(attempt.transport, "http");
+    assert_eq!(attempt.account_id, "account-a");
+    assert!(attempt.success);
     upstream.abort();
 }
 
@@ -1059,8 +1057,8 @@ async fn disabled_websocket_does_not_mask_invalid_client_authentication() {
     service.shutdown(Duration::from_secs(2)).await.unwrap();
     assert!(host.selections.lock().unwrap().is_empty());
     let diagnostics = host.diagnostics.lock().unwrap();
-    assert_eq!(diagnostics.len(), 1);
-    assert_eq!(diagnostics[0].failure_phase.as_deref(), Some("routing"));
+    assert!(diagnostics.is_empty(), "local authentication rejection has no upstream diagnostic");
+    assert!(host.reports.lock().unwrap().is_empty());
     upstream.abort();
 }
 

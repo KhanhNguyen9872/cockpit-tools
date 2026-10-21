@@ -10,8 +10,8 @@ function nodes(value: any): any[] {
 test('general settings retain payload privacy, refresh scope and account refresh controls after automatic controls are removed', () => {
   const callbacks: string[] = [];
   const hook = loadHookModule(new URL('../../pages/SettingsCodexPlatformPanel.tsx', import.meta.url), {
-    '../components/codex/CodexAppEnhancementSettings': { CodexAppEnhancementSettings: 'AppEnhancements' },
     '../components/CodexRefreshPlanScopeControl': { CodexRefreshPlanScopeControl: 'Scope' },
+    '../components/codex/CodexAppEnhancementSettings': { CodexAppEnhancementSettings: 'Enhancements' },
     '../components/codex/CodexRequestPayloadSetting': { CodexRequestPayloadSetting: 'PayloadPrivacy' },
     '../components/AutoSwitchAccountScopeSelector': { AutoSwitchAccountScopeSelector: 'AccountScope' },
     '../components/codex/CodexContextManagementControl': { CodexContextManagementControl: 'Context' },
@@ -31,6 +31,7 @@ test('general settings retain payload privacy, refresh scope and account refresh
   const tree = nodes(hook.render(() => hook.exports.SettingsCodexPlatformPanel(props)));
   assert.equal(tree.filter((entry) => entry.type === 'PayloadPrivacy').length, 1);
   assert.equal(tree.filter((entry) => entry.type === 'Scope').length, 1);
+  assert.equal(tree.filter((entry) => entry.type === 'Enhancements').length, 1);
   assert.deepEqual(callbacks, ['current', 'accounts']);
   assert.equal(tree.some((entry) => /^(multiAgent|capabilityFallback|codex\.quotaSync)\./.test(String(entry.props.children))), false);
   hook.unmount();

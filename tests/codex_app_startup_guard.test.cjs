@@ -7,11 +7,18 @@ const source = fs.readFileSync(path.resolve('src-tauri/src/modules/codex_app_enh
 function start(options = {}) {
   const listeners = new Map(); let reloads = 0, time = 0;
   const editor = { isConnected: true, value: options.draft || '', getClientRects: () => [1],
-    closest: () => null, querySelector: () => options.embedded ? {} : null };
+    closest: query => query.includes('data-composer-placement="home"') && options.home ? {} : null,
+    querySelector: () => options.embedded ? {} : null };
+  Object.defineProperty(editor, 'textContent', { get: () => editor.value });
+  if (options.home) editor.pmViewDesc = { node: {
+    get textContent() { return editor.value; },
+    toJSON: () => options.document || ({ type: 'doc', content: [{ type: 'paragraph',
+      content: [{ type: 'text', text: editor.value }] }] }),
+  } };
   const item = { isConnected: true, getClientRects: () => [1], closest: () => null };
   const sandbox = { Date: { now: () => time }, location: { protocol: 'app:', hostname: '-', reload() { reloads++; } },
     performance: options.noHistory ? {} : { eventCounts: new Map(options.history || []) },
-    __cockpitEnhancements: options.active ? { nativePatchState: 'active' } : {},
+    __cockpitEnhancements: { quotaCompat: options.quotaCompat ?? true, ...(options.active ? { nativePatchState: 'active' } : {}) },
     document: { readyState: options.loading ? 'loading' : 'complete',
       addEventListener: (key, fn) => listeners.set(key, fn), removeEventListener: key => listeners.delete(key),
       querySelectorAll: query => query.startsWith('.ProseMirror') ? options.noEditor ? [] : [editor]
@@ -98,4 +105,61 @@ test('draft check and reload happen in one synchronous call', () => {
   assert.equal(env.guard.reload().reason, 'draft-present'); assert.equal(env.reloads(), 0);
   env.editor.value = '';
   assert.equal(env.guard.reload().ok, true); assert.equal(env.reloads(), 1);
+});
+
+test('exact durable home draft proof permits one reload without changing any text', () => {
+  const env = start({ home: true, draft: '你好\nunsent' });
+  const snapshot = env.guard.snapshotDraft();
+  assert.equal(snapshot.placement, 'home');
+  assert.equal(env.guard.inspect(), 'draft-present');
+  const reordered = JSON.parse(JSON.stringify(snapshot, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item));
+  assert.equal(env.guard.approveSavedDraft(reordered).ok, true);
+  assert.equal(env.guard.reload().ok, true);
+  assert.equal(env.editor.value, '你好\nunsent');
+  assert.equal(env.reloads(), 1);
+  assert.equal(env.guard.reload().reason, 'already-claimed');
+});
+
+test('proof never admits thread composers, rich drafts, attachments, tasks or unknown editors', () => {
+  for (const options of [
+    { draft: 'unsent' }, { home: true, draft: 'unsent', quotaCompat: false },
+    { home: true, draft: 'unsent', protected: true },
+    { home: true, draft: 'unsent', document: { type: 'doc', content: [{ type: 'image' }] } },
+    { home: true, draft: 'unsent', document: { type: 'doc', content: [{ type: 'text', text: 'unsent', marks: [{ type: 'bold' }] }] } },
+  ]) {
+    const env = start(options);
+    assert.equal(env.guard.snapshotDraft(), null);
+    assert.equal(env.guard.approveSavedDraft({ placement: 'home', document: {} }).ok, false);
+    assert.equal(env.guard.reload().ok, false);
+    assert.equal(env.reloads(), 0);
+  }
+});
+
+test('typing, composition, document changes and expired proof cancel the approval', () => {
+  for (const mutation of [
+    env => { env.editor.value = 'new unsaved input'; },
+    env => env.event('beforeinput'),
+    env => env.event('compositionstart'),
+    env => env.advance(2001),
+    env => { env.sandbox.__cockpitEnhancements.quotaCompat = false; },
+  ]) {
+    const env = start({ home: true, draft: 'saved' });
+    assert.equal(env.guard.approveSavedDraft(env.guard.snapshotDraft()).ok, true);
+    mutation(env);
+    assert.equal(env.guard.reload().ok, false);
+    assert.equal(env.reloads(), 0);
+  }
+  const env = start({ home: true, draft: 'saved' });
+  const stale = env.guard.snapshotDraft();
+  env.editor.value = 'newer';
+  assert.equal(env.guard.approveSavedDraft(stale).ok, false);
+});
+
+test('new busy state after disk proof still prevents the final navigation', () => {
+  const options = { home: true, draft: 'saved' }, env = start(options);
+  assert.equal(env.guard.approveSavedDraft(env.guard.snapshotDraft()).ok, true);
+  options.protected = true;
+  assert.equal(env.guard.reload().reason, 'conversation-busy');
+  assert.equal(env.reloads(), 0);
 });

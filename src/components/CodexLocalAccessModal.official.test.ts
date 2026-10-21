@@ -183,7 +183,7 @@ test('production member selection unchecks both legacy channels without losing u
     localAccessAccountById: new Map(accounts.map((account) => [account.id, account])),
     selected: new Set([source.id, official.id, 'unrelated']),
     collection: { accountIds: [source.id, official.id] }, restrictFreeAccounts: false,
-    isCodexLocalAccessEligibleAccount: () => true, shouldRecommendCodexServiceAuthorization: () => false,
+    isCodexLocalAccessEligibleAccount: () => true,
     isMemberRowSelected: (account: CodexAccount) => codexServiceRelatedEndpointIds(account, accounts).some((id) => context.selected.has(id)),
     toggleCodexServiceDisplaySelection, needsCodexServiceMemberAuthorizationChoice, setMembersDraftDirty() {},
     addMemberRows: async (rows: CodexAccount[]) => rows.map((account) => account.id),
@@ -219,7 +219,7 @@ test('production API member removal removes both channels and preserves unrelate
 test('priority changes select the original member without opening authorization before Save', async () => {
   const source = { id: 'source', email: 'source@example.com', auth_mode: 'oauth' } as CodexAccount;
   const accounts = [source];
-  const draft = createCodexServiceMemberDraftHarness({ accounts, list: async () => [], recommend: true });
+  const draft = createCodexServiceMemberDraftHarness({ accounts, list: async () => [] });
   const context: Record<string, any> = {
     membersInteractionDisabled: false, completeLocalAccessAccounts: accounts,
     localAccessAccountById: new Map(accounts.map((account) => [account.id, account])),

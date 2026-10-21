@@ -352,6 +352,10 @@ fn normalize_request_diagnostics(
         attempt.transport = diagnostic_truncate(&attempt.transport, 32);
         attempt.error_category = diagnostic_optional(attempt.error_category.take(), 128);
         attempt.error_message = diagnostic_optional(attempt.error_message.take(), 1024);
+        attempt.upstream_request_id = attempt.upstream_request_id.take().filter(|value| {
+            !value.is_empty() && value.len() <= 256
+                && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        });
         attempt.failure_phase = diagnostic_optional(attempt.failure_phase.take(), 80);
         attempt.transport_error = attempt.transport_error.take().filter(|kind| kind == "tls_decrypt");
         if attempt.transport_error.is_none() {
@@ -361,6 +365,8 @@ fn normalize_request_diagnostics(
             matches!(version.as_str(), "HTTP/0.9" | "HTTP/1.0" | "HTTP/1.1" | "HTTP/2.0" | "HTTP/3.0")
         });
         detail.truncated |= normalize_capability_fallback_trace(attempt);
+        detail.truncated |= normalize_authorization_fallback_trace(attempt);
+        detail.truncated |= normalize_service_tier_adaptation(attempt);
     }
     detail.truncated |= detail.payloads.len() > REQUEST_DIAGNOSTICS_MAX_PAYLOADS;
     detail.payloads.truncate(REQUEST_DIAGNOSTICS_MAX_PAYLOADS);
@@ -405,6 +411,38 @@ fn normalize_request_diagnostics(
         payload.sha256 = format!("{:x}", Sha256::digest(payload.body.as_bytes()));
     }
     detail
+}
+
+fn normalize_service_tier_adaptation(attempt: &mut CodexLocalAccessRequestAttempt) -> bool {
+    let Some(trace) = attempt.service_tier_adaptation.as_ref() else { return false; };
+    let valid = attempt.authorization_route.as_deref() == Some("official")
+        && trace.reason == "official_default_only" && trace.sent_tier == "default"
+        && !trace.requested_tier.is_empty() && trace.requested_tier.len() <= 64
+        && trace.requested_tier.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        && !matches!(trace.requested_tier.as_str(), "auto" | "default");
+    if !valid { attempt.service_tier_adaptation = None; }
+    !valid
+}
+
+/// Only a recorded switch within the selected account can label an authorization fallback.
+fn normalize_authorization_fallback_trace(attempt: &mut CodexLocalAccessRequestAttempt) -> bool {
+    let Some(mut trace) = attempt.authorization_fallback.take() else { return false; };
+    let valid_id = |value: &str| !value.trim().is_empty() && value.len() <= 256
+        && !value.chars().any(char::is_control) && !value.contains("://");
+    if trace.from_route != "official" || trace.to_route != "local_gateway"
+        || trace.from_account_id != trace.to_account_id || trace.to_account_id != attempt.account_id
+        || attempt.authorization_route.as_deref() != Some("local_gateway")
+        || !valid_id(&trace.from_account_id) || trace.reason.is_empty() || trace.reason.len() > 80
+        || !trace.reason.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    { return true; }
+    if trace.trigger_stage.is_empty() { trace.trigger_stage = "upstream".into(); }
+    if !matches!(trace.trigger_stage.as_str(), "upstream" | "preflight" | "health_pause") { return true; }
+    trace.error_code = trace.error_code.take().filter(|value| !value.is_empty() && value.len() <= 128
+        && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.')));
+    trace.error_message = diagnostic_optional(trace.error_message.take(), 1024);
+    trace.status = trace.status.filter(|status| (100..=599).contains(status));
+    attempt.authorization_fallback = Some(trace);
+    false
 }
 
 /// Fallback provenance is bounded routing metadata, independent of payload
@@ -556,6 +594,9 @@ fn merge_request_diagnostics(
                 // A later completion snapshot may omit optional provenance.
                 // Retain it only for the very same account/model/attempt.
                 if same_attempt && old.model_id == attempt.model_id {
+                    attempt.authorization_route = attempt.authorization_route.or_else(|| old.authorization_route.clone());
+                    attempt.authorization_fallback = attempt.authorization_fallback.or_else(|| old.authorization_fallback.clone());
+                    attempt.upstream_request_id = attempt.upstream_request_id.or_else(|| old.upstream_request_id.clone());
                     attempt.transport_error = attempt.transport_error.or_else(|| old.transport_error.clone());
                     attempt.transport_pool_retired = match (old.transport_pool_retired, attempt.transport_pool_retired) {
                         (Some(old), Some(new)) => Some(old || new),

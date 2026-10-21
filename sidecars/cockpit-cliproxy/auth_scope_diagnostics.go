@@ -33,7 +33,6 @@ func (s *cockpitSelector) poolUnavailableError(model string, stats authPoolSelec
 			"{{available}}", strconv.Itoa(stats.availableAuths),
 			"{{unavailable}}", strconv.Itoa(stats.unavailableAuths),
 			"{{modelExcluded}}", strconv.Itoa(stats.modelExcludedAuths),
-			"{{quotaReserved}}", strconv.Itoa(stats.quotaReservedAuths),
 			"{{imageBlocked}}", strconv.Itoa(stats.imagePolicyBlockedAuths),
 		).Replace(statsTemplate)
 		err.Message = title + ". " + statsMessage

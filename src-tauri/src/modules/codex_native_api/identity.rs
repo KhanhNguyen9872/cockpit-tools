@@ -731,6 +731,57 @@ impl IdentityStore {
         })
     }
 
+    /// A fallback marker describes authorization, not a change of owner. Reuse
+    /// existing opaque state only when this caller's evidence proves that the
+    /// selected credential already owns it. This performs no publication.
+    pub(crate) fn same_upstream_owner(
+        &self,
+        context: &RequestIdentity,
+        account_id: &str,
+        owner_id: &str,
+    ) -> Result<bool, ServiceError> {
+        if context.state_account_id.as_deref() != Some(account_id)
+            || !context.unregistered_blobs.is_empty()
+        {
+            return Ok(false);
+        }
+        let reader = self.checkpoint_reader()?;
+        let connection = reader.unchecked_transaction().map_err(storage)?;
+        let scope = rebuild::accepted_scope(
+            &connection, &context.caller, context.thread_id.as_deref(),
+            Some(account_id), context.generation.as_deref(),
+        )?;
+        let accepted_here = scope.as_ref().is_some_and(|(account, owner, _)| {
+            account == account_id && owner == owner_id
+        });
+        let mut proven = accepted_here;
+        for reference in &context.opaque {
+            if automatic_history::detached(context, reference) {
+                continue;
+            }
+            let Some((account, owner)) = automatic_history::lookup(
+                &connection, &context.caller, reference,
+                context.thread_id.as_deref(), context.turn_id.as_deref(),
+            )? else {
+                return Ok(false);
+            };
+            if account == account_id && owner == owner_id {
+                proven = true;
+                continue;
+            }
+            if accepted_here && reference.kind == "encrypted"
+                && rebuild::blob_accepted(
+                    &connection, &context.caller, context.thread_id.as_deref(), reference,
+                    scope.as_ref().expect("accepted scope checked"),
+                )?
+            {
+                continue;
+            }
+            return Ok(false);
+        }
+        Ok(proven)
+    }
+
     pub fn rewrite(
         &self,
         context: &RequestIdentity,

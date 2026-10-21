@@ -1,14 +1,11 @@
 import { isCodexApiKeyAccount, isCodexAgentIdentityAccount, isCodexWebSessionAccount, isCodexPendingOAuthAccount, type CodexAccount } from '../types/codex';
-import { areCodexOfficialRemindersEnabled } from './codexOfficialReminders';
 
 export const CODEX_ACCOUNT_SERVICE_REQUEST = 'codex-account-service-request';
 export const CODEX_ACCOUNT_SERVICE_APPLIED = 'codex-account-service-applied';
 export const CODEX_ACCOUNT_SERVICE_DRAFT_RESULT = 'codex-account-service-draft-result';
 export const CODEX_ACCOUNT_SERVICE_DRAFT_CANCEL = 'codex-account-service-draft-cancel';
-export const CODEX_OFFICIAL_AUTHORIZATION_CHECK = 'codex-official-authorization-check';
 export const CODEX_OFFICIAL_AUTHORIZATION_MANAGE = 'codex-official-authorization-manage';
 let pendingManage = false;
-let snoozed = false;
 export function requestCodexOfficialAuthorizationManagement(): void {
   pendingManage = true;
   window.dispatchEvent(new Event(CODEX_OFFICIAL_AUTHORIZATION_MANAGE));
@@ -16,8 +13,6 @@ export function requestCodexOfficialAuthorizationManagement(): void {
 export function takeCodexOfficialAuthorizationManagement(): boolean {
   const next = pendingManage; pendingManage = false; return next;
 }
-/** "Later" suppresses automatic popups for this app session, including restarts of the service. */
-export function snoozeCodexOfficialAuthorizationPrompts(): void { snoozed = true; }
 export interface CodexAccountServiceApplied { relatedIds: string[]; selectedIds: string[] }
 export function announceCodexServiceAuthorizationApplied(relatedIds: string[], selectedIds: string[]): void {
   window.dispatchEvent(new CustomEvent<CodexAccountServiceApplied>(CODEX_ACCOUNT_SERVICE_APPLIED, { detail: { relatedIds, selectedIds } }));
@@ -31,57 +26,6 @@ export type CodexAccountServiceDraftResult = { requestId: string; sourceAccountI
 const draftRequests = new Map<string, Set<string>>();
 let draftSequence = 0;
 let pending: CodexAccountServiceRequest[] = [];
-let running = false;
-let generation = 0;
-let checked = false;
-let pendingCheck: number | null = null;
-let pendingStartup = false;
-let startupRun = false;
-
-/** Shared by service startup and both pages. Configuration refreshes are not new runs. */
-export function requestCodexOfficialAuthorizationCheck(state: { running: boolean; restarted?: boolean; stopped?: boolean }): void {
-  if (!state.running) {
-    // Keep-alive pages can finish an old stopped-state read after startup.
-    // Only an explicit lifecycle result may invalidate a pending start check.
-    if (!state.stopped && !state.restarted) return;
-    if (running) generation++;
-    running = false; checked = false; pendingCheck = null; pendingStartup = false;
-    return;
-  }
-  if (!running || state.restarted) { generation++; checked = false; startupRun = state.restarted === true; }
-  running = true;
-  if (checked) return;
-  checked = true;
-  pendingCheck = generation;
-  pendingStartup = state.restarted === true;
-  if (typeof window !== 'undefined') window.dispatchEvent(new Event(CODEX_OFFICIAL_AUTHORIZATION_CHECK));
-}
-
-export function takeCodexOfficialAuthorizationCheck(allowPageCheck = true): number | null {
-  if (snoozed || !areCodexOfficialRemindersEnabled()) { pendingCheck = null; pendingStartup = false; return null; }
-  if (!allowPageCheck && !pendingStartup) return null;
-  const next = pendingCheck;
-  pendingCheck = null;
-  pendingStartup = false;
-  return next;
-}
-
-export function isCodexOfficialAuthorizationCheckCurrent(value: number): boolean {
-  return running && value === generation;
-}
-
-export function isCodexOfficialAuthorizationStartup(value: number): boolean {
-  return isCodexOfficialAuthorizationCheckCurrent(value) && startupRun;
-}
-
-export function deferCodexOfficialAuthorizationCheck(value: number): void {
-  if (isCodexOfficialAuthorizationCheckCurrent(value)) { pendingCheck = value; pendingStartup = false; }
-}
-
-export function retryCodexOfficialAuthorizationCheck(value: number): void {
-  if (isCodexOfficialAuthorizationCheckCurrent(value)) checked = false;
-}
-
 /** A card link never changes the underlying credential kind. */
 export function canChooseCodexServiceAuthorization(account: CodexAccount): boolean {
   return !isCodexApiKeyAccount(account) && !isCodexAgentIdentityAccount(account)
@@ -89,11 +33,6 @@ export function canChooseCodexServiceAuthorization(account: CodexAccount): boole
     && !account.upstream_grok_account_id && !account.id.startsWith('codex_grok_')
     && (!account.api_provider_mode || account.api_provider_mode === 'openai_builtin')
     && !account.api_provider_id && !account.openai_api_key;
-}
-
-/** Optional recommendations honor the global reminder preference; manual management does not. */
-export function shouldRecommendCodexServiceAuthorization(account: CodexAccount): boolean {
-  return canChooseCodexServiceAuthorization(account) && areCodexOfficialRemindersEnabled();
 }
 
 /** A batch is one review dialog, not a sequence of modal interruptions. */

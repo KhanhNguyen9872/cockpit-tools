@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn pelican_request_preserves_text_and_json_instead_of_forcing_html() {
+    for prompt in [
+        "Solve the candy problem. Answer in plain text.",
+        "Return JSON only.",
+    ] {
+        let (body, _) = build_pelican_request("gpt-5.5", "high", prompt, "acct-1")
+            .expect("build benchmark request");
+        let value: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["input"][0]["content"][0]["text"], prompt);
+        let instructions = value["instructions"].as_str().unwrap();
+        assert!(instructions.contains("Follow the output format requested by the user"));
+        assert!(instructions.contains("do not wrap plain text or JSON in HTML"));
+        assert!(instructions.contains("standalone HTML document"));
+        assert!(value.get("tools").is_none());
+    }
+}
+
+#[test]
 fn pelican_request_carries_codex_client_metadata_and_prompt_cache() {
     let (body, headers) =
         build_pelican_request("gpt-5.5", "high", "hi", "acct-1").expect("build request");

@@ -119,7 +119,8 @@ fn native_patch_mode(current: &str, mode: CodexLocalAccessGatewayMode) -> Result
     if !value.is_object() {
         return Err("Invalid API service configuration".into());
     }
-    if mode != CodexLocalAccessGatewayMode::Native && native_json_has_chatgpt_plan_reference(&value) {
+    if mode != CodexLocalAccessGatewayMode::Native && native_json_has_chatgpt_plan_reference(&value)
+    {
         return Err("CHATGPT_PLAN_NATIVE_REQUIRED".into());
     }
     value["gatewayMode"] = serde_json::to_value(mode).map_err(|error| error.to_string())?;
@@ -129,20 +130,44 @@ fn native_patch_mode(current: &str, mode: CodexLocalAccessGatewayMode) -> Result
 }
 
 fn native_json_has_chatgpt_plan_reference(value: &Value) -> bool {
-    if value.get("officialAccountBindings").and_then(Value::as_object).is_some_and(|map| !map.is_empty()) { return true; }
-    ["accountIds", "imageGenerationAccountIds"].iter().any(|field| {
-        value.get(field).and_then(Value::as_array).is_some_and(|ids| {
-            ids.iter().filter_map(Value::as_str).any(|id| id.starts_with("chatgpt_plan_"))
-        })
-    }) || value.get("apiKeys").and_then(Value::as_array).is_some_and(|keys| {
-        keys.iter().any(|key| {
-            native_json_has_chatgpt_plan_reference(key)
-                || key.pointer("/modelRouting/routes").and_then(Value::as_array).is_some_and(|routes| {
-                    routes.iter().any(|route| route.get("providerAccountId").and_then(Value::as_str)
-                        .is_some_and(|id| id.starts_with("chatgpt_plan_")))
+    if value
+        .get("officialAccountBindings")
+        .and_then(Value::as_object)
+        .is_some_and(|map| !map.is_empty())
+    {
+        return true;
+    }
+    ["accountIds", "imageGenerationAccountIds"]
+        .iter()
+        .any(|field| {
+            value
+                .get(field)
+                .and_then(Value::as_array)
+                .is_some_and(|ids| {
+                    ids.iter()
+                        .filter_map(Value::as_str)
+                        .any(|id| id.starts_with("chatgpt_plan_"))
                 })
         })
-    })
+        || value
+            .get("apiKeys")
+            .and_then(Value::as_array)
+            .is_some_and(|keys| {
+                keys.iter().any(|key| {
+                    native_json_has_chatgpt_plan_reference(key)
+                        || key
+                            .pointer("/modelRouting/routes")
+                            .and_then(Value::as_array)
+                            .is_some_and(|routes| {
+                                routes.iter().any(|route| {
+                                    route
+                                        .get("providerAccountId")
+                                        .and_then(Value::as_str)
+                                        .is_some_and(|id| id.starts_with("chatgpt_plan_"))
+                                })
+                            })
+                })
+            })
 }
 
 fn native_validate_chatgpt_plan_mode(
@@ -150,8 +175,10 @@ fn native_validate_chatgpt_plan_mode(
     mode: CodexLocalAccessGatewayMode,
 ) -> Result<(), String> {
     if mode != CodexLocalAccessGatewayMode::Native
-        && (!collection.official_account_bindings.is_empty() || effective_sidecar_account_ids(collection).iter()
-            .any(|id| id.starts_with("chatgpt_plan_")))
+        && (!collection.official_account_bindings.is_empty()
+            || effective_sidecar_account_ids(collection)
+                .iter()
+                .any(|id| id.starts_with("chatgpt_plan_")))
     {
         return Err("CHATGPT_PLAN_NATIVE_REQUIRED".into());
     }
@@ -256,6 +283,33 @@ include!("codex_local_access_native_identity_fixture.rs");
 include!("codex_local_access_native_cooldown.rs");
 include!("codex_local_access_native_health.rs");
 include!("codex_local_access_native_retry.rs");
+include!("codex_local_access_native_official_fallback.rs");
+
+fn native_official_report_attempt(
+    report: &native_contract::RequestReport,
+) -> Option<&native_api::diagnostics::DiagnosticAttempt> {
+    let context = report.diagnostics.as_ref()?;
+    if context.failure_phase.as_deref().is_some_and(|phase| phase != "upstream") {
+        return None;
+    }
+    let attempt = context.attempts.last()?;
+    if attempt.account_id != report.account_id
+        || attempt.model_id != report.upstream_model
+        || attempt.authorization_route.as_deref() != Some("official")
+        || matches!(attempt.transport.as_str(), "" | "preflight")
+    {
+        return None;
+    }
+    match attempt.status? {
+        200..=299 if report.success && attempt.success => Some(attempt),
+        401 | 403 | 429 | 500..=599
+            if !report.success && !attempt.success && attempt.failure_phase.as_deref() == Some("upstream") =>
+        {
+            Some(attempt)
+        }
+        _ => None,
+    }
+}
 
 fn native_recorded_failure_cools_account(report: &native_contract::RequestReport) -> bool {
     // The final report must keep the transport's request-fault classification.
@@ -351,6 +405,9 @@ fn native_report_model_unavailable(report: &native_contract::RequestReport) -> b
 
 impl NativeHostBridge {
     fn record_failure_cooldown(&self, report: &native_contract::RequestReport) {
+        if report.official_registration_id.is_some() {
+            return;
+        }
         if self.cooling_disabled.load(Ordering::Acquire) {
             return;
         }
@@ -536,24 +593,27 @@ fn native_scoped_account_ids(
     collection: &CodexLocalAccessCollection,
     key: Option<&CodexLocalAccessApiKey>,
 ) -> Vec<String> {
-    active_service_account_ids(collection, match key {
-        Some(key)
-            if !key
-                .inherit_account_pool
-                .unwrap_or(key.account_ids.is_empty()) =>
-        {
-            key.account_ids.clone()
-        }
-        _ => collection.account_ids.clone(),
-    })
+    active_service_account_ids(
+        collection,
+        match key {
+            Some(key)
+                if !key
+                    .inherit_account_pool
+                    .unwrap_or(key.account_ids.is_empty()) =>
+            {
+                key.account_ids.clone()
+            }
+            _ => collection.account_ids.clone(),
+        },
+    )
 }
 
-fn native_quota_allows(collection: &CodexLocalAccessCollection, account: &CodexAccount) -> bool {
+fn native_quota_allows(_collection: &CodexLocalAccessCollection, account: &CodexAccount) -> bool {
     let now = now_ms();
     if account_quota_cooldown(account, now).is_some_and(|snapshot| snapshot.active(now)) {
         return false;
     }
-    native_bound_quota_reserve_allows(collection, account)
+    true
 }
 
 fn native_is_reserve_model(model: &str) -> bool {
@@ -565,20 +625,16 @@ fn native_model_quota_allows(
     account: &CodexAccount,
     model: &str,
 ) -> bool {
+    // Official subscription sharing has its own route health and upstream
+    // limits. Ordinary account quota checks apply to raw local credentials.
+    if native_is_chatgpt_plan_account(account) {
+        return true;
+    }
     if native_is_reserve_model(model) && !account.is_api_key_auth() {
         account_has_gpt_reserve_entitlement(account)
-            && native_bound_quota_reserve_allows(collection, account)
     } else {
         native_quota_allows(collection, account)
     }
-}
-
-fn native_bound_quota_reserve_allows(
-    collection: &CodexLocalAccessCollection,
-    account: &CodexAccount,
-) -> bool {
-    quota_reserve_policy(collection, &account.id)
-        .is_none_or(|reserve| quota_reserve_allows(&reserve, account))
 }
 
 fn native_image_allows(collection: &CodexLocalAccessCollection, account: &CodexAccount) -> bool {
@@ -734,28 +790,49 @@ fn native_quota(account: &CodexAccount) -> i32 {
 include!("codex_local_access_native_scheduler.rs");
 
 impl native_contract::Host for NativeHostBridge {
+    fn observe_official_failure<'a>(
+        &'a self,
+        route: &'a native_contract::Route,
+        model: &'a str,
+        failure: &'a native_contract::OfficialFallbackFailure,
+    ) -> futures_util::future::BoxFuture<'a, ()> {
+        Box::pin(native_observe_official_rejection(route, model, failure))
+    }
+    fn fallback_to_local<'a>(
+        &'a self,
+        caller: &'a native_contract::Caller,
+        failed: &'a native_contract::Route,
+        request: native_contract::RouteRequest,
+        failure: native_contract::OfficialFallbackFailure,
+    ) -> futures_util::future::BoxFuture<
+        'a,
+        Result<Option<native_contract::Route>, native_contract::ServiceError>,
+    > {
+        Box::pin(native_fallback_to_local(
+            self, caller, failed, request, failure,
+        ))
+    }
     fn invalidate_transport(&self, identity: &str) -> bool {
-        self.clients.lock().map(|mut cache| cache.invalidate(identity)).unwrap_or(false)
+        self.clients
+            .lock()
+            .map(|mut cache| cache.invalidate(identity))
+            .unwrap_or(false)
     }
     fn multi_agent_policy<'a>(
         &'a self,
         caller: &'a native_contract::Caller,
         route: Option<&'a native_contract::Route>,
         requested_model: &'a str,
-    ) -> futures_util::future::BoxFuture<'a, Result<native_contract::MultiAgentPolicy, native_contract::ServiceError>> {
-        Box::pin(native_multi_agent_policy(self, caller, route, requested_model))
-    }
-    fn observe_rate_limits(&self, account_id: &str, snapshot: QuotaSnapshot, started: Instant) {
-        observe_gateway_quota(account_id, snapshot, started);
-    }
-    fn quota_request_started(&self, account_id: &str) {
-        note_gateway_quota_request(account_id);
-    }
-    fn check_quota_before_send(&self, account_id: &str) -> Result<(), native_contract::ServiceError> {
-        let local = self.collection_override.as_ref().filter(|collection|
-            collection.bound_oauth_account_id.as_deref() == Some(account_id))
-            .and_then(|collection| collection.bound_oauth_quota_reserve.as_ref());
-        check_gateway_quota_before_send(account_id, self.collection_override.is_none(), local)
+    ) -> futures_util::future::BoxFuture<
+        'a,
+        Result<native_contract::MultiAgentPolicy, native_contract::ServiceError>,
+    > {
+        Box::pin(native_multi_agent_policy(
+            self,
+            caller,
+            route,
+            requested_model,
+        ))
     }
     fn set_session_affinity_enabled(&self, enabled: bool) {
         if self
@@ -879,12 +956,29 @@ impl native_contract::Host for NativeHostBridge {
     }
 
     fn route_failed_attempt<'a>(
-        &'a self, route: &'a native_contract::Route, model: &'a str, status: u16,
-        retry_after: Option<Duration>, credential_scope: bool, message: Option<&'a str>,
+        &'a self,
+        route: &'a native_contract::Route,
+        model: &'a str,
+        status: u16,
+        retry_after: Option<Duration>,
+        credential_scope: bool,
+        message: Option<&'a str>,
     ) -> futures_util::future::BoxFuture<'a, ()> {
         Box::pin(async move {
-            if self.selected_authorization_current(&route.account_id, route.official_registration_id.as_deref(), route.official_authorization_revision.as_deref()).await {
-                self.route_failed_with_context(&route.account_id, model, status, retry_after, credential_scope, message).await;
+            if route.official_registration_id.is_some() {
+                native_observe_official_failure(route, model, status, message, retry_after).await;
+                return;
+            }
+            if self.selected_route_current(route).await {
+                self.route_failed_with_context(
+                    &route.account_id,
+                    model,
+                    status,
+                    retry_after,
+                    credential_scope,
+                    message,
+                )
+                .await;
             }
         })
     }
@@ -1025,8 +1119,13 @@ impl native_contract::Host for NativeHostBridge {
         caller: &'a native_contract::Caller,
         route: &'a native_contract::Route,
         request: &'a native_contract::RouteRequest,
-    ) -> futures_util::future::BoxFuture<'a, Result<native_contract::CapabilityFallbackDecision, native_contract::ServiceError>> {
-        Box::pin(native_capability_fallback_decision(self, caller, route, request))
+    ) -> futures_util::future::BoxFuture<
+        'a,
+        Result<native_contract::CapabilityFallbackDecision, native_contract::ServiceError>,
+    > {
+        Box::pin(native_capability_fallback_decision(
+            self, caller, route, request,
+        ))
     }
 
     fn route<'a>(
@@ -1038,6 +1137,18 @@ impl native_contract::Host for NativeHostBridge {
         Result<native_contract::Route, native_contract::ServiceError>,
     > {
         Box::pin(native_select_route(self, caller, request))
+    }
+
+    fn refresh_route<'a>(
+        &'a self,
+        caller: &'a native_contract::Caller,
+        previous: &'a native_contract::Route,
+        request: native_contract::RouteRequest,
+    ) -> futures_util::future::BoxFuture<
+        'a,
+        Result<native_contract::Route, native_contract::ServiceError>,
+    > {
+        Box::pin(native_refresh_route(self, caller, previous, request))
     }
 
     fn models<'a>(
@@ -1101,16 +1212,26 @@ impl native_contract::Host for NativeHostBridge {
         Box::pin(async move {
             let collection = self.collection().await?;
             let key = native_caller_key(&collection, caller)?;
-            let account = self
-                .load_route_account(route)
-                .await?
-                .ok_or_else(|| {
-                    native_error(
-                        404,
-                        "account_not_found",
-                        "Selected account no longer exists",
-                    )
-                })?;
+            if route
+                .authorization_scope_fingerprint
+                .as_deref()
+                .is_some_and(|scope| {
+                    native_official_scope_fingerprint(&collection, caller) != scope
+                })
+            {
+                return Err(native_error(
+                    409,
+                    "official_fallback_authorization_changed",
+                    "API key or model authorization changed before sending",
+                ));
+            }
+            let account = self.load_route_account(route).await?.ok_or_else(|| {
+                native_error(
+                    404,
+                    "account_not_found",
+                    "Selected account no longer exists",
+                )
+            })?;
             let body = native_prepare_provider_vision_body(&collection, key, &account, body);
             Ok(native_prepare_image_body(
                 &collection,
@@ -1128,14 +1249,103 @@ impl native_contract::Host for NativeHostBridge {
         report: native_contract::RequestReport,
     ) -> futures_util::future::BoxFuture<'_, ()> {
         Box::pin(async move {
-            if let (Some(id), Some(revision), Some(fingerprint)) = (
-                report.official_registration_id.as_deref().or_else(|| report.account_id.strip_prefix(codex_account::CHATGPT_PLAN_ACCOUNT_PREFIX)),
+            let official_attempt = native_official_report_attempt(&report);
+            let official_feedback = (report.official_registration_id.is_none()
+                && !report.account_id.starts_with(codex_account::CHATGPT_PLAN_ACCOUNT_PREFIX))
+                || official_attempt.is_some();
+            if let (Some(id), Some(revision), Some(fingerprint), Some(attempt)) = (
+                report.official_registration_id.as_deref().or_else(|| {
+                    report
+                        .account_id
+                        .strip_prefix(codex_account::CHATGPT_PLAN_ACCOUNT_PREFIX)
+                }),
                 report.official_authorization_revision.as_deref(),
                 report.official_access_fingerprint.as_deref(),
+                official_attempt,
             ) {
-                crate::modules::chatgpt_plan::observe_inference_result(id, revision, fingerprint, report.status, report.official_authorization_error.as_deref().or(report.error.as_deref())).await;
+                crate::modules::chatgpt_plan::observe_inference_result(
+                    id,
+                    revision,
+                    fingerprint,
+                    attempt.status.expect("upstream status checked"),
+                    report
+                        .official_authorization_error
+                        .as_deref()
+                        .or(attempt.error_category.as_deref()),
+                )
+                .await;
+                if report.success
+                    && !report
+                        .account_id
+                        .starts_with(codex_account::CHATGPT_PLAN_ACCOUNT_PREFIX)
+                {
+                    native_note_official_health(
+                        crate::modules::chatgpt_plan::record_official_route_success(
+                            id,
+                            &report.account_id,
+                            revision,
+                            &report.upstream_model,
+                            attempt.started_at_ms,
+                            fingerprint,
+                        )
+                        .await,
+                    );
+                } else if !report.success
+                    && !report
+                        .account_id
+                        .starts_with(codex_account::CHATGPT_PLAN_ACCOUNT_PREFIX)
+                    && (!report
+                        .diagnostics
+                        .as_ref()
+                        .is_some_and(|context| context.upstream_request_scoped)
+                        || attempt
+                            .error_category
+                            .as_deref()
+                            .is_some_and(|code| code.contains("not_eligible")))
+                {
+                    if let Ok(snapshot) = crate::modules::chatgpt_plan::official_route_snapshot(
+                        id,
+                        &report.account_id,
+                        &report.upstream_model,
+                    )
+                    .await
+                    {
+                        if snapshot.authorization_revision == revision {
+                            native_note_official_health(
+                                crate::modules::chatgpt_plan::record_official_route_failure(
+                                    &snapshot,
+                                    &report.upstream_model,
+                                    attempt.status.expect("upstream status checked"),
+                                    report
+                                        .official_authorization_error
+                                        .as_deref()
+                                        .or(attempt.error_category.as_deref())
+                                        .unwrap_or("official_unavailable"),
+                                    attempt.error_message.as_deref(),
+                                    report.retry_after,
+                                    Some(fingerprint),
+                                )
+                                .await,
+                            );
+                        }
+                    }
+                }
             }
-            if self.selected_authorization_current(&report.account_id, report.official_registration_id.as_deref(), report.official_authorization_revision.as_deref()).await {
+            let current = if let (Some(id), Some(revision)) = (
+                &report.official_fallback_registration_id,
+                &report.official_fallback_authorization_revision,
+            ) {
+                self.selected_fallback_current(&report.account_id, id, revision)
+                    .await
+            } else {
+                self.selected_authorization_current(
+                    &report.account_id,
+                    report.official_registration_id.as_deref(),
+                    report.official_authorization_revision.as_deref(),
+                )
+                .await
+            };
+            if current && official_feedback {
                 self.record_failure_cooldown(&report);
                 self.record_soft_binding_result(&report).await;
             }
@@ -1180,7 +1390,11 @@ impl native_contract::Host for NativeHostBridge {
                 report.elapsed.as_millis() as u64,
                 usage,
                 RequestStatsMeta {
-                    authorization_route: Some(if report.official_registration_id.is_some() { "official" } else { "local_gateway" }),
+                    authorization_route: Some(if report.official_registration_id.is_some() {
+                        "official"
+                    } else {
+                        "local_gateway"
+                    }),
                     gateway_mode: Some(CodexLocalAccessGatewayMode::Native),
                     proxy_route: proxy_route.as_ref(),
                     request_id: diagnostics.map(|d| d.request_id.as_str()),
@@ -1271,8 +1485,16 @@ async fn native_prepare_account(
 include!("codex_local_access_native_parity.rs");
 
 #[cfg(test)]
+#[path = "codex_local_access_native_official_fallback_tests.rs"]
+mod native_official_fallback_tests;
+
+#[cfg(test)]
 #[path = "codex_local_access_native_live_acceptance.rs"]
 mod native_live_acceptance;
+
+#[cfg(test)]
+#[path = "codex_local_access_native_live_pool.rs"]
+mod native_live_pool;
 
 #[cfg(test)]
 mod native_host_tests {
@@ -1284,7 +1506,6 @@ mod native_host_tests {
     include!("codex_local_access_tests_native_health.rs");
     include!("codex_local_access_tests_native_cooling_continuation.rs");
     include!("codex_local_access_tests_native_reserve.rs");
-    include!("codex_local_access_tests_quota_protection.rs");
     include!("codex_local_access_tests_native_automatic.rs");
     include!("codex_local_access_tests_native_parity22.rs");
     #[test]

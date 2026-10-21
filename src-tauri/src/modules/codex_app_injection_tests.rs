@@ -1,5 +1,6 @@
     use super::{
-        app_server_auth_file_snapshot, auth_diagnostic_error_signal, auth_diagnostic_observation,
+        aggregate_api_service_balances, app_server_auth_file_snapshot, auth_diagnostic_error_signal,
+        auth_diagnostic_observation,
         build_launch_args, cdp_auth_signal, cdp_body_preview, cdp_console_auth_signal,
         deepseek_balance_endpoint, deepseek_balance_injection_script,
         deepseek_model_injection_script, has_login_route_markers, injection_badge_kind_for_model,
@@ -35,6 +36,8 @@
             grok,
             kind,
             fallback,
+            &json!({}),
+            None,
         )
     }
 
@@ -144,6 +147,62 @@
     }
 
     #[test]
+    fn api_service_balances_count_unique_contributors_per_currency() {
+        let snapshot = |currency: Option<&str>, total_balance| DeepSeekBalanceSnapshot {
+            currency: currency.map(str::to_string),
+            total_balance,
+            ..Default::default()
+        };
+        let lines = aggregate_api_service_balances([
+            ("cny-a".into(), snapshot(Some("CNY"), Some(12.5))),
+            ("cny-a".into(), snapshot(Some("CNY"), Some(12.5))),
+            ("cny-b".into(), snapshot(Some("CNY"), Some(0.0))),
+            ("usd-a".into(), snapshot(Some("USD"), Some(4.0))),
+            ("unknown".into(), snapshot(None, Some(3.0))),
+            ("failed".into(), snapshot(Some("CNY"), None)),
+            ("invalid".into(), snapshot(Some("CNY"), Some(f64::NAN))),
+            ("infinite".into(), snapshot(Some("CNY"), Some(f64::INFINITY))),
+        ])
+        .expect("valid balances remain visible when another account fails");
+        assert_eq!(
+            lines,
+            vec![
+                InjectionBalanceLine {
+                    currency: None,
+                    total_balance: 3.0,
+                    account_count: 1,
+                },
+                InjectionBalanceLine {
+                    currency: Some("CNY".into()),
+                    total_balance: 12.5,
+                    account_count: 2,
+                },
+                InjectionBalanceLine {
+                    currency: Some("USD".into()),
+                    total_balance: 4.0,
+                    account_count: 1,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn api_service_balances_keep_last_snapshot_when_no_amount_is_available() {
+        assert!(aggregate_api_service_balances([]).is_none());
+        assert!(aggregate_api_service_balances([
+            ("missing".into(), DeepSeekBalanceSnapshot::default()),
+            (
+                "invalid".into(),
+                DeepSeekBalanceSnapshot {
+                    total_balance: Some(f64::NAN),
+                    ..Default::default()
+                },
+            ),
+        ])
+        .is_none());
+    }
+
+    #[test]
     fn deepseek_balance_script_renders_balance_badge_and_details() {
         let snapshot = DeepSeekBalanceSnapshot {
             is_available: true,
@@ -222,6 +281,8 @@
             &QuotaResponse {
                 weekly_remaining_percent: Some(1387),
                 five_hour_remaining_percent: Some(100),
+                weekly_capacity_percent: Some(1400),
+                five_hour_capacity_percent: Some(100),
                 account_count: Some(14),
                 available_account_count: Some(12),
                 abnormal_account_count: Some(2),
@@ -245,23 +306,26 @@
         assert!(script.contains("const fiveHourLabel = \"5h\""));
         assert!(script.contains("const balanceLines = []"));
         assert!(script.contains("data-cockpit-quota-footer"));
-        assert!(script.contains("document.body.appendChild(host)"));
-        assert!(script.contains("position:fixed"));
-        // 保留徽章外观，按完整宽度检查实际空档，不能覆盖原生 Fast 和语音控件。
+        // 胶囊组回到权限与模型之间的真实空档，不改变输入框高度。
         assert!(script.contains("badgeLayout.place(root, host, footer, permissions)"));
-        assert!(script.contains("host.style.left = placement.left + 'px'"));
-        assert!(script.contains("details.style.left = badgeAnchorLeft + 'px'"));
-        assert!(script.contains("data-composer-navigation-target"));
-        assert!(script.contains("permissions.top + permissions.height / 2"));
+        assert!(script.contains("document.body.appendChild(host)"));
+        assert!(!script.contains("card.insertAdjacentElement('afterend', host)"));
+        assert!(script.contains("usageMetrics.visibleCard()"));
         assert!(script.contains("justify-content:center"));
-        assert!(script.contains("host.innerHTML !== nextHtml"));
-        assert!(script.contains("mutations.every"));
+        assert!(script.contains("height:28px"));
+        assert!(script.contains("padding:0 6px"));
+        assert!(!script.contains("--cockpit-quota-fill-width"));
+        assert!(script.contains("syncMetrics(host, fields, count)"));
+        assert!(script.contains("mutation.target.closest?.(ownSelector)"));
         assert!(script.contains("new ResizeObserver"));
         assert!(script.contains("window.addEventListener('resize'"));
         assert!(script.contains("requestAnimationFrame"));
         assert!(script.contains("root.render()"));
-        assert!(script.contains("data-cockpit-quota-refresh"));
         assert!(script.contains("data-cockpit-quota-open"));
+        assert!(script.contains("document.createElement('button')"));
+        assert!(script.contains("data-cockpit-quota-metric"));
+        assert!(script.contains("gap:4px"));
+        assert!(!script.contains("cockpit-usage-separator"));
         assert!(script.contains("data-cockpit-quota-details"));
         assert!(script.contains("data-cockpit-quota-close"));
         assert!(script.contains("const plans = [{\"plan\":\"PLUS\",\"count\":14"));
@@ -269,27 +333,75 @@
         assert!(script.contains("const issueText = \"异常 2 · 冷却 0\""));
         assert!(script.contains("var(--color-token-main-surface-primary"));
         assert!(script.contains("var(--color-token-text-secondary"));
-        assert!(script.contains("const planColor"));
-        assert!(script.contains("background:#10b981"));
-        assert!(script.contains("background:#3b82f6"));
         assert!(script.contains("root.quotaDetailsOpen"));
-        assert!(script.contains("details.innerHTML !== detailsHtml"));
-        assert!(script.contains("details.contains(mutation.target)"));
+        assert!(script.contains("details.__cockpitDialogHtml !== html"));
         assert!(!script.contains("modal-overlay"));
         assert!(!script.contains("common.shared.refreshQuota"));
         assert!(script.contains("root.refreshRequestToken"));
-        assert!(script.contains("cockpit-quota-spin"));
-        assert!(script.contains("pointer-events:auto"));
         assert!(script.contains("root.hostHeartbeatAt = Date.now()"));
         assert!(script.contains("root.watchdogTimer"));
         assert!(script.contains("hostHeartbeatTimeoutMs = 8000"));
         assert!(script.contains("root.refreshRequestToken = null"));
         assert!(!script.contains("footer.appendChild(host)"));
-        assert!(!script.contains("justify-content:flex-end"));
         assert!(!script.contains("grid-row:3"));
-        assert!(!script.contains("min-height:18px"));
         assert!(!script.contains("data-cockpit-fast-mode"));
         assert!(!script.contains("Debugger"));
+    }
+
+    #[test]
+    fn api_service_details_keep_actions_errors_and_scroll_inside_viewport() {
+        let script = api_service_script(
+            &QuotaResponse::empty_pool(), &[], &[], InjectionBadgeKind::CodexQuota, None,
+        );
+        let summary = script
+            .split_once("const fields = [];")
+            .expect("summary metrics start")
+            .1
+            .split_once("let placement = null;")
+            .expect("summary metrics end before placement")
+            .0;
+        assert!(!summary.contains("data-cockpit-quota-refresh"));
+        assert!(script.contains("details.querySelector('[data-cockpit-quota-refresh]')"));
+        assert!(script.contains("max-height:min(700px,85dvh,calc(100dvh - 32px))"));
+        assert!(script.contains(".panel{flex:1;min-height:0;overflow-y:auto"));
+        assert!(script.contains(".request-scroll{flex:1;min-height:0;overflow:auto"));
+        assert!(script.contains(".request-table th{position:sticky;top:0"));
+        assert!(script.contains("window.innerWidth - 24"));
+        assert!(script.contains("window.innerHeight - height - 12"));
+        assert!(script.contains("data-cockpit-quota-error"));
+        assert!(script.contains("usageLabels[root.refreshError] || label('refreshFailed')"));
+        assert!(script.contains("if (root.refreshing) root.refreshError = null"));
+        assert!(script.contains("event.key === 'Escape' && root.quotaDetailsOpen"));
+        assert!(script.contains("root.lastTrigger = document.querySelector('[data-cockpit-quota-footer]')"));
+        assert!(script.contains("root.lastTrigger.focus()"));
+        assert!(script.contains("window.addEventListener('pointerdown', root.outsidePointerHandler, true)"));
+        assert!(script.contains("root.hostAvailable === false"));
+        assert!(script.contains("label('hostUnavailable')"));
+    }
+
+    #[test]
+    fn api_service_injection_embeds_usage_records_and_refresh_error() {
+        let usage = json!({"thread-1": {"threadId": "thread-1", "events": []}});
+        let script = injection_script(
+            "Provider", &QuotaResponse::empty_pool(), "zh-cn", false, None,
+            &[], &[], InjectionBadgeKind::CodexQuota, None, &usage, Some("refreshPartial"),
+        );
+        assert!(script.contains(&format!("const usageState = {}", usage)));
+        assert!(script.contains("const refreshError = \"refreshPartial\""));
+        assert!(script.contains("root.usageState = usageState"));
+        assert!(script.contains("data?.threadId === root.threadId"));
+        assert!(script.contains("usageMetrics.snapshot(data.events, Date.now(), data.currentTurnId)"));
+        assert!(script.contains("root.threadId !== nextThreadId || root.card !== card"));
+        assert!(script.contains("data.outputSpeed?.threadId === root.threadId"));
+        assert!(script.contains("rate === null ? missingLabel"));
+        assert!(script.contains("unit: 'tok/s'"));
+        assert!(!script.contains("usageLabels.waiting"));
+        assert!(script.contains("badgeLayout.place(root, host, footer, permissions)"));
+        assert!(script.contains("usageDialog.render"));
+        assert!(script.contains("session?.model"));
+        assert!(script.contains("response.session?.threadId === s.threadId"));
+        assert!(script.contains("recentAccount"));
+        assert!(script.contains("threadId: root.threadId || null"));
     }
 
     #[test]
@@ -312,9 +424,10 @@
         assert!(script.contains(
             "const grokLines = [{\"product\":\"GrokBuild\",\"count\":2,\"remainingPercent\":75}]"
         ));
-        assert!(script.contains("const grokRows = grokLines.map"));
-        // Grok 行与 Codex 套餐行一起渲染在点击弹框里。
-        assert!(script.contains("plans.map(renderPlan).join('') + grokRows"));
+        assert!(script.contains("if (kind === 'grok')"));
+        assert!(script.contains("grokLines.map(line =>"));
+        assert!(script.contains("quotaContent(root,input)"));
+        assert!(!script.contains("planTable + grokRows + balanceRows"));
     }
 
     #[test]
@@ -327,6 +440,7 @@
             &[InjectionBalanceLine {
                 currency: Some("CNY".to_string()),
                 total_balance: 62.36,
+                account_count: 2,
             }],
             &[],
             InjectionBadgeKind::CodexQuota,
@@ -334,11 +448,16 @@
         );
 
         assert!(
-            script.contains("const balanceLines = [{\"currency\":\"CNY\",\"totalBalance\":62.36}]")
+            script.contains("const balanceLines = [{\"currency\":\"CNY\",\"totalBalance\":62.36,\"accountCount\":2}]")
         );
         assert!(script.contains("const balanceLabel = \"余额\""));
-        assert!(script.contains("const balanceRows = balanceLines.map"));
-        assert!(script.contains("escapeHtml(formatMoney(line.totalBalance, line.currency))"));
+        assert!(script.contains("if (kind === 'deepseek')"));
+        assert!(script.contains("formatMoney(line.totalBalance,line.currency)"));
+        assert!(script.contains("resource-table"));
+        assert!(script.contains("\"provider\":\"供应商\""));
+        // 已知币种保留符号，未知币种保留原始代码，不能统一转成单一货币。
+        assert!(script.contains("CNY: '¥', RMB: '¥', USD: '$', EUR: '€'"));
+        assert!(script.contains("value.toFixed(2) + (currency ? ' ' + currency : '')"));
         // 余额只显示在点击弹框里，不再渲染独立的 DeepSeek 余额徽章宿主。
         assert!(script.contains("const staleBalanceRoot = window.__cockpitDeepSeekBalance"));
         assert!(script.contains("document.querySelectorAll('[data-cockpit-deepseek-balance]"));
@@ -356,6 +475,7 @@
         let balance = [InjectionBalanceLine {
             currency: Some("CNY".to_string()),
             total_balance: 13.47,
+            account_count: 1,
         }];
         let grok_script = api_service_script(
             &QuotaResponse::empty_pool(),
@@ -371,8 +491,8 @@
         assert!(grok_script.contains("} else if (badgeKind === 'grok')"));
         assert!(grok_script.contains("readVisibleModel"));
         assert!(grok_script.contains("classifyModel"));
-        // Grok 徽章只写产品短名（Build），不带 Grok 前缀。
-        assert!(grok_script.contains("const shortProductLabel = (value) =>"));
+        // Grok 状态文字只写产品短名（Build），不带 Grok 前缀。
+        assert!(grok_script.contains("const shortProductLabel = value =>"));
         assert!(grok_script.contains("text.replace(/^grok[\\s_\\-]*/i, '')"));
         assert!(grok_script.contains("shortProductLabel(grokBadgeProduct) + ' ' + grokPercent"));
 
@@ -390,11 +510,17 @@
         );
         assert!(gpt_script.contains("const hostBadgeKind = \"codex\""));
         assert!(gpt_script.contains("const fallbackModel = \"gpt-5.4\""));
-        // GPT 原生模型恢复「账号 / 5h / 周」三个并排胶囊。
-        assert!(gpt_script.contains("accountPoolLabel + ' ' + Math.round(accountCount)"));
-        assert!(gpt_script.contains("fiveHourLabel + ' ' + Math.round(fiveHourPercent) + '%'"));
-        assert!(gpt_script.contains("weeklyLabel + ' ' + Math.round(weeklyPercent) + '%'"));
-        assert!(gpt_script.contains("detailsHtml = detailHeader('#8b5cf6'"));
+        // GPT 底部显示两个额度与当前会话指标；账号数只提供给详情统计。
+        let summary = gpt_script.split("const fields = [];").nth(1).unwrap()
+            .split("const nextHtml").next().unwrap();
+        assert!(!summary.contains("accountCount"));
+        assert!(gpt_script.contains("usageLabels.speedHint"));
+        assert!(gpt_script.contains("usageLabels.cacheShort"));
+        assert!(gpt_script.contains("metricField('five-hour', fiveHourLabel, Math.round(fiveHourPercent) + '%'"));
+        assert!(gpt_script.contains("metricField('weekly', weeklyLabel, Math.round(weeklyPercent) + '%'"));
+        assert!(gpt_script.contains("quotaContent(root,input)"));
+        assert!(!gpt_script.contains("planTable + grokRows + balanceRows"));
+        assert!(!gpt_script.contains("quotaRows"));
 
         let deepseek_script = api_service_script(
             &QuotaResponse::default(),
@@ -405,16 +531,17 @@
         );
         assert!(deepseek_script.contains("const hostBadgeKind = \"deepseek\""));
         assert!(deepseek_script.contains("const fallbackModel = \"deepseek-v4-pro\""));
-        // 余额徽章恢复「余额 ¥xx」样式，弹框只列余额。
+        // DeepSeek 保留余额摘要与明细，同时使用统一的会话用量详情框。
         assert!(deepseek_script.contains("const accountBalanceLabel = \"账户余额\""));
         assert!(deepseek_script.contains("const totalBalanceLabel = \"总余额\""));
         assert!(deepseek_script.contains("formatMoney(line.totalBalance, line.currency)"));
-        assert!(deepseek_script.contains("detailsHtml = detailHeader('#3b82f6'"));
+        assert!(deepseek_script.contains("if (kind === 'deepseek')"));
+        assert!(deepseek_script.contains("resource-table"));
 
-        // Grok 弹框只讲 Grok 额度，不混账号池与余额。
+        // Grok 账号数据区域只列其自身额度，不混入 GPT 套餐或余额。
         assert!(grok_script.contains("const quotaOverviewLabel = \"额度概览\""));
         assert!(grok_script.contains("const grokEmptyLabel = \"暂无可用配额数据\""));
-        assert!(grok_script.contains("detailsHtml = detailHeader('#f59e0b'"));
+        assert!(grok_script.contains("if (kind === 'grok')"));
     }
 
     #[test]
@@ -426,13 +553,17 @@
             InjectionBadgeKind::CodexQuota,
             None,
         );
-        // 翻译键缺失时 i18n 会回落成键名，底部徽章必须使用真实文案。
+        // 翻译键缺失时 i18n 会回落成键名，底部状态行必须使用真实文案。
         assert!(script.contains("const missingLabel = \"—\""));
         assert!(!script.contains("settings.general.codexAppUiInjectionMissingLabel"));
-        // 没有数据的窗口不渲染胶囊：池里没有官方 GPT 账号时不会再排「— - —」。
+        // 有数据的窗口独立渲染；都缺失时使用明确的窗口占位文字。
         assert!(!script.contains("quotaParts"));
         assert!(script.contains("if (Number.isFinite(fiveHourPercent)) {"));
         assert!(script.contains("if (Number.isFinite(weeklyPercent)) {"));
+        assert!(script.contains("if (!fields.length)"));
+        assert!(script.contains("\"cacheShort\":\"缓存\""));
+        assert!(script.contains("\"session\":\"当前会话\""));
+        assert!(!script.contains("common.codexUsage.cacheShort"));
     }
 
     #[test]
@@ -510,11 +641,13 @@
     }
 
     #[test]
-    fn empty_pool_quota_renders_zero_account_and_windows() {
+    fn empty_pool_quota_keeps_zero_windows_and_account_detail_counts() {
         let quota = QuotaResponse::empty_pool();
         assert_eq!(quota.account_count, Some(0));
         assert_eq!(quota.five_hour_remaining_percent, Some(0));
         assert_eq!(quota.weekly_remaining_percent, Some(0));
+        assert_eq!(quota.five_hour_capacity_percent, Some(0));
+        assert_eq!(quota.weekly_capacity_percent, Some(0));
 
         let script = api_service_script(
             &quota,
@@ -526,24 +659,53 @@
         assert!(script.contains("const accountCount = 0"));
         assert!(script.contains("const fiveHourPercent = 0"));
         assert!(script.contains("const weeklyPercent = 0"));
-        // GPT 原生模型恢复「账号 / 5h / 周」三个并排胶囊，账号数回到独立徽章。
-        assert!(script.contains("const fields = [];"));
-        assert!(script.contains("accountPoolLabel + ' ' + Math.round(accountCount)"));
+        // 空池保留零额度；底部不再单独显示账号数，详情保留可用账号统计。
+        let summary = script.split("const fields = [];").nth(1).unwrap()
+            .split("const nextHtml").next().unwrap();
+        assert!(summary.contains("Number.isFinite(fiveHourPercent)"));
+        assert!(summary.contains("Number.isFinite(weeklyPercent)"));
+        assert!(!summary.contains("accountCount"));
+        assert!(script.contains("const availableText = \"可用 0/0\""));
     }
 
     #[test]
     fn empty_pool_response_normalizes_missing_window_values_to_zero() {
-        let quota = QuotaResponse {
-            weekly_remaining_percent: None,
-            five_hour_remaining_percent: None,
-            account_count: Some(0),
-            ..QuotaResponse::default()
-        }
-        .normalize_empty_pool();
+        // The sidecar omits its empty plans list and absent window values.
+        let quota: QuotaResponse = serde_json::from_value(json!({"accountCount": 0})).unwrap();
+        let quota = quota.normalize_empty_pool();
 
         assert_eq!(quota.account_count, Some(0));
         assert_eq!(quota.five_hour_remaining_percent, Some(0));
         assert_eq!(quota.weekly_remaining_percent, Some(0));
+        assert_eq!(quota.five_hour_capacity_percent, Some(0));
+        assert_eq!(quota.weekly_capacity_percent, Some(0));
+    }
+
+    #[test]
+    fn quota_capacity_fields_remain_optional_but_do_not_drive_display_colors() {
+        let legacy: QuotaResponse = serde_json::from_value(json!({
+            "fiveHourRemainingPercent": 295, "accountCount": 4, "plans": [],
+        }))
+        .unwrap();
+        assert_eq!(legacy.five_hour_capacity_percent, None);
+        assert_eq!(legacy.weekly_capacity_percent, None);
+        let legacy_script =
+            api_service_script(&legacy, &[], &[], InjectionBadgeKind::CodexQuota, None);
+        assert!(legacy_script.contains("const fiveHourPercent = 295"));
+        assert!(!legacy_script.contains("quotaRatio"));
+        let current: QuotaResponse = serde_json::from_value(json!({
+            "fiveHourRemainingPercent": 295, "fiveHourCapacityPercent": 300,
+            "weeklyRemainingPercent": 240, "weeklyCapacityPercent": 300,
+            "accountCount": 4, "plans": [],
+        }))
+        .unwrap();
+        assert_eq!(current.five_hour_capacity_percent, Some(300));
+        assert_eq!(current.weekly_capacity_percent, Some(300));
+        let current_script =
+            api_service_script(&current, &[], &[], InjectionBadgeKind::CodexQuota, None);
+        assert!(current_script.contains("const fiveHourPercent = 295"));
+        assert!(current_script.contains("const weeklyPercent = 240"));
+        assert!(!current_script.contains("quotaRatio"));
     }
 
     #[test]

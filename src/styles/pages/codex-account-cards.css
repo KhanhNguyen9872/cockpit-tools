@@ -2698,35 +2698,6 @@
   min-height: 28px;
 }
 
-.codex-accounts-page .codex-local-access-quota-reserve-warning {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  width: fit-content;
-  max-width: 100%;
-  margin-top: 4px;
-  padding: 4px 7px;
-  border: 1px solid color-mix(in srgb, var(--warning) 38%, var(--border));
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--warning) 10%, transparent);
-  color: var(--warning);
-  font-size: 11px;
-  line-height: 1.25;
-}
-
-.codex-accounts-page .codex-local-access-quota-reserve-warning span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.codex-accounts-page .codex-local-access-quota-reserve-warning.is-blocked {
-  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
-  color: var(--danger);
-}
-
 .codex-accounts-page .codex-provider-inline-switch:hover:not(:disabled) {
   color: #fff;
   border-color: transparent;

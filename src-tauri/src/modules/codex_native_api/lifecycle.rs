@@ -73,6 +73,10 @@ pub(super) struct RequestTracker {
     started: Instant,
     busy: bool,
     report: Option<RequestReport>,
+    pending_dispatch: Option<Box<PendingDispatch>>,
+    dispatch_count: usize,
+    dispatch_open: bool,
+    dispatch_checkpoint: Option<Box<DispatchCheckpoint>>,
     installation_profile: Option<crate::modules::codex_api_identity::InstallationProfile>,
     transport_identity: Option<String>,
     diagnostics: Option<DiagnosticContext>,
@@ -85,6 +89,38 @@ pub(super) struct RequestTracker {
     rebuild_abort: Option<Arc<AtomicBool>>,
     quota_account: Option<String>,
     quota_started: Instant,
+}
+
+/// A selected candidate is not an upstream attempt until its transport starts.
+/// Keep its identity separate from the last real response while preparing it.
+struct PendingDispatch {
+    report: RequestReport,
+    attempt: DiagnosticAttempt,
+    transport_identity: Option<String>,
+    quota_account: Option<String>,
+    proxy_route: Option<serde_json::Value>,
+}
+
+/// Only lightweight diagnostic positions are saved: request payload buffers
+/// must not be copied whenever a candidate starts connecting.
+struct DispatchCheckpoint {
+    report: Option<RequestReport>,
+    installation_profile: Option<crate::modules::codex_api_identity::InstallationProfile>,
+    transport_identity: Option<String>,
+    quota_account: Option<String>,
+    quota_started: Instant,
+    diagnostics: Option<DiagnosticCheckpoint>,
+    retry: Option<Box<PendingDispatch>>,
+}
+
+struct DiagnosticCheckpoint {
+    attempts: usize,
+    payloads: usize,
+    proxy_route: Option<serde_json::Value>,
+    upstream_request_scoped: bool,
+    failure_phase: Option<String>,
+    first_response_ms: Option<u64>,
+    truncated: bool,
 }
 
 const DOWNSTREAM_OUTCOME_TIMEOUT: Duration = Duration::from_secs(3600);
@@ -151,6 +187,10 @@ impl RequestTracker {
             started: Instant::now(),
             busy: true,
             report: None,
+            pending_dispatch: None,
+            dispatch_count: 0,
+            dispatch_open: false,
+            dispatch_checkpoint: None,
             installation_profile: None,
             transport_identity: None,
             diagnostics: None,
@@ -186,6 +226,12 @@ impl RequestTracker {
         headers: &axum::http::HeaderMap,
         capture_payloads: bool,
     ) {
+        self.dispatch_count = 0;
+        self.dispatch_open = false;
+        self.dispatch_checkpoint = None;
+        self.pending_dispatch = None;
+        self.quota_account = None;
+        self.transport_identity = None;
         self.capture_payloads = capture_payloads;
         let identity = super::diagnostics::capture_header_identity(headers);
         self.diagnostics = Some(DiagnosticContext {
@@ -275,6 +321,8 @@ impl RequestTracker {
                 official_access_fingerprint: None,
                 official_authorization_revision: None,
                 official_registration_id: None,
+                official_fallback_registration_id: None,
+                official_fallback_authorization_revision: None,
                 official_authorization_error: None,
                 operation: self.operation,
                 diagnostics: None,
@@ -301,37 +349,142 @@ impl RequestTracker {
         tokio::time::Instant::now() + timeout.saturating_sub(self.started.elapsed())
     }
 
-    /// A route can have several connection/bootstrap attempts before any output.
+    /// Called only immediately before dispatching a real upstream operation.
+    /// Candidate selection, credential reads and local handshakes are not sends.
     pub(super) fn begin_attempt(&mut self, transport: &str) {
+        if self.dispatch_open {
+            return;
+        }
+        let mut checkpoint = Box::new(DispatchCheckpoint {
+            report: self.report.clone(),
+            installation_profile: self.installation_profile.clone(),
+            transport_identity: self.transport_identity.clone(),
+            quota_account: self.quota_account.clone(),
+            quota_started: self.quota_started,
+            diagnostics: self.diagnostics.as_ref().map(|context| DiagnosticCheckpoint {
+                attempts: context.attempts.len(),
+                payloads: context.payloads.len(),
+                proxy_route: context.proxy_route.clone(),
+                upstream_request_scoped: context.upstream_request_scoped,
+                failure_phase: context.failure_phase.clone(),
+                first_response_ms: context.first_response_ms,
+                truncated: context.truncated,
+            }),
+            retry: None,
+        });
+        let pending = self.pending_dispatch.take();
+        let next = pending.as_ref().map(|pending| pending.attempt.clone());
+        if let Some(pending) = pending {
+            self.transport_identity = pending.transport_identity;
+            self.quota_account = pending.quota_account;
+            self.installation_profile = pending.attempt.account_identity;
+            self.report = Some(pending.report);
+            if let Some(context) = &mut self.diagnostics {
+                context.proxy_route = pending.proxy_route;
+            }
+        }
+        self.quota_started = Instant::now();
+        self.dispatch_count += 1;
+        self.dispatch_open = true;
         self.capture_request_fault(false);
         if let Some(report) = &mut self.report {
             report.credential_scope = false;
             report.error_message = None;
             report.official_authorization_error = None;
+            let previous = self.diagnostics.as_ref().and_then(|context| context.attempts.last());
+            let mut attempt = next.unwrap_or_else(|| DiagnosticAttempt {
+                authorization_route: previous.and_then(|attempt| attempt.authorization_route.clone()),
+                authorization_fallback: previous.and_then(|attempt| attempt.authorization_fallback.clone()),
+                service_tier_adaptation: previous.and_then(|attempt| attempt.service_tier_adaptation.clone()),
+                account_identity: self.installation_profile.clone(),
+                account_id: report.account_id.clone(),
+                model_id: report.upstream_model.clone(),
+                ..Default::default()
+            });
+            checkpoint.retry = Some(Box::new(PendingDispatch {
+                report: report.clone(),
+                attempt: attempt.clone(),
+                transport_identity: self.transport_identity.clone(),
+                quota_account: self.quota_account.clone(),
+                proxy_route: self.diagnostics.as_ref().and_then(|context| context.proxy_route.clone()),
+            }));
+            if let Some(context) = &mut self.diagnostics {
+                attempt.sequence = context.attempts.len() as u32 + 1;
+                attempt.transport = transport.to_owned();
+                attempt.started_at_ms = chrono::Utc::now().timestamp_millis();
+                context.attempts.push(attempt);
+            }
         }
-        let Some(context) = &mut self.diagnostics else {
-            return;
-        };
-        if let Some(attempt) = context.attempts.last_mut().filter(|v| v.status.is_none()) {
-            attempt.transport = transport.to_owned();
-            return;
+        self.dispatch_checkpoint = Some(checkpoint);
+    }
+
+    pub(super) fn has_upstream_attempt(&self) -> bool {
+        self.dispatch_count > 0
+    }
+
+    pub(super) fn upstream_attempt_count(&self) -> usize {
+        self.dispatch_count
+    }
+
+    pub(super) fn upstream_account_ids(&self) -> std::collections::HashSet<String> {
+        self.diagnostics.as_ref().map(|context| context.attempts.iter()
+            .map(|attempt| attempt.account_id.clone()).collect()).unwrap_or_default()
+    }
+
+    /// Use only when transport evidence proves no HTTP request reached upstream
+    /// (e.g. reqwest's is_connect). A timeout/read failure is not such evidence.
+    pub(super) fn discard_unsent_attempt(&mut self) -> bool {
+        if !self.dispatch_open {
+            return false;
         }
-        let Some(report) = &self.report else {
-            return;
+        let Some(checkpoint) = self.dispatch_checkpoint.take() else {
+            return false;
         };
-        context.attempts.push(DiagnosticAttempt {
-            sequence: context.attempts.len() as u32 + 1,
-            account_identity: self.installation_profile.clone(),
-            account_id: report.account_id.clone(),
-            model_id: report.upstream_model.clone(),
-            transport: transport.to_owned(),
-            started_at_ms: chrono::Utc::now().timestamp_millis(),
-            ..Default::default()
-        });
+        self.dispatch_open = false;
+        self.dispatch_count = self.dispatch_count.saturating_sub(1);
+        self.report = checkpoint.report;
+        self.installation_profile = checkpoint.installation_profile;
+        self.transport_identity = checkpoint.transport_identity;
+        self.quota_account = checkpoint.quota_account;
+        self.quota_started = checkpoint.quota_started;
+        // The same candidate can be tried again without another routed call.
+        self.pending_dispatch = checkpoint.retry;
+        if let (Some(context), Some(before)) = (&mut self.diagnostics, checkpoint.diagnostics) {
+            context.attempts.truncate(before.attempts);
+            context.payloads.truncate(before.payloads);
+            context.proxy_route = before.proxy_route;
+            context.upstream_request_scoped = before.upstream_request_scoped;
+            context.failure_phase = before.failure_phase;
+            context.first_response_ms = before.first_response_ms;
+            context.truncated = before.truncated;
+        }
+        true
     }
 
     pub(super) fn upstream_headers(&mut self, headers: &axum::http::HeaderMap) {
         self.upstream_identity(super::diagnostics::capture_header_identity(headers));
+    }
+
+    pub(super) fn upstream_response_headers(&mut self, headers: &axum::http::HeaderMap) {
+        let request_id = ["x-request-id", "x-openai-request-id", "openai-request-id"]
+            .iter().filter_map(|name| headers.get(*name).and_then(|value| value.to_str().ok()))
+            .find(|value| !value.is_empty() && value.len() <= 256
+                && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.')))
+            .map(str::to_owned);
+        if let Some(attempt) = self.diagnostics.as_mut().and_then(|context| context.attempts.last_mut()) {
+            attempt.upstream_request_id = request_id;
+        }
+    }
+
+    pub(super) fn authorization_fallback_unavailable(
+        &mut self,
+        _account_id: &str,
+        _model: &str,
+        _failure: &super::contract::OfficialFallbackFailure,
+        _error: &ServiceError,
+    ) {
+        // The candidate was never sent. Its preparation error is returned to
+        // the caller, but must not impersonate a failed upstream execution.
     }
 
     pub(super) fn quota_headers(&self, headers: &axum::http::HeaderMap) {
@@ -341,13 +494,6 @@ impl RequestTracker {
         }
     }
 
-    pub(super) fn check_quota_before_send(&self) -> Result<(), ServiceError> {
-        if let Some(account_id) = &self.quota_account {
-            self.host.check_quota_before_send(account_id)?;
-            self.host.quota_request_started(account_id);
-        }
-        Ok(())
-    }
 
     pub(super) fn quota_event(&self, event: &serde_json::Value) {
         if let (Some(account_id), Some(snapshot)) = (&self.quota_account,
@@ -401,6 +547,16 @@ impl RequestTracker {
     }
 
     pub(super) fn attempt_result(&mut self, status: u16, success: bool, error: Option<&str>) {
+        if !self.dispatch_open {
+            return;
+        }
+        self.dispatch_open = false;
+        self.dispatch_checkpoint = None;
+        if let Some(report) = &mut self.report {
+            report.status = status;
+            report.success = success;
+            report.error = error.map(str::to_string);
+        }
         if let Some(context) = &mut self.diagnostics {
             if let Some(attempt) = context.attempts.last_mut().filter(|v| v.status.is_none()) {
                 attempt.status = Some(status);
@@ -416,6 +572,11 @@ impl RequestTracker {
     }
 
     pub(super) fn attempt_error(&mut self, error: &ServiceError) {
+        if !self.dispatch_open {
+            return;
+        }
+        let open_attempt = self.diagnostics.as_ref().and_then(|context| context.attempts.last())
+            .is_some_and(|attempt| attempt.status.is_none());
         if let Some(details) = error.response_error.as_ref() {
             self.capture_official_authorization_error(error.status, details);
         }
@@ -425,15 +586,15 @@ impl RequestTracker {
             None
         };
         self.capture_request_fault(error.code == super::upstream_errors::REQUEST_SCOPED);
-        self.attempt_result(error.status, false, Some(error.code));
         self.capture_response_error(Some(&error.message), error.credential_scope);
+        self.attempt_result(error.status, false, Some(error.code));
         if let Some(context) = &mut self.diagnostics {
             let mut phase = super::diagnostics::failure_phase(error.code);
             if phase == "upstream" && context.attempts.is_empty() {
                 phase = "routing";
             }
             context.failure_phase = Some(phase.to_owned());
-            if let Some(attempt) = context.attempts.last_mut() {
+            if let Some(attempt) = context.attempts.last_mut().filter(|_| open_attempt) {
                 if error.transport_failure.is_some() {
                     attempt.transport_error = Some("tls_decrypt".into());
                     // Repeated reporting of the same failure must preserve a
@@ -457,7 +618,7 @@ impl RequestTracker {
             }
         }
         if let (Some(context), Some(message)) = (&mut self.diagnostics, message) {
-            if let Some(attempt) = context.attempts.last_mut() {
+            if let Some(attempt) = context.attempts.last_mut().filter(|attempt| attempt.status.is_none()) {
                 attempt.error_message = Some(super::diagnostics::sanitize_error_text(message));
             }
         }
@@ -488,6 +649,10 @@ impl RequestTracker {
         success: bool,
         error: Option<&str>,
     ) -> Option<DiagnosticContext> {
+        if self.dispatch_count == 0 {
+            self.diagnostics = None;
+            return None;
+        }
         self.attempt_result(status, success, error);
         let mut context = self.diagnostics.take()?;
         context.output_generation_ms = context
@@ -504,7 +669,7 @@ impl RequestTracker {
                 }
                 .into(),
             );
-            if let Some(attempt) = context.attempts.last_mut() {
+            if let Some(attempt) = context.attempts.last_mut().filter(|attempt| attempt.failure_phase.is_none()) {
                 attempt.failure_phase = context.failure_phase.clone();
             }
         }
@@ -552,28 +717,21 @@ impl RequestTracker {
     }
 
     pub(super) fn routed(&mut self, caller: &Caller, route: &Route, model: &str) {
-        self.transport_identity = route.transport_identity.clone();
-        self.quota_account = (route.chatgpt && !route.chatgpt_plan).then(|| route.account_id.clone());
-        self.quota_started = Instant::now();
-        self.capture_request_fault(false);
-        self.installation_profile = route.installation_profile.clone();
         self.route_permit = route.permit.clone();
-        if let Some(context) = &mut self.diagnostics {
-            context.proxy_route = route.proxy_route.clone();
-            context.attempts.push(DiagnosticAttempt {
-                authorization_route: Some(if route.chatgpt_plan { "official" } else { "local_gateway" }.into()),
-                sequence: context.attempts.len() as u32 + 1,
-                account_identity: route.installation_profile.clone(),
-                account_id: route.account_id.clone(),
-                model_id: route.model.clone(),
-                transport: format!("{:?}", route.wire_api).to_lowercase(),
-                started_at_ms: chrono::Utc::now().timestamp_millis(),
-                ..Default::default()
-            });
-        }
-        self.report = Some(RequestReport {
+        let attempt = DiagnosticAttempt {
+            authorization_route: Some(if route.chatgpt_plan { "official" } else { "local_gateway" }.into()),
+            authorization_fallback: (!route.chatgpt_plan).then(|| route.official_fallback_failure.as_ref()
+                .map(|failure| super::official_fallback::trace(&route.account_id, failure))).flatten(),
+            account_identity: route.installation_profile.clone(),
+            account_id: route.account_id.clone(),
+            model_id: route.model.clone(),
+            ..Default::default()
+        };
+        let report = RequestReport {
             official_authorization_revision: route.official_authorization_revision.clone(),
             official_registration_id: route.official_registration_id.clone(),
+            official_fallback_registration_id: route.official_fallback_registration_id.clone(),
+            official_fallback_authorization_revision: route.official_fallback_authorization_revision.clone(),
             official_authorization_error: None,
             official_access_fingerprint: route.chatgpt_plan.then(|| route.headers.get("authorization")
                 .and_then(|value| value.to_str().ok()).and_then(|value| value.strip_prefix("Bearer "))
@@ -595,11 +753,45 @@ impl RequestTracker {
             requested_service_tier: None,
             response_service_tier: None,
             reasoning_effort: None,
-        });
+        };
+        self.pending_dispatch = Some(Box::new(PendingDispatch {
+            report,
+            attempt,
+            transport_identity: route.transport_identity.clone(),
+            quota_account: (route.chatgpt && !route.chatgpt_plan).then(|| route.account_id.clone()),
+            proxy_route: route.proxy_route.clone(),
+        }));
+    }
+
+    pub(super) fn prepared_metadata(&mut self, prepared: &super::mapping::Prepared) {
+        self.request_metadata(&prepared.body);
+        let requested = prepared.source_body.get("service_tier")
+            .and_then(serde_json::Value::as_str)
+            .or(prepared.route.default_service_tier.as_deref());
+        let attempt = if let Some(pending) = &mut self.pending_dispatch {
+            Some(&mut pending.attempt)
+        } else {
+            self.diagnostics.as_mut().and_then(|context| context.attempts.last_mut())
+        };
+        if let Some(attempt) = attempt {
+            attempt.service_tier_adaptation = requested
+                .filter(|tier| prepared.route.chatgpt_plan && !matches!(*tier, "" | "auto" | "default"))
+                .map(|tier| crate::models::codex_local_access::CodexLocalAccessServiceTierAdaptation {
+                    requested_tier: tier.to_owned(), sent_tier: "default".into(), reason: "official_default_only".into(),
+                });
+        }
+    }
+
+    fn metadata_report(&mut self) -> Option<&mut RequestReport> {
+        if let Some(pending) = &mut self.pending_dispatch {
+            Some(&mut pending.report)
+        } else {
+            self.report.as_mut()
+        }
     }
 
     pub(super) fn request_metadata(&mut self, body: &serde_json::Value) {
-        if let Some(report) = self.report.as_mut() {
+        if let Some(report) = self.metadata_report() {
             report.requested_service_tier = body
                 .get("service_tier")
                 .and_then(serde_json::Value::as_str)
@@ -673,6 +865,15 @@ impl RequestTracker {
         usage: Option<serde_json::Value>,
         error: Option<String>,
     ) {
+        // A later candidate may fail locally after a real upstream rejection.
+        // Persist that real response under its original account, not the
+        // unsent candidate or its preparation/cancellation error.
+        let (status, success, error) = if !self.dispatch_open && self.dispatch_count > 0 {
+            self.report.as_ref().map(|report| (report.status, report.success, report.error.clone()))
+                .unwrap_or((status, success, error))
+        } else {
+            (status, success, error)
+        };
         if let Some(abort) = self.rebuild_abort.take().filter(|_| !success) {
             abort.store(true, Ordering::Release);
         }
@@ -681,6 +882,7 @@ impl RequestTracker {
         }
         self.idle();
         self.route_permit = None;
+        self.pending_dispatch = None;
         let diagnostics = self.finish_diagnostic(status, success, error.as_deref());
         let downstream = self.downstream.take();
         if let Some(mut report) = self.report.take() {
@@ -710,7 +912,7 @@ impl RequestTracker {
         mut diagnostics: Option<DiagnosticContext>,
         downstream: Option<oneshot::Receiver<DownstreamOutcome>>,
     ) -> Option<tokio::task::JoinHandle<()>> {
-        if report.is_none() && diagnostics.is_none() {
+        if self.dispatch_count == 0 || report.is_none() && diagnostics.is_none() {
             return None;
         }
         let runtime = tokio::runtime::Handle::try_current().ok()?;
@@ -766,8 +968,9 @@ impl RequestTracker {
     }
 
     pub(super) async fn fail(&mut self, error: &ServiceError) {
+        let dispatched = self.dispatch_open;
         self.attempt_error(error);
-        if error.retry_after.is_some() {
+        if dispatched && error.retry_after.is_some() {
             self.set_retry_after(error.retry_after);
         }
         self.complete(error.status, false, None, Some(error.code.to_string()))
@@ -777,31 +980,16 @@ impl RequestTracker {
     pub(super) async fn complete_local(&mut self) {
         self.idle();
         self.route_permit = None;
+        self.pending_dispatch = None;
         let diagnostics = self.finish_diagnostic(200, true, None);
         self.report = None;
         self.persist(None, diagnostics, None).await;
     }
 
-    /// A deliberate handshake rejection negotiates HTTP before inference starts.
-    /// Keep its diagnostic without adding a failed model execution or usage record.
-    pub(super) async fn transport_fallback(&mut self, error: &ServiceError) {
-        debug_assert!(self
-            .report
-            .as_ref()
-            .is_some_and(|report| report.account_id.is_empty()));
-        self.idle();
-        self.route_permit = None;
-        self.begin_attempt("websocket");
-        let mut diagnostics = self.finish_diagnostic(error.status, false, Some(error.code));
-        if let Some(context) = &mut diagnostics {
-            context.failure_phase = Some("transport_fallback".into());
-            if let Some(attempt) = context.attempts.last_mut() {
-                attempt.failure_phase = Some("transport_fallback".into());
-                attempt.error_message = Some(error.message.clone());
-            }
-        }
-        self.report = None;
-        self.persist(None, diagnostics, None).await;
+    /// A local handshake rejection negotiates HTTP without contacting upstream.
+    pub(super) async fn transport_fallback(&mut self, _error: &ServiceError) {
+        debug_assert_eq!(self.dispatch_count, 0);
+        self.complete_local().await;
     }
 }
 
@@ -811,18 +999,21 @@ impl Drop for RequestTracker {
             abort.store(true, Ordering::Release);
         }
         self.idle();
-        let status = if self.stop.stopped() { 503 } else { 499 };
-        let error = if self.stop.stopped() {
-            "service_stopping"
+        let (status, success, error) = if !self.dispatch_open && self.dispatch_count > 0 {
+            self.report.as_ref().map(|report| (report.status, report.success, report.error.clone()))
+                .unwrap_or((499, false, Some("client_cancelled".into())))
+        } else if self.stop.stopped() {
+            (503, false, Some("service_stopping".into()))
         } else {
-            "client_cancelled"
+            (499, false, Some("client_cancelled".into()))
         };
-        let diagnostics = self.finish_diagnostic(status, false, Some(error));
+        let diagnostics = self.finish_diagnostic(status, success, error.as_deref());
         let mut report = self.report.take();
         if let Some(report) = &mut report {
             report.elapsed = self.started.elapsed();
             report.status = status;
-            report.error = Some(error.into());
+            report.success = success;
+            report.error = error;
             report.diagnostics = diagnostics.clone();
         }
         // Register persistence before releasing the request task so shutdown

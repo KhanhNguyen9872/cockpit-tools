@@ -116,7 +116,7 @@ func (s *relayServer) imageAccountEligible(account *accountSpec, model string) b
 	if account.ImageGenerationUpstream == nil && !imageGenerationAllowedForAccount(account) {
 		return false
 	}
-	if strings.EqualFold(account.ImageGenerationPolicy, "disabled") || accountQuotaExhausted(s.manifest, account, now) || quotaReserveBlockReason(account, now) != "" {
+	if strings.EqualFold(account.ImageGenerationPolicy, "disabled") || accountQuotaExhausted(s.manifest, account, now) {
 		return false
 	}
 	auth, _ := s.imageAccountAuth(account)

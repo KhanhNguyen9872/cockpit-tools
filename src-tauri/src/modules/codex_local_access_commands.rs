@@ -57,7 +57,7 @@ fn new_local_access_collection() -> Result<CodexLocalAccessCollection, String> {
         account_concurrency_default_migrated: true,
         account_concurrency_wait_ms: DEFAULT_ACCOUNT_CONCURRENCY_WAIT_MS,
         bound_oauth_account_id: None,
-        bound_oauth_quota_reserve: None,
+
         account_ids: Vec::new(),
         created_at: now,
         updated_at: now,
@@ -1430,7 +1430,6 @@ pub async fn delete_local_access_api_key(
 
 pub async fn update_local_access_bound_oauth_account(
     bound_oauth_account_id: Option<String>,
-    bound_oauth_quota_reserve: Option<CodexLocalAccessQuotaReserve>,
 ) -> Result<CodexLocalAccessState, String> {
     ensure_runtime_loaded_without_start().await?;
 
@@ -1445,9 +1444,6 @@ pub async fn update_local_access_bound_oauth_account(
     let previous_collection = collection.clone();
 
     let normalized_bound_id = normalize_optional_account_ref(bound_oauth_account_id.as_deref());
-    let has_bound_oauth = normalized_bound_id.is_some();
-    let bound_oauth_quota_reserve =
-        validate_bound_oauth_quota_reserve(bound_oauth_quota_reserve, has_bound_oauth)?;
     if let Some(bound_id) = normalized_bound_id {
         let bound_account = validate_local_access_bound_oauth_account(&bound_id)?;
         // API Service 绑定动作复用客户端启动的 OAuth 预检：仅在 access_token
@@ -1462,22 +1458,20 @@ pub async fn update_local_access_bound_oauth_account(
                 }
             };
         collection.bound_oauth_account_id = Some(bound_account.id);
-        collection.bound_oauth_quota_reserve = bound_oauth_quota_reserve;
     } else {
         collection.bound_oauth_account_id = None;
-        collection.bound_oauth_quota_reserve = None;
     }
     // 绑定 OAuth：改前逻辑，默认全开生图，不启用本地网关 ImagesOnly 绕路。
     collection.image_generation_mode = CodexLocalAccessImageGenerationMode::Enabled;
     collection.updated_at = now_ms();
     save_collection_to_disk(&collection)?;
-    let bound_account_id_for_quota_reserve = collection.bound_oauth_account_id.clone();
+    let bound_account_id_for_cache = collection.bound_oauth_account_id.clone();
     let next_collection = collection.clone();
 
     {
         let mut runtime = gateway_runtime().lock().await;
         sync_runtime_collection(&mut runtime, collection);
-        if let Some(bound_account_id) = bound_account_id_for_quota_reserve.as_deref() {
+        if let Some(bound_account_id) = bound_account_id_for_cache.as_deref() {
             runtime.prepared_accounts.remove(bound_account_id);
         }
     }

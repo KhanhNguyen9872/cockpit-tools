@@ -353,6 +353,7 @@ func (e *CodexWebsocketsExecutor) Execute(ctx context.Context, auth *cliproxyaut
 	outputItemsByIndex := make(map[int64][]byte)
 	var outputItemsFallback [][]byte
 	sawOutputDelta := false
+	replaySafe := true
 	for {
 		msgType, payload, errRead := readCodexWebsocketMessage(ctx, sess, conn, readCh)
 		if errRead != nil {
@@ -402,7 +403,7 @@ func (e *CodexWebsocketsExecutor) Execute(ctx context.Context, auth *cliproxyaut
 				return resp, errClearReplay
 			}
 			helps.RecordAPIWebsocketError(ctx, e.cfg, "upstream_error", wsErr)
-			return resp, wsErr
+			return resp, helps.CodexStopAfterExecution(wsErr, replaySafe && helps.CodexEventHasNoExecution(payload))
 		}
 		if streamErr, terminalBody, ok := codexTerminalFailureErrWithCooling(payload, e.modelLevelCooling()); ok {
 			if sess != nil {
@@ -412,8 +413,9 @@ func (e *CodexWebsocketsExecutor) Execute(ctx context.Context, auth *cliproxyaut
 			if errClearReplay := clearCodexReasoningReplayOnInvalidSignature(ctx, replayScope, streamErr.StatusCode(), terminalBody); errClearReplay != nil {
 				return resp, errClearReplay
 			}
-			return resp, streamErr
+			return resp, helps.CodexStopAfterExecution(streamErr, replaySafe && helps.CodexEventHasNoExecution(payload))
 		}
+		replaySafe = replaySafe && helps.CodexHandshakeMetadataEvent(payload)
 
 		if ctx.Err() != nil {
 			continue

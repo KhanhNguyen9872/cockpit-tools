@@ -94,6 +94,30 @@ pub struct DiagnosticAttempt {
     pub failure_phase: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capability_fallback: Option<CapabilityFallbackTrace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_fallback: Option<AuthorizationFallbackTrace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier_adaptation: Option<crate::models::codex_local_access::CodexLocalAccessServiceTierAdaptation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_request_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorizationFallbackTrace {
+    #[serde(default)]
+    pub trigger_stage: String,
+    pub reason: String,
+    pub from_account_id: String,
+    pub to_account_id: String,
+    pub from_route: String,
+    pub to_route: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

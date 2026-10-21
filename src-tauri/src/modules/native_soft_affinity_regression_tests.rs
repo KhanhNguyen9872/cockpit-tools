@@ -95,6 +95,8 @@ fn report(
         official_access_fingerprint: None,
         official_authorization_revision: None,
         official_registration_id: None,
+        official_fallback_registration_id: None,
+        official_fallback_authorization_revision: None,
         official_authorization_error: None,
         operation: "responses",
         caller: caller("caller-a"),

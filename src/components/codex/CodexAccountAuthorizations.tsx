@@ -24,7 +24,7 @@ export function CodexAccountAuthorizations({ account, registrations, memberIds }
     </button>
     {(legacy || official) && <button type="button" className="group-account-badge" onClick={(event) => {
       event.stopPropagation(); requestCodexServiceAuthorization(account.id);
-    }}>{t('chatgptPlan.card.serviceRoute', { mode: t(legacy && official ? 'chatgptPlan.card.bothRoutes' : official ? 'chatgptPlan.serviceMode.official' : 'chatgptPlan.serviceMode.codex') })}</button>}
+    }}>{t('chatgptPlan.card.serviceRoute', { mode: t(official ? 'chatgptPlan.officialFlow.rowOfficial' : 'chatgptPlan.officialFlow.rowLocal') })}</button>}
     {official && <span className="codex-login-subline">{t('chatgptPlan.imagePolicyLocked')}</span>}
     {grant && <span className="codex-login-subline" title={t('chatgptPlan.card.quotaHint')}>{t('chatgptPlan.card.quotaSource')}</span>}
   </div>;

@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { requestCodexOfficialAuthorizationCheck } from '../utils/codexAccountServiceNavigation';
 import type {
   CodexLocalAccessChatMessage,
   CodexLocalAccessChatResult,
@@ -12,7 +11,6 @@ import type {
   CodexLocalAccessAccountWindowQuery,
   CodexLocalAccessAccountWindowStats,
   CodexLocalAccessModelPricing,
-  CodexLocalAccessOAuthQuotaReserve,
   CodexLocalAccessPortCleanupResult,
   CodexLocalAccessRequestLogQuery,
   CodexLocalAccessRequestDetail,
@@ -96,11 +94,9 @@ export async function rotateCodexLocalAccessApiKey(): Promise<CodexLocalAccessSt
 
 export async function updateCodexLocalAccessBoundOAuthAccount(
   boundOauthAccountId: string | null,
-  boundOauthQuotaReserve: CodexLocalAccessOAuthQuotaReserve | null = null,
 ): Promise<CodexLocalAccessState> {
   return await invoke("codex_local_access_update_bound_oauth_account", {
     boundOauthAccountId,
-    boundOauthQuotaReserve,
   });
 }
 
@@ -195,7 +191,6 @@ export async function prepareCodexLocalAccessForRestart(): Promise<CodexLocalAcc
 
 export async function restartCodexLocalAccessSidecar(): Promise<CodexLocalAccessState> {
   const state = await invoke<CodexLocalAccessState>("codex_local_access_restart_sidecar");
-  requestCodexOfficialAuthorizationCheck({ running: state.running && Boolean(state.collection?.enabled), restarted: true });
   return state;
 }
 
@@ -429,7 +424,6 @@ export async function setCodexLocalAccessEnabled(
   enabled: boolean,
 ): Promise<CodexLocalAccessState> {
   const state = await invoke<CodexLocalAccessState>("codex_local_access_set_enabled", { enabled });
-  requestCodexOfficialAuthorizationCheck({ running: state.running && Boolean(state.collection?.enabled), ...(enabled ? { restarted: true } : { stopped: true }) });
   return state;
 }
 
@@ -443,7 +437,6 @@ export async function activateCodexLocalAccess(
       autoRepairMode: null,
       instanceId: instanceId ?? null,
     });
-    requestCodexOfficialAuthorizationCheck({ running: state.running && Boolean(state.collection?.enabled), restarted: true });
     return state;
   } finally {
     console.info(

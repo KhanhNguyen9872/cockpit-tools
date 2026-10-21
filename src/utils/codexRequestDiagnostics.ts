@@ -1,4 +1,29 @@
-import type { CodexLocalAccessRequestDetail, CodexLocalAccessRequestPayload } from '../types/codexLocalAccess';
+import type { CodexAuthorizationFallbackTrace, CodexLocalAccessRequestDetail, CodexLocalAccessRequestPayload, CodexServiceTierAdaptation } from '../types/codexLocalAccess';
+
+/** Only explicit gateway evidence establishes an adaptation, not response tier or route. */
+export function recordedServiceTierAdaptation(value?: CodexServiceTierAdaptation | null): CodexServiceTierAdaptation | null {
+  return value?.reason === 'official_default_only' && value.sentTier === 'default'
+    && Boolean(value.requestedTier?.trim()) ? value : null;
+}
+
+/** Display recorded provenance only, never guess a fallback from the final local route. */
+export function authorizationFallbackSummaryKey(trace?: CodexAuthorizationFallbackTrace | null): string | null {
+  if (!trace || trace.fromRoute !== 'official' || trace.toRoute !== 'local_gateway'
+    || !trace.fromAccountId || trace.fromAccountId !== trace.toAccountId) return null;
+  return 'codex.requestDiagnostics.authorizationFallback.summary';
+}
+
+export function authorizationFallbackReasonKey(reason: string): string {
+  const reasons = new Map([
+    ['eligibility_rejected', 'notEligible'], ['subscription_sharing_user_not_eligible', 'notEligible'], ['not_eligible', 'notEligible'],
+    ['reauthorize', 'authorization'], ['authorization', 'authorization'], ['authorization_failed', 'authorization'],
+    ['capability_unsupported', 'unsupported'], ['unsupported_capability', 'unsupported'], ['unsupported', 'unsupported'],
+    ['official_throttled', 'limited'], ['rate_limit', 'limited'], ['quota', 'limited'],
+    ['cooldown', 'paused'], ['circuit_open', 'paused'],
+    ['transport', 'unavailable'], ['upstream_error', 'unavailable'], ['unavailable', 'unavailable'],
+  ]);
+  return `codex.requestDiagnostics.authorizationFallback.reasons.${reasons.get(reason) || 'unavailable'}`;
+}
 
 /** Persisted endpoint IDs describe the route used then, independently of today's account binding. */
 export function requestAuthorizationRouteKey(accountId?: string | null, authorizationRoute?: 'official' | 'local_gateway' | null): string {

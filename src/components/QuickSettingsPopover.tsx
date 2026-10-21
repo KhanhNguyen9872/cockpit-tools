@@ -1938,10 +1938,7 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
                   </div>
                 </div>
                 <div className="qs-hint">
-                  {t(
-                    'settings.general.codexAppUiInjectionDesc',
-                    '重启 Codex 实例后，在输入框下方显示 Cockpit Tools API 服务的账号数、周额度和 5h 额度。需保持 Cockpit Tools 在后台运行；完全退出或网络不可用时，额度不会继续刷新。',
-                  )}
+                  {t('settings.general.codexAppUiInjectionDesc')}
                 </div>
                 <div className="qs-row" style={{ marginTop: 8 }}>
                   <div className="qs-row-label">

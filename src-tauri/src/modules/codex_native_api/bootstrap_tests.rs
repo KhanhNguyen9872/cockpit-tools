@@ -70,6 +70,10 @@ impl Host for FixtureHost {
                 installation_profile: None,
                 official_authorization_revision: None,
                 official_registration_id: None,
+                official_fallback_registration_id: None,
+                official_fallback_authorization_revision: None,
+                authorization_scope_fingerprint: None,
+                official_fallback_failure: None,
                 transport_identity: None,
                 account_id: index.to_string(),
                 owner_id: format!("owner-{index}"),
@@ -124,7 +128,7 @@ async fn upstream(
         events.push(overload());
         events
     } else {
-        vec![created(), completed()]
+        vec![json!({"type":"response.created","response":{"id":format!("account-{index}-response"),"status":"in_progress"}}), completed()]
     };
     if index < host.failing && host.delayed_opening != 0 {
         let rejection = format!("data: {}\n\n", overload());
@@ -383,11 +387,14 @@ async fn comments_or_partial_json_do_not_spend_the_response_id_hold_budget() {
 }
 
 #[tokio::test]
-async fn published_created_still_prevents_replay_after_the_hold_budget() {
+async fn published_created_retains_pre_business_recovery_after_visibility_budget() {
     let (host, status, text) = run_delayed(0, vec![], 1, false, true, 3).await;
     assert_eq!(status, 200);
-    assert!(text.contains("server_is_overloaded"));
-    assert_eq!(text.matches("response.created").count(), 1);
+    assert!(!text.contains("server_is_overloaded"));
+    assert_eq!(text.matches("response.created").count(), 2);
     assert_eq!(host.calls[0].load(Ordering::SeqCst), 1);
-    assert_eq!(host.calls[1].load(Ordering::SeqCst), 0);
+    assert_eq!(host.calls[1].load(Ordering::SeqCst), 1);
 }
+
+#[path = "nonofficial_pre_business_http_tests.rs"]
+mod nonofficial_pre_business_http_tests;

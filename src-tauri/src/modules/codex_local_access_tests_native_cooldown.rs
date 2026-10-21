@@ -5,6 +5,8 @@ fn native_cooldown_report(status: u16, error: &str) -> native_contract::RequestR
         official_access_fingerprint: None,
         official_authorization_revision: None,
         official_registration_id: None,
+        official_fallback_registration_id: None,
+        official_fallback_authorization_revision: None,
         official_authorization_error: None,
         operation: "text",
         diagnostics: None,

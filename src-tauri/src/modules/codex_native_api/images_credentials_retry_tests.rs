@@ -110,6 +110,10 @@ impl Host for CredentialHost {
                     installation_profile: None,
                     official_authorization_revision: None,
                     official_registration_id: None,
+                    official_fallback_registration_id: None,
+                    official_fallback_authorization_revision: None,
+                    authorization_scope_fingerprint: None,
+                official_fallback_failure: None,
                     transport_identity: None,
                     account_id: account.into(),
                     owner_id: if request.force_refresh && self.change_refresh_owner {

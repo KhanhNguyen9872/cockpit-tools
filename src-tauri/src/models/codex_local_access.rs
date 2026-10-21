@@ -530,24 +530,24 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct CodexLocalAccessQuotaReserve {
-    pub hourly_percent: i32,
-    pub weekly_percent: i32,
-    // Legacy `strict: false` no longer disables quota protection.
-    #[serde(default = "default_true", skip_deserializing)]
-    pub strict: bool,
-    #[serde(default = "default_quota_safety_margin")]
-    pub safety_margin_percent: i32,
-}
-
-pub fn default_quota_safety_margin() -> i32 { 3 }
-
 pub const CODEX_CAPABILITY_IDS: &[&str] = &[
-    "function", "custom", "namespace", "tool_search_client", "tool_search", "web_search",
-    "image_generation", "file_search", "code_interpreter", "computer_use", "mcp",
-    "programmatic_tool_calling", "image_input", "file_input", "audio_input", "video_input", "compact",
+    "function",
+    "custom",
+    "namespace",
+    "tool_search_client",
+    "tool_search",
+    "web_search",
+    "image_generation",
+    "file_search",
+    "code_interpreter",
+    "computer_use",
+    "mcp",
+    "programmatic_tool_calling",
+    "image_input",
+    "file_input",
+    "audio_input",
+    "video_input",
+    "compact",
 ];
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -580,7 +580,11 @@ pub struct CodexLocalAccessCapabilityFallbackConfig {
 
 impl Default for CodexLocalAccessCapabilityFallbackConfig {
     fn default() -> Self {
-        Self { enabled: true, account_ids: Vec::new(), overrides: Vec::new() }
+        Self {
+            enabled: true,
+            account_ids: Vec::new(),
+            overrides: Vec::new(),
+        }
     }
 }
 
@@ -603,7 +607,11 @@ pub struct CodexLocalAccessMultiAgentConfig {
 }
 impl Default for CodexLocalAccessMultiAgentConfig {
     fn default() -> Self {
-        Self { optimize: true, orphan_delegation: true, compat_models: Vec::new() }
+        Self {
+            optimize: true,
+            orphan_delegation: true,
+            compat_models: Vec::new(),
+        }
     }
 }
 
@@ -729,8 +737,6 @@ pub struct CodexLocalAccessCollection {
     pub account_concurrency_wait_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bound_oauth_account_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bound_oauth_quota_reserve: Option<CodexLocalAccessQuotaReserve>,
     pub account_ids: Vec<String>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -876,6 +882,11 @@ pub struct CodexLocalAccessProxyRoute {
 pub struct CodexLocalAccessUsageEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authorization_route: Option<String>,
+    /// Derived from recorded attempts when reading a page; never inferred from today's mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_fallback: Option<CodexLocalAccessAuthorizationFallbackTrace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier_adaptation: Option<CodexLocalAccessServiceTierAdaptation>,
     #[serde(default)]
     pub timestamp: i64,
     #[serde(default)]
@@ -1048,9 +1059,41 @@ pub struct CodexLocalAccessCapabilityFallbackTrace {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct CodexLocalAccessAuthorizationFallbackTrace {
+    pub reason: String,
+    #[serde(default)]
+    pub trigger_stage: String,
+    pub from_account_id: String,
+    pub to_account_id: String,
+    pub from_route: String,
+    pub to_route: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexLocalAccessServiceTierAdaptation {
+    pub requested_tier: String,
+    pub sent_tier: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct CodexLocalAccessRequestAttempt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authorization_route: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_fallback: Option<CodexLocalAccessAuthorizationFallbackTrace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier_adaptation: Option<CodexLocalAccessServiceTierAdaptation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_request_id: Option<String>,
     pub sequence: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport_error: Option<String>,
@@ -1207,7 +1250,6 @@ pub struct CodexLocalAccessAccountPoolHealth {
     pub available_auths: usize,
     pub unavailable_auths: usize,
     pub model_excluded_auths: usize,
-    pub quota_reserved_auths: usize,
     pub image_policy_blocked_auths: usize,
     #[serde(default)]
     pub account_statuses: Vec<CodexLocalAccessAccountPoolMemberHealth>,
@@ -1281,7 +1323,6 @@ pub struct CodexLocalAccessState {
     /// 避免恢复过程中仍在飞行的旧请求失败状态立刻把行重新点亮。
     #[serde(default)]
     pub recovery_suppressed_account_ids: Vec<String>,
-    pub quota_reserve_status: Option<CodexLocalAccessQuotaReserveStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1307,23 +1348,6 @@ pub struct CodexLocalAccessAppendAccountsResult {
     pub synced_account_ids: Vec<String>,
     pub added_account_ids: Vec<String>,
     pub skipped_accounts: Vec<CodexLocalAccessAppendAccountSkipped>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CodexLocalAccessQuotaReserveStatus {
-    pub account_id: String,
-    pub snapshot_updated_at: Option<i64>,
-    pub snapshot_fresh: bool,
-    pub blocked: bool,
-    pub warning: bool,
-    pub effective_window: Option<String>,
-    pub effective_remaining_percent: Option<f64>,
-    pub effective_reserve_percent: Option<i32>,
-    pub strict: bool,
-    pub safety_margin_percent: i32,
-    pub in_flight: usize,
-    pub awaiting_confirmation: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1409,21 +1433,20 @@ mod automatic_policy_tests {
         let multi: CodexLocalAccessMultiAgentConfig = serde_json::from_value(json!({
             "optimize": false, "orphanDelegation": false,
             "compatModels": [{"accountId":"legacy", "model":"legacy-model"}]
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(multi.optimize && multi.orphan_delegation);
         assert!(multi.compat_models.is_empty());
-        assert!(serde_json::to_value(&multi).unwrap().get("compatModels").is_none());
+        assert!(serde_json::to_value(&multi)
+            .unwrap()
+            .get("compatModels")
+            .is_none());
 
         let fallback: CodexLocalAccessCapabilityFallbackConfig = serde_json::from_value(json!({
             "enabled": false, "accountIds": [], "overrides": []
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(fallback.enabled);
         assert!(CodexLocalAccessCapabilityFallbackConfig::default().enabled);
-
-        let reserve: CodexLocalAccessQuotaReserve = serde_json::from_value(json!({
-            "hourlyPercent":20, "weeklyPercent":10, "strict":false
-        })).unwrap();
-        assert!(reserve.strict);
-        assert_eq!(reserve.safety_margin_percent, default_quota_safety_margin());
     }
 }

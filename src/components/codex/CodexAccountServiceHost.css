@@ -91,18 +91,11 @@
   .codex-official-confirm .codex-official-release-options { grid-template-columns: 1fr; }
 }
 
-.codex-official-reminder-preference { min-width: 0; text-align: start; }
-.codex-official-reminder-preference label { display: inline-flex; align-items: center; gap: 8px; color: var(--text-primary); font-size: 13px; cursor: pointer; }
-.codex-official-reminder-preference input { flex: 0 0 16px; appearance: none; width: 16px; height: 16px; margin: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-surface); display: grid; place-content: center; cursor: pointer; }
-.codex-official-reminder-preference input:checked { border-color: var(--primary); background: var(--primary); }
-.codex-official-reminder-preference input:checked::after { content: ''; width: 7px; height: 4px; border-left: 2px solid white; border-bottom: 2px solid white; transform: translateY(-1px) rotate(-45deg); }
-.codex-official-reminder-preference input:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
-.codex-official-reminder-preference p { margin: 4px 0 0; padding-inline-start: 24px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 
-/* Two-line reminder copy must never stretch the footer buttons. */
+/* Keep explicit management actions visible at narrow viewport sizes. */
 .modal.codex-official-guide > .codex-official-guide-footer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 16px 24px;
   padding: 14px 24px;
@@ -115,7 +108,6 @@
   flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
-  grid-column: 2;
 }
 .codex-official-guide-footer-actions > .btn {
   appearance: none;
@@ -139,7 +131,6 @@
 .codex-official-guide-footer-actions > .btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; transform: none; }
 @media (max-width: 600px) {
   .modal.codex-official-guide > .codex-official-guide-footer { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; gap: 12px; }
-  .codex-official-guide-footer-actions { grid-column: 1; }
 }
 @media (max-height: 600px) {
   .modal.codex-official-guide > .codex-official-guide-footer { padding-block: 10px; }

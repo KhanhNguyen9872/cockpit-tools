@@ -2039,6 +2039,20 @@ fn write_local_access_realtime_sideband_override(
     collection: &CodexLocalAccessCollection,
     api_key: &str,
 ) -> Result<(), String> {
+    write_local_access_realtime_sideband_override_with_ownership(
+        profile_dir,
+        collection,
+        api_key,
+        None,
+    )
+}
+
+fn write_local_access_realtime_sideband_override_with_ownership(
+    profile_dir: &Path,
+    collection: &CodexLocalAccessCollection,
+    api_key: &str,
+    managed_realtime_sideband: Option<&str>,
+) -> Result<(), String> {
     if !profile_api_key_uses_oauth_realtime(collection, api_key) {
         return Ok(());
     }
@@ -2050,7 +2064,12 @@ fn write_local_access_realtime_sideband_override(
     // WebRTC sideband ignores model provider.base_url by default but reuses its
     // bearer. Keep call creation and sideband on the same gateway/account.
     // Explicit user overrides for call creation or sideband are outside Cockpit's ownership.
-    if doc.get("experimental_realtime_ws_base_url").is_some()
+    let sideband_is_still_owned = managed_realtime_sideband.is_some_and(|managed| {
+        doc.get("experimental_realtime_ws_base_url")
+            .and_then(|item| item.as_str())
+            .is_some_and(|current| current.trim_end_matches('/') == managed.trim_end_matches('/'))
+    });
+    if (doc.get("experimental_realtime_ws_base_url").is_some() && !sideband_is_still_owned)
         || doc
             .get("experimental_realtime_webrtc_call_base_url")
             .is_some()
@@ -2086,8 +2105,28 @@ async fn write_local_access_profile_takeover(
         bound_oauth_account_id,
         supports_websockets,
     );
+    // Capture ownership before the account writer replaces provider.base_url;
+    // comparing afterward mistakes our previous port for an explicit user URL.
+    let previous_config = read_optional_profile_file(&profile_config_path(profile_dir))?
+        .as_deref()
+        .map(crate::modules::codex_config_format::read_codex_config_doc_from_str)
+        .transpose()?;
+    let mut managed_realtime_sideband = None;
+    if let Some(doc) = previous_config.as_ref() {
+        if profile_has_managed_realtime_sideband(profile_dir, doc)? {
+            managed_realtime_sideband = doc
+                .get("experimental_realtime_ws_base_url")
+                .and_then(|item| item.as_str())
+                .map(str::to_owned);
+        }
+    }
     codex_account::write_account_bundle_to_dir(profile_dir, &runtime_account)?;
-    write_local_access_realtime_sideband_override(profile_dir, collection, &runtime_api_key)?;
+    write_local_access_realtime_sideband_override_with_ownership(
+        profile_dir,
+        collection,
+        &runtime_api_key,
+        managed_realtime_sideband.as_deref(),
+    )?;
     let definitions = local_access_profile_model_definitions(
         profile_dir,
         collection,
@@ -2097,8 +2136,12 @@ async fn write_local_access_profile_takeover(
     write_local_access_profile_model_catalog(profile_dir, supports_websockets, &definitions)?;
     if include_account_pool_models {
         native_sync_profile_catalog_tool_capabilities(
-            profile_dir, collection, &runtime_api_key, &[],
-        ).await?;
+            profile_dir,
+            collection,
+            &runtime_api_key,
+            &[],
+        )
+        .await?;
         // API 服务接管：客户端「可用推理强度」默认不含 max，而账号模型（例如 DeepSeek）
         // 只声明 low/high/max；这里补齐最高档，保证选择器里的档位与 DeepSeek 网关模式一致。
         ensure_profile_max_reasoning_effort(profile_dir)?;
@@ -2362,10 +2405,19 @@ fn local_access_profile_takeover_needs_sync(
         || !profile_model_catalog_websocket_preference_matches(profile_dir, catalog_file, expected)
         || (profile_api_key_uses_oauth_realtime(collection, &collection.api_key)
             && config_doc.as_ref().is_some_and(|doc| {
-                doc.get("experimental_realtime_ws_base_url").is_none()
-                    && doc
-                        .get("experimental_realtime_webrtc_call_base_url")
-                        .is_none()
+                doc.get("experimental_realtime_webrtc_call_base_url")
+                    .is_none()
+                    && (doc.get("experimental_realtime_ws_base_url").is_none()
+                        || (profile_has_managed_realtime_sideband(profile_dir, doc)
+                            .unwrap_or(false)
+                            && doc
+                                .get("experimental_realtime_ws_base_url")
+                                .and_then(|item| item.as_str())
+                                .is_some_and(|current| {
+                                    current.trim_end_matches('/')
+                                        != build_collection_base_url(collection)
+                                            .trim_end_matches('/')
+                                })))
             }))
 }
 

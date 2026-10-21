@@ -721,8 +721,7 @@
         append_eligible_local_access_account_ids, append_usage_event,
         apply_account_usage_priority_ids, apply_codex_image_model_visibility,
         apply_codex_official_headers, apply_routing_strategy,
-        backup_current_profile_model_before_provider_gateway, bound_oauth_quota_refresh_failures,
-        bound_oauth_quota_reserve_blocks_account, bridge_websocket_streams,
+        backup_current_profile_model_before_provider_gateway, bridge_websocket_streams,
         build_account_scoped_upstream_body, build_base_url_with_host,
         build_chat_completion_payload, build_chat_completion_stream_body,
         build_codex_client_models_response, build_collection_base_url, build_images_api_payload,
@@ -736,7 +735,6 @@
         collect_local_access_profile_takeover_dirs_from_store, compare_routing_candidates,
         count_request_logs_for_model_ids, default_codex_model_ids, effective_api_key_account_ids,
         empty_stats_snapshot, extract_usage_capture,
-        filter_bound_oauth_quota_reserve_account,
         filter_websocket_client_message, insert_local_access_usage_event,
         load_stats_windows_and_recent_events_from_conn,
         inspect_local_access_profile_attachment, inspect_local_access_profile_config,
@@ -784,7 +782,7 @@
         sidecar_codex_key_config_value, sidecar_config_fingerprint,
         sidecar_config_fingerprint_with_account_proxies, account_proxy_fingerprint,
         sidecar_local_account_usable_for_start, sidecar_payload_default_service_tier,
-        sidecar_quota_reserve_snapshot_value, sidecar_routing_strategy_value, sidecar_stable_id,
+        sidecar_routing_strategy_value, sidecar_stable_id,
         sidecar_usage_event_is_client_canceled, sidecar_usage_event_should_auto_restart,
         now_ms, stats_snapshot_without_events, supported_codex_model_ids,
         sync_provider_gateway_runtime_auth_file,
@@ -802,7 +800,7 @@
         CodexLocalAccessScope, CodexModelProviderGatewayChatTestRequest, GatewayResponseAdapter,
         ParsedRequest, ResolvedLocalApiKey, ResponseUsageCollector, RoutingCandidate,
         SidecarUsageDetails, SidecarUsageEvent, UsageCapture,
-        BOUND_OAUTH_QUOTA_RESERVE_MAX_SNAPSHOT_AGE_SECONDS, CODEX_AUTO_REVIEW_MODEL_ID,
+        CODEX_AUTO_REVIEW_MODEL_ID,
         CODEX_GPT_RESERVE_MODEL_ID,
         CODEX_IMAGEGEN_ACTOR_HEADER, CODEX_IMAGE_MODEL_ID,
         DEFAULT_CODEX_IMAGE_GENERATION_MODEL,
@@ -831,7 +829,7 @@
         CodexLocalAccessApiKey, CodexLocalAccessClientBaseUrlHost,
         CodexLocalAccessCustomRoutingRule, CodexLocalAccessImageGenerationMode,
         CodexLocalAccessModelRoute, CodexLocalAccessModelRouting,
-        CodexLocalAccessProviderGateway, CodexLocalAccessQuotaReserve, CodexLocalAccessRequestKind,
+        CodexLocalAccessProviderGateway, CodexLocalAccessRequestKind,
         CodexLocalAccessRoutingStrategy, CodexLocalAccessStats, CodexLocalAccessStatsWindow,
         CodexLocalAccessTimeouts, CodexLocalAccessUsageEvent, CodexTokenBreakdown,
     };
@@ -1142,7 +1140,7 @@
             account_concurrency_default_migrated: true,
             account_concurrency_wait_ms: DEFAULT_ACCOUNT_CONCURRENCY_WAIT_MS,
             bound_oauth_account_id: None,
-            bound_oauth_quota_reserve: None,
+
             account_ids,
             created_at: 0,
             updated_at: 0,
@@ -2673,11 +2671,6 @@ http_headers = { "x-cockpit-instance-id" = "default" }
             excluded_models: vec!["gpt-5.4-mini".to_string()],
         }];
         collection.bound_oauth_account_id = Some("account-b".to_string());
-        collection.bound_oauth_quota_reserve = Some(CodexLocalAccessQuotaReserve {
-            hourly_percent: 20,
-            weekly_percent: 30,
-            strict: false, safety_margin_percent: 3,
-});
 
         let changed = remove_account_refs_from_collection(
             &mut collection,
@@ -2694,7 +2687,6 @@ http_headers = { "x-cockpit-instance-id" = "default" }
         assert_eq!(collection.custom_routing_rules[0].account_id, "account-c");
         assert!(collection.account_model_rules.is_empty());
         assert!(collection.bound_oauth_account_id.is_none());
-        assert!(collection.bound_oauth_quota_reserve.is_none());
     }
 
     #[test]
@@ -3016,271 +3008,10 @@ http_headers = { "x-cockpit-instance-id" = "default" }
         );
     }
 
-    #[test]
-    fn sidecar_fingerprint_ignores_dynamic_quota_snapshot_changes() {
-        let config = r#"{"host":"127.0.0.1","port":58393}"#;
-        let manifest_available_high = r#"{
-          "accounts": [{
-            "id": "account-a",
-            "quotaReserve": {
-              "hourlyThresholdPercent": 10,
-              "weeklyThresholdPercent": 20,
-              "snapshotUpdatedAtUnixSeconds": 100,
-              "hourlyRemainingPercent": 50,
-              "weeklyRemainingPercent": 60,
-              "hourlyWindowPresent": true,
-              "weeklyWindowPresent": true
-            }
-          }]
-        }"#;
-        let manifest_available_low = r#"{
-          "accounts": [{
-            "id": "account-a",
-            "quotaReserve": {
-              "hourlyThresholdPercent": 10,
-              "weeklyThresholdPercent": 20,
-              "snapshotUpdatedAtUnixSeconds": 100,
-              "hourlyRemainingPercent": 11,
-              "weeklyRemainingPercent": 21,
-              "hourlyWindowPresent": true,
-              "weeklyWindowPresent": true
-            }
-          }]
-        }"#;
-        let manifest_new_snapshot = r#"{
-          "accounts": [{
-            "id": "account-a",
-            "quotaReserve": {
-              "hourlyThresholdPercent": 10,
-              "weeklyThresholdPercent": 20,
-              "snapshotUpdatedAtUnixSeconds": 200,
-              "hourlyRemainingPercent": 11,
-              "weeklyRemainingPercent": 21,
-              "hourlyWindowPresent": true,
-              "weeklyWindowPresent": true
-            }
-          }]
-        }"#;
-        let manifest_blocked = r#"{
-          "accounts": [{
-            "id": "account-a",
-            "quotaReserve": {
-              "hourlyThresholdPercent": 10,
-              "weeklyThresholdPercent": 20,
-              "snapshotUpdatedAtUnixSeconds": 100,
-              "hourlyRemainingPercent": 10,
-              "weeklyRemainingPercent": 21,
-              "hourlyWindowPresent": true,
-              "weeklyWindowPresent": true
-            }
-          }]
-        }"#;
-        let manifest_threshold_changed = r#"{
-          "accounts": [{
-            "id": "account-a",
-            "quotaReserve": {
-              "hourlyThresholdPercent": 15,
-              "weeklyThresholdPercent": 20,
-              "snapshotUpdatedAtUnixSeconds": 100,
-              "hourlyRemainingPercent": 50,
-              "weeklyRemainingPercent": 60,
-              "hourlyWindowPresent": true,
-              "weeklyWindowPresent": true
-            }
-          }]
-        }"#;
 
-        assert_eq!(
-            sidecar_config_fingerprint(config, manifest_available_high),
-            sidecar_config_fingerprint(config, manifest_available_low)
-        );
-        assert_eq!(
-            sidecar_config_fingerprint(config, manifest_available_low),
-            sidecar_config_fingerprint(config, manifest_new_snapshot)
-        );
-        assert_eq!(
-            sidecar_config_fingerprint(config, manifest_available_low),
-            sidecar_config_fingerprint(config, manifest_blocked)
-        );
-        assert_ne!(
-            sidecar_config_fingerprint(config, manifest_available_high),
-            sidecar_config_fingerprint(config, manifest_threshold_changed)
-        );
-    }
 
-    #[test]
-    fn bound_oauth_quota_reserve_blocks_at_threshold_and_fails_closed() {
-        let reserve = CodexLocalAccessQuotaReserve {
-            hourly_percent: 20,
-            weekly_percent: 10,
-            strict: false, safety_margin_percent: 3,
-};
-        let blocked =
-            test_oauth_account_with_quota("account-bound", 20, 90, Some(true), Some(true));
-        assert!(bound_oauth_quota_reserve_blocks_account(
-            &reserve,
-            Some(&blocked)
-        ));
 
-        let available =
-            test_oauth_account_with_quota("reserve-confirmed-bound", 24, 14, Some(true), Some(true));
-        {
-            super::quota_reserve_coordinator().lock().unwrap().accounts.entry(available.id.clone()).or_default();
-        }
-        super::confirm_gateway_quota_refresh(&available.id, available.quota.as_ref().unwrap(), std::time::Instant::now());
-        assert!(!bound_oauth_quota_reserve_blocks_account(&reserve, Some(&available)));
 
-        let ignored_hourly =
-            test_oauth_account_with_quota("reserve-confirmed-bound", 0, 14, Some(false), Some(true));
-        super::confirm_gateway_quota_refresh(&ignored_hourly.id, ignored_hourly.quota.as_ref().unwrap(), std::time::Instant::now());
-        assert!(!bound_oauth_quota_reserve_blocks_account(&reserve, Some(&ignored_hourly)));
-        assert!(bound_oauth_quota_reserve_blocks_account(&reserve, None));
-
-        let mut quota_error = available;
-        quota_error.quota_error = Some(CodexQuotaErrorInfo {
-            code: Some("quota_refresh_failed".to_string()),
-            message: "refresh failed".to_string(),
-            timestamp: 1,
-        });
-        assert!(bound_oauth_quota_reserve_blocks_account(
-            &reserve,
-            Some(&quota_error)
-        ));
-
-        let mut stale =
-            test_oauth_account_with_quota("account-stale", 80, 80, Some(true), Some(true));
-        stale.usage_updated_at = Some(
-            chrono::Utc::now().timestamp() - BOUND_OAUTH_QUOTA_RESERVE_MAX_SNAPSHOT_AGE_SECONDS - 1,
-        );
-        assert!(bound_oauth_quota_reserve_blocks_account(
-            &reserve,
-            Some(&stale)
-        ));
-
-        let mut missing_timestamp =
-            test_oauth_account_with_quota("account-missing", 80, 80, Some(true), Some(true));
-        missing_timestamp.usage_updated_at = None;
-        assert!(bound_oauth_quota_reserve_blocks_account(
-            &reserve,
-            Some(&missing_timestamp)
-        ));
-
-        let mut future_timestamp =
-            test_oauth_account_with_quota("account-future", 80, 80, Some(true), Some(true));
-        future_timestamp.usage_updated_at = Some(chrono::Utc::now().timestamp() + 60);
-        assert!(bound_oauth_quota_reserve_blocks_account(
-            &reserve,
-            Some(&future_timestamp)
-        ));
-
-        let transient =
-            test_oauth_account_with_quota("account-transient", 80, 80, Some(true), Some(true));
-        bound_oauth_quota_refresh_failures()
-            .lock()
-            .unwrap()
-            .insert(transient.id.clone());
-        assert!(bound_oauth_quota_reserve_blocks_account(
-            &reserve,
-            Some(&transient)
-        ));
-        bound_oauth_quota_refresh_failures()
-            .lock()
-            .unwrap()
-            .remove(&transient.id);
-    }
-
-    #[test]
-    fn bound_oauth_quota_reserve_filters_only_the_bound_account() {
-        let reserve = CodexLocalAccessQuotaReserve {
-            hourly_percent: 20,
-            weekly_percent: 10,
-            strict: false, safety_margin_percent: 3,
-};
-        let blocked =
-            test_oauth_account_with_quota("account-bound", 20, 90, Some(true), Some(true));
-        let scoped = vec!["account-bound".to_string(), "account-other".to_string()];
-
-        assert_eq!(
-            filter_bound_oauth_quota_reserve_account(
-                scoped,
-                "account-bound",
-                &reserve,
-                Some(&blocked),
-            ),
-            vec!["account-other"]
-        );
-    }
-
-    #[test]
-    fn sidecar_manifest_keeps_thresholds_and_snapshot_state_is_separate() {
-        let mut collection = test_local_access_collection(vec!["account-bound".to_string()]);
-        collection.bound_oauth_account_id = Some("account-bound".to_string());
-        collection.bound_oauth_quota_reserve = Some(CodexLocalAccessQuotaReserve {
-            hourly_percent: 20,
-            weekly_percent: 10,
-            strict: false, safety_margin_percent: 3,
-});
-        let account =
-            test_oauth_account_with_quota("account-bound", 75, 40, Some(true), Some(false));
-
-        let manifest = sidecar_account_manifest_value(&account, Some("auth.json"), &collection);
-        let reserve = manifest
-            .get("quotaReserve")
-            .expect("quota reserve should exist");
-        assert_eq!(reserve["hourlyThresholdPercent"], json!(23));
-        assert_eq!(reserve["weeklyThresholdPercent"], json!(13));
-        assert!(reserve.get("snapshotUpdatedAtUnixSeconds").is_none());
-        assert!(reserve.get("hourlyRemainingPercent").is_none());
-
-        let snapshot = sidecar_quota_reserve_snapshot_value(&collection, &account)
-            .expect("quota reserve snapshot should exist");
-        assert_eq!(
-            snapshot["snapshotUpdatedAtUnixSeconds"],
-            json!(account.usage_updated_at)
-        );
-        assert_eq!(snapshot["hourlyRemainingPercent"], json!(75));
-        assert_eq!(snapshot["weeklyRemainingPercent"], json!(40));
-        assert_eq!(snapshot["hourlyWindowPresent"], json!(true));
-        assert_eq!(snapshot["weeklyWindowPresent"], json!(false));
-    }
-
-    #[test]
-    fn sidecar_fingerprint_ignores_all_dynamic_reserve_states() {
-        let config = r#"{"host":"127.0.0.1","port":58393}"#;
-        let manifest = |remaining: Value| {
-            json!({
-                "accounts": [{
-                    "id": "account-a",
-                    "quotaReserve": {
-                        "hourlyThresholdPercent": 20,
-                        "weeklyThresholdPercent": 10,
-                        "hourlyRemainingPercent": remaining,
-                        "weeklyRemainingPercent": 80,
-                        "hourlyWindowPresent": true,
-                        "weeklyWindowPresent": true
-                    }
-                }]
-            })
-            .to_string()
-        };
-        let available_80 = manifest(json!(80));
-        let available_70 = manifest(json!(70));
-        let blocked_20 = manifest(json!(20));
-        let unknown = manifest(Value::Null);
-
-        assert_eq!(
-            sidecar_config_fingerprint(config, &available_80),
-            sidecar_config_fingerprint(config, &available_70)
-        );
-        assert_eq!(
-            sidecar_config_fingerprint(config, &available_70),
-            sidecar_config_fingerprint(config, &blocked_20)
-        );
-        assert_eq!(
-            sidecar_config_fingerprint(config, &blocked_20),
-            sidecar_config_fingerprint(config, &unknown)
-        );
-    }
 
     #[test]
     fn account_model_rules_block_matching_model_only() {

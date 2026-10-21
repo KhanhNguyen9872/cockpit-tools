@@ -38,6 +38,15 @@ impl NativeHostBridge {
         &self,
         route: &native_contract::Route,
     ) -> Result<Option<CodexAccount>, native_contract::ServiceError> {
+        if route.official_fallback_registration_id.is_some()
+            && !self.selected_route_current(route).await
+        {
+            return Err(native_error(
+                409,
+                "account_binding_unavailable",
+                "Local fallback authorization changed",
+            ));
+        }
         if let Some(registration) = route
             .official_registration_id
             .as_ref()

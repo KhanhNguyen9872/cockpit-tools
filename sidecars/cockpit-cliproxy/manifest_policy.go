@@ -54,7 +54,6 @@ const ginUserAPIKeyKey = "userApiKey"
 const ginResponsesWebsocketDisabledKey = "cockpitResponsesWebsocketDisabled"
 
 const defaultStreamKeepAliveSeconds = 15
-const quotaReserveMaxSnapshotAge = 3 * time.Minute
 const codexAutoReviewModel = "codex-auto-review"
 const codexReserveModel = "gpt-reserve"
 const defaultImagesMainModel = "gpt-5.6-luna"
@@ -403,41 +402,8 @@ type accountSpec struct {
 	SubscriptionExpiryMS    *int64                `json:"subscriptionExpiryMs,omitempty"`
 	GPTReserveAllowed       bool                  `json:"gptReserveAllowed,omitempty"`
 	ImageGenerationPolicy   string                `json:"imageGenerationPolicy,omitempty"`
-	QuotaReserve            *quotaReserveSpec     `json:"quotaReserve,omitempty"`
-	ModelContextWindows     map[string]int64      `json:"modelContextWindows,omitempty"`
-}
 
-type quotaReserveSpec struct {
-	SnapshotVerifiedQueryStartedAtUnixMillis *int64 `json:"snapshotVerifiedQueryStartedAtUnixMillis,omitempty"`
-	HourlyThresholdPercent                   *int   `json:"hourlyThresholdPercent,omitempty"`
-	WeeklyThresholdPercent                   *int   `json:"weeklyThresholdPercent,omitempty"`
-	SnapshotUpdatedAtUnixSeconds             *int64 `json:"snapshotUpdatedAtUnixSeconds,omitempty"`
-	HourlyRemainingPercent                   *int   `json:"hourlyRemainingPercent,omitempty"`
-	WeeklyRemainingPercent                   *int   `json:"weeklyRemainingPercent,omitempty"`
-	HourlyWindowPresent                      *bool  `json:"hourlyWindowPresent,omitempty"`
-	WeeklyWindowPresent                      *bool  `json:"weeklyWindowPresent,omitempty"`
-}
-
-type quotaReserveSnapshot struct {
-	SnapshotVerifiedQueryStartedAtUnixMillis *int64 `json:"snapshotVerifiedQueryStartedAtUnixMillis,omitempty"`
-	SnapshotUpdatedAtUnixSeconds             *int64 `json:"snapshotUpdatedAtUnixSeconds,omitempty"`
-	HourlyRemainingPercent                   *int   `json:"hourlyRemainingPercent,omitempty"`
-	WeeklyRemainingPercent                   *int   `json:"weeklyRemainingPercent,omitempty"`
-	HourlyWindowPresent                      *bool  `json:"hourlyWindowPresent,omitempty"`
-	WeeklyWindowPresent                      *bool  `json:"weeklyWindowPresent,omitempty"`
-}
-
-type quotaReserveStateFile struct {
-	Accounts map[string]quotaReserveSnapshot `json:"accounts"`
-}
-
-type quotaReserveStateStore struct {
-	admission *quotaProtectionCoordinator
-	path      string
-	snapshot  atomic.Value
-	mu        sync.Mutex
-	lastHash  [sha256.Size]byte
-	hasHash   bool
+	ModelContextWindows map[string]int64 `json:"modelContextWindows,omitempty"`
 }
 
 type modelAliasSpec struct {
@@ -491,27 +457,27 @@ type usagePayload struct {
 }
 
 type requestDiagnosticPayload struct {
-	Type                    string                     `json:"type"`
-	RequestID               string                     `json:"requestId,omitempty"`
-	Method                  string                     `json:"method,omitempty"`
-	Path                    string                     `json:"path,omitempty"`
-	RequestKind             string                     `json:"requestKind,omitempty"`
-	Model                   string                     `json:"model,omitempty"`
-	APIKeyID                string                     `json:"apiKeyId,omitempty"`
-	APIKeyLabel             string                     `json:"apiKeyLabel,omitempty"`
-	Transport               string                     `json:"transport,omitempty"`
-	Status                  int                        `json:"status,omitempty"`
-	LatencyMS               int64                      `json:"latencyMs,omitempty"`
-	StartedAtMS             int64                      `json:"startedAtMs,omitempty"`
-	CompletedAtMS           int64                      `json:"completedAtMs,omitempty"`
-	Aborted                 bool                       `json:"aborted,omitempty"`
-	ErrorMessage            string                     `json:"errorMessage,omitempty"`
-	CandidateAuths          int                        `json:"candidateAuths,omitempty"`
-	ScopedAuths             int                        `json:"scopedAuths,omitempty"`
-	AvailableAuths          int                        `json:"availableAuths,omitempty"`
-	UnavailableAuths        int                        `json:"unavailableAuths,omitempty"`
-	ModelExcludedAuths      int                        `json:"modelExcludedAuths,omitempty"`
-	QuotaReservedAuths      int                        `json:"quotaReservedAuths,omitempty"`
+	Type               string `json:"type"`
+	RequestID          string `json:"requestId,omitempty"`
+	Method             string `json:"method,omitempty"`
+	Path               string `json:"path,omitempty"`
+	RequestKind        string `json:"requestKind,omitempty"`
+	Model              string `json:"model,omitempty"`
+	APIKeyID           string `json:"apiKeyId,omitempty"`
+	APIKeyLabel        string `json:"apiKeyLabel,omitempty"`
+	Transport          string `json:"transport,omitempty"`
+	Status             int    `json:"status,omitempty"`
+	LatencyMS          int64  `json:"latencyMs,omitempty"`
+	StartedAtMS        int64  `json:"startedAtMs,omitempty"`
+	CompletedAtMS      int64  `json:"completedAtMs,omitempty"`
+	Aborted            bool   `json:"aborted,omitempty"`
+	ErrorMessage       string `json:"errorMessage,omitempty"`
+	CandidateAuths     int    `json:"candidateAuths,omitempty"`
+	ScopedAuths        int    `json:"scopedAuths,omitempty"`
+	AvailableAuths     int    `json:"availableAuths,omitempty"`
+	UnavailableAuths   int    `json:"unavailableAuths,omitempty"`
+	ModelExcludedAuths int    `json:"modelExcludedAuths,omitempty"`
+
 	ImagePolicyBlockedAuths int                        `json:"imagePolicyBlockedAuths,omitempty"`
 	RoutingStrategy         string                     `json:"routingStrategy,omitempty"`
 	Provider                string                     `json:"provider,omitempty"`
@@ -603,9 +569,6 @@ type selectedAccountRecord struct {
 }
 
 type requestUsageTracker struct {
-	quotaManifest    *manifest
-	quotaState       *quotaReserveStateStore
-	quotaAdmission   *quotaProtectionCoordinator
 	mu               sync.Mutex
 	records          map[string][]usagePayload
 	selectedAccounts map[string]selectedAccountRecord
@@ -767,7 +730,6 @@ func (t *requestUsageTracker) releaseAccountSlots(requestID string) {
 	if t == nil {
 		return
 	}
-	defer t.releaseQuotaProtection(requestID)
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
 		return

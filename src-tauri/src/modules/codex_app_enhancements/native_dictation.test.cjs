@@ -4,7 +4,6 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { test } = require('node:test');
 
-const script = fs.readFileSync(path.join(__dirname, 'native_dictation.js'), 'utf8');
 const moduleUrl = 'app://-/assets/app-initial-fixture.js';
 const fixture = `
 var kKt=Y(U,({get:e})=>{if(!navigator?.mediaDevices?.getUserMedia||typeof MediaRecorder>\`u\`)return{isLoading:!1,isError:!1,isCapable:!1};let t=e(ig,\`4100906017\`),n=e(rg,\`4100906017\`),{authLoading:r,authMethod:i}=e(Ag),a=r||t;return{isLoading:a,isError:!1,isCapable:!a&&n&&i===\`chatgpt\`}});
@@ -30,13 +29,14 @@ let Ee={current:null};return {streaming:e.streamingEnabled,record(){Ee.current=M
 let c=Ee.current!=null&&(Oq()||Ee.current.chatgpt!=null)?Ee.current:Me();
 if(c.chatgpt!=null)return XLo(n,{signal:i.abortController.signal,language:i.language});
 return YLo(n,{signal:i.abortController.signal,language:i.language})}};}
+function f6u(e,t,n){if(t===\`transcription\`){return {message:'native transcription failure',canRetry:true}}return {message:'native start failure',canRetry:false}}
 async function YLo(e,t={}){nativeCalls.push({blob:e,options:t,kind:'local'});return {text:'native local'};}
 async function XLo(e,t){nativeCalls.push({blob:e,options:t,kind:'chatgpt'});return {text:'native chatgpt'};}
 `;
 
-function load({ enabled = true, ready = true, apiKeyAuthVerified = false } = {}) {
+function load({ apiService = true, nativeFast = true, quotaCompat = true } = {}) {
   const calls = [], nativeCalls = [];
-  const policy = { authMethod: 'apiKey', authLoading: false, rollout: true, rolloutLoading: false,
+  const policy = { authMethod: 'chatgpt', authLoading: false, rollout: true, rolloutLoading: false,
     workspaceRollout: true, workspaceRolloutLoading: false,
     workspace: { isLoading: false, isError: false, isCapable: true },
     configFeatures: { isLoading: false, isError: false, data: [{ name: 'in_app_dictation', enabled: true }] },
@@ -44,10 +44,10 @@ function load({ enabled = true, ready = true, apiKeyAuthVerified = false } = {})
   const ig = {}, rg = {}, Ag = {}, Jh = {};
   const sandbox = {
     module: { exports: {} }, URL, DOMException, Reflect, Object,
-    __cockpitEnhancements: { apiDictation: enabled, apiKeyAuthVerified },
+    __cockpitEnhancements: { apiService, nativeFast, quotaCompat },
     __cockpitApiDictation: {
-      ready, session: 'session-1',
-      async transcribe(blob, options) { calls.push({ blob, options }); return { text: 'API transcript' }; },
+      ready: true, session: 'session-1',
+      async transcribe(blob, options) { calls.push({ blob, options }); throw new Error('removed API transcription bridge must never execute'); },
     },
     nativeCalls, U: {}, ig, rg, Ag, Jh, Ls: 'local', policy,
     navigator: { mediaDevices: { getUserMedia() {} } }, MediaRecorder: class {},
@@ -71,16 +71,30 @@ function load({ enabled = true, ready = true, apiKeyAuthVerified = false } = {})
   sandbox.window = sandbox;
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  vm.runInContext(script, sandbox);
-  return { sandbox, api: sandbox.module.exports, calls, nativeCalls, policy };
+  for (const name of ['fast.js', 'quota.js']) {
+    vm.runInContext(fs.readFileSync(path.join(__dirname, name), 'utf8'), sandbox);
+  }
+  return { sandbox, api: sandbox.__cockpitNativeFast, calls, nativeCalls, policy };
 }
+
+
+const fastFixtureSource = fs.readFileSync(path.join(__dirname, 'fast.test.cjs'), 'utf8');
+const fastLiteral = fastFixtureSource.match(/const fixture = ([\s\S]*?);\n\nfunction load/);
+assert.ok(fastLiteral, 'exercise the complete Fast structural contracts');
+const fastFixture = vm.runInNewContext(fastLiteral[1]);
+const quotaFixture = require('../../../../tests/helpers/codexNativeQuotaFixture.cjs')();
+const original = fastFixture + fixture + quotaFixture.initial;
 
 function evaluate(options) {
   const result = load(options);
-  const transformed = result.api.transform(fixture, moduleUrl);
-  assert.equal(transformed.ok, true, JSON.stringify(transformed.diagnostics));
-  vm.runInContext(transformed.patchedSource, result.sandbox);
-  return result;
+  const transformed = result.api.prepareLive(original, moduleUrl);
+  if (options?.apiService !== false || options?.nativeFast !== false || options?.quotaCompat !== false) {
+    assert.equal(transformed.ok, true, JSON.stringify(transformed.diagnostics));
+  }
+  // The native initial module exports quota atoms. This VM executes the same
+  // function bodies without its ESM export table; Chromium integration covers ESM.
+  vm.runInContext(transformed.patchedSource.replace(/export\{[^}]+\};/g, ''), result.sandbox);
+  return { ...result, transformed };
 }
 
 function composer(sandbox, host = 'local', chatgpt = null, enabled = true) {
@@ -89,369 +103,137 @@ function composer(sandbox, host = 'local', chatgpt = null, enabled = true) {
     onDictationTranscriptInsert() {} });
 }
 
-test('local API uses the official pipeline with matching non-streaming presentation', async () => {
-  const { sandbox, calls, nativeCalls } = evaluate();
-  const controller = composer(sandbox);
-  assert.equal(controller.capability, true);
-  assert.equal(controller.enabled, true);
-  assert.equal(controller.presentation, false);
-  assert.equal(controller.streaming, false);
-  const handlers = controller.record();
-  assert.equal(typeof handlers.onTranscriptInsert, 'function');
-  const abortController = new AbortController();
-  const blob = new Blob(['test'], { type: 'audio/webm' });
-  assert.equal((await controller.stop(blob, { abortController, language: 'zh' })).text, 'API transcript');
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].blob, blob);
-  assert.equal(calls[0].options.signal, abortController.signal);
-  assert.equal(calls[0].options.language, 'zh');
-  assert.equal(nativeCalls.length, 0);
+for (const apiService of [true, false]) {
+  test(`${apiService ? 'API Service' : 'ordinary OAuth'} retains native dictation entry and local transcription`, async () => {
+    const { sandbox, calls, nativeCalls } = evaluate({ apiService });
+    const control = composer(sandbox);
+    assert.equal(control.capability, true);
+    assert.equal(control.enabled, true);
+    assert.equal(control.presentation, true);
+    assert.equal(control.streaming, true);
+    control.record();
+    const blob = new Blob(['recorded audio']), signal = new AbortController().signal;
+    assert.equal((await control.stop(blob, { abortController: { signal }, language: 'zh' })).text, 'native local');
+    assert.equal(nativeCalls.length, 1);
+    assert.equal(nativeCalls[0].kind, 'local');
+    assert.equal(nativeCalls[0].blob, blob);
+    assert.equal(nativeCalls[0].options.signal, signal);
+    assert.equal(nativeCalls[0].options.language, 'zh');
+    assert.equal(calls.length, 0);
+    assert.equal(sandbox.__cockpitNativeDictation, undefined);
+  });
+
+  test(`${apiService ? 'API Service' : 'ordinary OAuth'} preserves native remote and ChatGPT transcription`, async () => {
+    const { sandbox, calls, nativeCalls } = evaluate({ apiService });
+    for (const control of [composer(sandbox, 'remote-host'), composer(sandbox, 'local', {})]) {
+      assert.equal(control.capability, true);
+      assert.equal(control.enabled, true);
+      control.record();
+      await control.stop(new Blob(['audio']), { abortController: new AbortController() });
+    }
+    assert.deepEqual(nativeCalls.map(call => call.kind), ['local', 'chatgpt']);
+    assert.equal(calls.length, 0);
+  });
+
+  test(`${apiService ? 'API Service' : 'ordinary OAuth'} pure API credentials retain native capability denial`, () => {
+    const { sandbox, policy, calls, nativeCalls } = evaluate({ apiService });
+    policy.authMethod = 'apiKey';
+    assert.equal(composer(sandbox).capability, false);
+    assert.equal(composer(sandbox).enabled, false);
+    assert.equal(calls.length, 0);
+    assert.equal(nativeCalls.length, 0);
+  });
+}
+
+test('Fast and quota switches cannot hide or force the native dictation entry', () => {
+  for (const apiService of [true, false]) for (const nativeFast of [true, false]) for (const quotaCompat of [true, false]) {
+    const { sandbox, transformed } = evaluate({ apiService, nativeFast, quotaCompat });
+    assert.equal(composer(sandbox).capability, true);
+    assert.equal(composer(sandbox).enabled, true);
+    const nativeStart = transformed.patchedSource.indexOf('var kKt=');
+    assert.equal(transformed.patchedSource.slice(nativeStart, nativeStart + fixture.trimStart().length), fixture.trimStart());
+    assert.equal(transformed.patchedSource.includes('__cockpitApiDictation'), false);
+    assert.equal(transformed.patchedSource.includes('__cockpitNativeDictation'), false);
+    if (nativeFast) assert.equal((transformed.patchedSource.match(/window\.__cockpitNativeFast\?\.allow\(/g) || []).length, 4);
+    if (quotaCompat || apiService) assert.equal((transformed.patchedSource.match(/globalThis\.__cockpitQuotaCompat\.initialReady=true/g) || []).length, 1);
+  }
+});
+
+test('native rollout, loading, workspace, hardware, configuration and user gates remain authoritative', () => {
+  const mutations = [
+    ({ policy }) => { policy.rollout = false; },
+    ({ policy }) => { policy.rolloutLoading = true; },
+    ({ policy }) => { policy.authLoading = true; },
+    ({ policy }) => { policy.workspace.isCapable = false; },
+    ({ policy }) => { policy.workspace.isLoading = true; },
+    ({ policy }) => { policy.configFeatures.data = [{ name: 'in_app_dictation', enabled: false }]; },
+    ({ policy }) => { policy.settings.isCapable = false; },
+    ({ sandbox }) => { sandbox.navigator.mediaDevices = undefined; },
+    ({ sandbox }) => { sandbox.MediaRecorder = undefined; },
+  ];
+  for (const apiService of [true, false]) for (const mutate of mutations) {
+    const result = evaluate({ apiService });
+    mutate(result);
+    assert.notEqual(composer(result.sandbox).capability, true);
+    assert.equal(composer(result.sandbox).enabled, false);
+    assert.equal(result.calls.length, 0);
+  }
+  const { sandbox } = evaluate();
   assert.equal(composer(sandbox, 'local', null, false).enabled, false);
 });
 
-test('remote, ChatGPT and global dictation preserve their native paths', async () => {
-  const { sandbox, api, calls, nativeCalls } = evaluate();
-  const controllers = [composer(sandbox, 'remote-host'), composer(sandbox, 'local', {}), sandbox.G3u({})];
-  for (const controller of controllers) {
-    controller.record();
-    await controller.stop(new Blob(['test']), { abortController: new AbortController() });
-  }
-  assert.deepEqual(nativeCalls.map(call => call.kind), ['local', 'chatgpt', 'local']);
-  assert.equal(calls.length, 0);
-  assert.equal(controllers[0].capability, false);
-  assert.equal(controllers[0].presentation, true);
-  assert.equal(controllers[0].streaming, true);
-  assert.equal(controllers[1].capability, false);
-  for (const host of [undefined, null, '', 'LOCAL', 'remote-host']) assert.equal(api.allowed(host), false);
-  const args = { name: 'dictation.composer' };
-  assert.equal(api.capabilityArgs(args, 'remote-host', false), args);
-  assert.equal(api.capabilityArgs(args, 'local', true), args);
-});
-
-test('bridge readiness enables capability on the next ordinary native render', () => {
-  const { sandbox, api } = evaluate({ ready: false });
-  assert.equal(api.allowed('local'), false);
-  assert.equal(composer(sandbox).capability, false);
-  sandbox.__cockpitApiDictation.ready = true;
-  assert.equal(composer(sandbox).capability, true);
-  // No hook is inserted to force an update; native render timing is preserved.
-  sandbox.__cockpitEnhancements.apiDictation = false;
-  assert.equal(composer(sandbox).capability, false);
-  assert.equal(composer(sandbox).streaming, true);
-  assert.equal(composer(sandbox).presentation, true);
-});
-
-test('pure API eligibility preserves local disablement, browser support and auth loading', () => {
-  const cases = [
-    [state => { state.policy.settings.isCapable = false; }, false],
-    [state => { state.policy.settings = { isLoading: false, isError: true, isCapable: false }; }, false],
-    [state => { state.policy.settings = { isLoading: true, isError: false, isCapable: false }; }, null],
-    [state => { state.policy.configFeatures.data[0].enabled = false; }, false],
-    [state => { state.policy.configFeatures = { isLoading: true, isError: false }; }, null],
-    [state => { state.policy.configFeatures = { isLoading: false, isError: true }; }, false],
-    [state => { state.sandbox.navigator = {}; }, false],
-    [state => { state.sandbox.MediaRecorder = undefined; }, false],
-    [state => { state.policy.authLoading = true; }, null],
-    [state => { state.policy.authMethod = null; }, false],
-    [state => { state.policy.authMethod = 'personalAccessToken'; }, false],
-  ];
-  for (const [mutate, expected] of cases) {
-    const state = evaluate();
-    mutate(state);
-    assert.equal(composer(state.sandbox).capability, expected);
-    assert.equal(composer(state.sandbox).enabled, false);
-  }
-  for (const authMethod of ['chatgpt', 'apiKey', 'apikey']) {
-    const state = evaluate();
-    state.policy.authMethod = authMethod;
-    assert.equal(composer(state.sandbox).capability, true);
-    state.policy.settings.isCapable = false;
-    assert.equal(composer(state.sandbox).capability, false);
-  }
-});
-
-test('pure API does not depend on ChatGPT rollout or workspace entitlements', () => {
-  for (const authMethod of ['apiKey', 'apikey']) {
-    for (const mutate of [
-      state => { state.policy.rollout = false; },
-      state => { state.policy.rolloutLoading = true; },
-      state => { state.policy.workspace.isCapable = false; },
-      state => { state.policy.workspace = { isLoading: false, isError: true, isCapable: false }; },
-      state => { state.policy.workspace = { isLoading: true, isError: false, isCapable: false }; },
-      state => { state.policy.workspaceRolloutLoading = true; },
-    ]) {
-      const state = evaluate();
-      state.policy.authMethod = authMethod;
-      mutate(state);
-      assert.equal(composer(state.sandbox).capability, true);
-      assert.equal(composer(state.sandbox).enabled, true);
-      // The default native local setting is enabled unless explicitly false.
-      state.policy.configFeatures.data = [];
-      assert.equal(composer(state.sandbox).enabled, true);
-      state.policy.configFeatures.data = [{ name: 'in_app_dictation', enabled: false }];
-      assert.equal(composer(state.sandbox).enabled, false);
-    }
-  }
-});
-
-test('ChatGPT and non-local scopes retain native rollout and workspace policies', () => {
-  for (const mutate of [
-    state => { state.policy.rollout = false; },
-    state => { state.policy.rolloutLoading = true; },
-    state => { state.policy.workspace.isCapable = false; },
-    state => { state.policy.workspaceRolloutLoading = true; },
-  ]) {
-    const state = evaluate();
-    state.policy.authMethod = 'chatgpt';
-    mutate(state);
-    for (const controller of [composer(state.sandbox), composer(state.sandbox, 'remote-host'),
-      composer(state.sandbox, 'local', {})]) assert.equal(controller.enabled, false);
-  }
-  const { api } = evaluate();
-  const descriptor = { name: 'dictation.composer', hostId: 'local', cockpitApiDictation: true };
-  for (const args of [{ ...descriptor, hostId: 'remote-host' },
-    { ...descriptor, name: 'dictation.global' }, { ...descriptor, name: 'dictation.chatgpt' }]) {
-    assert.equal(api.policyOverride(args, 'dictation', { authMethod: 'apiKey' }), null);
-  }
-  for (const policy of ['chatgpt-dictation', 'global-dictation', 'other']) {
-    assert.equal(api.policyOverride(descriptor, policy, { authMethod: 'apiKey' }), null);
-  }
-});
-
-test('verified local API provider accepts the native no-account authentication shape', () => {
-  const state = evaluate({ apiKeyAuthVerified: true });
-  Object.assign(state.policy, {
-    authMethod: null, requiresAuth: false, authLoading: false,
-    rollout: false, rolloutLoading: true, workspaceRolloutLoading: true,
-    workspace: { isLoading: false, isError: true, isCapable: false },
-  });
-  assert.equal(composer(state.sandbox).enabled, true);
-  state.policy.authLoading = true;
-  assert.equal(composer(state.sandbox).capability, null);
-  state.policy.authLoading = false;
-  state.policy.configFeatures.data[0].enabled = false;
-  assert.equal(composer(state.sandbox).enabled, false);
-});
-
-test('native null account alone never qualifies as an API profile', () => {
-  for (const options of [
-    { apiKeyAuthVerified: false },
-    { apiKeyAuthVerified: true, ready: false },
-    { apiKeyAuthVerified: true, enabled: false },
-  ]) {
-    const state = evaluate(options.enabled === false ? { apiKeyAuthVerified: true } : options);
-    Object.assign(state.policy, { authMethod: null, requiresAuth: false, rollout: false });
-    if (options.enabled === false) state.sandbox.__cockpitEnhancements.apiDictation = false;
-    assert.equal(composer(state.sandbox).enabled, false);
-  }
-  for (const authMethod of [null, undefined, 'chatgpt', 'chatgptAuthTokens', 'personalAccessToken', 'copilot', 'amazonBedrock']) {
-    const state = evaluate({ apiKeyAuthVerified: true });
-    Object.assign(state.policy, { authMethod, requiresAuth: authMethod === null, rollout: false });
-    assert.equal(composer(state.sandbox).enabled, false);
-  }
-  const state = evaluate({ apiKeyAuthVerified: true });
-  Object.assign(state.policy, { authMethod: null, requiresAuth: false, rollout: false });
-  assert.equal(composer(state.sandbox, 'remote-host').enabled, false);
-  assert.equal(composer(state.sandbox, 'local', {}).enabled, false);
-});
-
-test('new capability parameter avoids pre-existing singleton and family caches', () => {
-  const { sandbox, api } = evaluate({ ready: false });
-  const args = { name: 'dictation.composer' };
-  const key = value => JSON.stringify(Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))));
-  const familyCache = new Map();
-  const staleLeaf = { isLoading: false, isError: false, isCapable: false };
-  let nativeLeafReads = 0;
-  const read = descriptor => {
-    const cacheKey = key(descriptor);
-    if (!familyCache.has(cacheKey)) {
-      familyCache.set(cacheKey, sandbox.ty.read(descriptor, { get(atom) {
-        if (atom === sandbox.kKt) { nativeLeafReads++; return staleLeaf; }
-        return sandbox.readPolicy(atom);
-      } }));
-    }
-    return familyCache.get(cacheKey);
-  };
-  assert.equal(read(args).isCapable, false);
-  assert.equal(nativeLeafReads, 1);
-  sandbox.__cockpitApiDictation.ready = true;
-  const compatible = api.capabilityArgs(args, 'local', false);
-  assert.notEqual(key(compatible), key(args));
-  assert.equal(api.capabilityArgs(args, 'local', false), compatible);
-  assert.equal(read(compatible).isCapable, true);
-  assert.equal(nativeLeafReads, 1, 'the compatible policy reads actual dependencies instead of stale kKt');
-  assert.equal(read(args).isCapable, false, 'the original family cache remains intact');
-  assert.equal(familyCache.size, 2);
-});
-
-test('policy revision and verification transitions do not reuse a stale family result', () => {
-  const { sandbox, api, policy } = evaluate({ apiKeyAuthVerified: false });
-  Object.assign(policy, { authMethod: null, requiresAuth: false, rollout: false });
-  const args = { name: 'dictation.composer' };
-  const key = value => JSON.stringify(Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))));
-  const legacyArgs = { ...args, hostId: 'local', cockpitApiDictation: true };
-  const cache = new Map([[key(legacyArgs), { isLoading: false, isError: false, isCapable: false }]]);
-  let reads = 0;
-  const read = descriptor => {
-    const cacheKey = key(descriptor);
-    if (!cache.has(cacheKey)) {
-      reads++;
-      cache.set(cacheKey, sandbox.ty.read(descriptor, { get: sandbox.readPolicy }));
-    }
-    return cache.get(cacheKey);
-  };
-  const unverified = api.capabilityArgs(args, 'local', false);
-  assert.equal(unverified.cockpitApiDictationPolicyVersion, 2);
-  assert.equal(unverified.cockpitApiAuthVerified, false);
-  assert.notEqual(key(unverified), key(legacyArgs));
-  assert.equal(read(unverified).isCapable, false);
-  assert.equal(api.capabilityArgs(args, 'local', false), unverified);
-
-  sandbox.__cockpitEnhancements.apiKeyAuthVerified = true;
-  const verified = api.capabilityArgs(args, 'local', false);
-  assert.notEqual(verified, unverified);
-  assert.notEqual(key(verified), key(unverified));
-  assert.equal(read(verified).isCapable, true);
-  assert.equal(api.capabilityArgs(args, 'local', false), verified);
-  assert.equal(read(legacyArgs).isCapable, false, 'a previously cached policy remains isolated');
-
-  sandbox.__cockpitEnhancements.apiKeyAuthVerified = false;
-  const revoked = api.capabilityArgs(args, 'local', false);
-  assert.notEqual(revoked, verified);
-  assert.equal(key(revoked), key(unverified));
-  assert.equal(read(revoked).isCapable, false, 'revocation cannot retain verified eligibility');
-  assert.equal(reads, 2, 'each verification state is evaluated once with its own native family key');
-});
-
-test('new verification keys preserve explicit local disablement and scope boundaries', () => {
-  const { sandbox, api, policy } = evaluate({ apiKeyAuthVerified: false });
-  Object.assign(policy, { authMethod: null, requiresAuth: false });
-  policy.configFeatures.data[0].enabled = false;
-  const args = { name: 'dictation.composer' };
-  for (const verified of [false, true, false]) {
-    sandbox.__cockpitEnhancements.apiKeyAuthVerified = verified;
-    const local = api.capabilityArgs(args, 'local', false);
-    assert.equal(local.cockpitApiAuthVerified, verified);
-    assert.equal(sandbox.ty.read(local, { get: sandbox.readPolicy }).isCapable, false);
-    assert.equal(api.capabilityArgs(args, 'remote-host', false), args);
-    assert.equal(api.capabilityArgs(args, 'local', true), args);
-  }
-});
-
-test('stable handlers preserve each recording snapshot across host and bridge changes', async () => {
-  const { sandbox, api, calls, nativeCalls } = evaluate();
-  const originalHandler = () => ({ onTranscriptInsert() {} });
-  const first = api.scopedHandlers(originalHandler, 'local');
-  const saved = first();
-  assert.equal(api.scopedHandlers(originalHandler, 'remote-host'), first);
-  assert.equal(first().cockpitDictationScope, null);
-  assert.equal(saved.cockpitDictationScope.host, 'local');
-
-  const controller = composer(sandbox);
-  controller.record();
-  sandbox.__cockpitApiDictation = { ready: true, session: 'session-2', transcribe: async () => ({ text: 'new transport' }) };
-  await assert.rejects(() => controller.stop(new Blob(['test']), { abortController: new AbortController() }), { name: 'AbortError' });
-  assert.equal(calls.length, 0);
-  assert.equal(nativeCalls.length, 0);
-});
-
-test('stopping or disabling an admitted transport cannot fall back to official upload', async () => {
-  for (const mutate of [
-    sandbox => { sandbox.__cockpitApiDictation.ready = false; },
-    sandbox => { sandbox.__cockpitApiDictation.session = 'replacement-session'; },
-    sandbox => { sandbox.__cockpitEnhancements.apiDictation = false; },
-    sandbox => { delete sandbox.__cockpitApiDictation; },
-  ]) {
-    const { sandbox, nativeCalls, calls } = evaluate();
-    const controller = composer(sandbox);
-    controller.record();
-    mutate(sandbox);
-    await assert.rejects(() => controller.stop(new Blob(['test']), { abortController: new AbortController() }), { name: 'AbortError' });
-    assert.equal(nativeCalls.length, 0);
-    assert.equal(calls.length, 0);
-  }
-});
-
-test('cancel passes through the native signal and prevents stale transcription results', async () => {
-  const { sandbox, calls, nativeCalls } = evaluate();
-  const controller = composer(sandbox);
-  controller.record();
-  const abortController = new AbortController();
-  abortController.abort();
-  await assert.rejects(() => controller.stop(new Blob(['test']), { abortController }), { name: 'AbortError' });
-  assert.equal(calls.length, 0);
-  assert.equal(nativeCalls.length, 0);
-
-  let finish;
-  sandbox.__cockpitApiDictation.transcribe = (_blob, options) => new Promise(resolve => {
-    assert.equal(options.signal, inFlight.signal);
-    finish = resolve;
-  });
-  const inFlight = new AbortController();
-  controller.record();
-  const pending = controller.stop(new Blob(['test']), { abortController: inFlight });
-  inFlight.abort();
-  finish({ text: 'must not be inserted' });
-  await assert.rejects(() => pending, { name: 'AbortError' });
-});
-
-test('replacement during response and malformed bridge responses fail without native fallback', async () => {
-  const { sandbox, api, nativeCalls } = evaluate();
-  const handler = api.scopedHandlers(() => ({}), 'local');
-  let finish;
-  sandbox.__cockpitApiDictation.transcribe = () => new Promise(resolve => { finish = resolve; });
-  const pending = api.transcribe(handler().cockpitDictationScope, new Blob(['test']), {}, sandbox.YLo);
-  sandbox.__cockpitApiDictation.session = 'new-session';
-  finish({ text: 'stale' });
-  await assert.rejects(() => pending, { name: 'AbortError' });
-  sandbox.__cockpitApiDictation.transcribe = async () => ({ text: 123 });
-  await assert.rejects(() => api.transcribe(handler().cockpitDictationScope, new Blob(['test']), {}, sandbox.YLo), { name: 'TypeError' });
-  assert.equal(nativeCalls.length, 0);
-});
-
-test('all nine gates and surrounding contracts are required atomically', () => {
+test('unsupported native module contracts fail without changing dictation or activating partial patches', () => {
   const { api } = load();
-  const result = api.transform(fixture, moduleUrl);
-  assert.equal(result.ok, true);
-  assert.equal(Object.keys(result.diagnostics.gates).length, 9);
-  assert.ok(Object.values(result.diagnostics.gates).every(value => value === 1));
-  for (const source of [fixture + fixture, fixture.replace('executionTargetHostId:a', 'executionTargetHostId:other'),
-    fixture.replace('let Me=fu(je),Ne;', 'let Me=other(je),Ne;'),
-    fixture.replace('isCapable:!a&&n&&i===`chatgpt`', 'isCapable:!a&&n&&i===`chatgpt`&&newPolicy'),
-    fixture.replace('return YLo(n,', 'return other(n,'), result.patchedSource.replace('cockpitDictationHost:r==null?a:null,', ''), 'unknown client']) {
-    const unsupported = api.transform(source, moduleUrl);
-    assert.equal(unsupported.ok, false);
-    assert.equal(unsupported.patchedSource, source);
-  }
-  assert.equal(api.transform(result.patchedSource, moduleUrl).ok, true);
-  assert.equal(api.transform(result.patchedSource, moduleUrl).patchedSource, result.patchedSource);
-  // Exported HTTP helpers stay available to all other official callers.
-  assert.equal(result.patchedSource.slice(result.patchedSource.indexOf('async function YLo')),
-    fixture.slice(fixture.indexOf('async function YLo')));
+  const changed = original.replace('serviceTierAccess:', 'unknownAccess:');
+  const result = api.prepareLive(changed, moduleUrl);
+  assert.equal(result.ok, false);
+  assert.equal(result.patchedSource, changed);
 });
 
-test('unsupported URLs and disabled adaptation leave source untouched', () => {
-  const { api } = load();
-  for (const url of ['https://example.com/app-initial-a.js', 'app://remote/assets/app-initial-a.js',
-    'app://-/assets/app-initial-a.js?secret=x', 'app://-/assets/app-primary-a.js',
-    'file://remote/app-initial-a.js', 'invalid']) {
-    assert.equal(api.transform(fixture, url).ok, false);
-    assert.equal(api.transform(fixture, url).patchedSource, fixture);
+
+const hostSource = fs.readFileSync(path.join(__dirname, 'fast.rs'), 'utf8');
+const stateLiteral = hostSource.match(/const STATE_SCRIPT: &str = r#"([\s\S]*?)"#;/);
+assert.ok(stateLiteral, 'exercise the actual renderer upgrade state script');
+const stateScript = stateLiteral[1].replace('__COCKPIT_STATE_OPTIONS__', JSON.stringify({
+  nativeFast: true, quotaCompat: true, apiKeyAuthVerified: true, apiService: true, owner: 'rollback-owner',
+}));
+
+test('upgrading an existing renderer revokes the bridge and restores native capability without losing drafts', () => {
+  for (const throwingDispose of [false, true]) {
+    let disposals = 0;
+    const oldState = { apiDictation: true, nativePatchState: 'active-capability',
+      nativePatchMode: 'capability-only', nativePatchFeatures: '0001:capability-only' };
+    const oldHook = { capability: () => false, scopedHandlers: { active: true } };
+    const nativeHandlers = oldHook.scopedHandlers;
+    const sandbox = {
+      __cockpitEnhancements: oldState,
+      __cockpitNativeDictation: oldHook,
+      __cockpitApiDictation: { dispose() { disposals++; if (throwingDispose) throw Error('retired bridge cleanup failure'); } },
+      document: { draft: 'unsent user work' },
+      location: { reload() { throw Error('upgrade must not reload a running conversation'); } },
+    };
+    sandbox.window = sandbox;
+    vm.runInNewContext(stateScript, sandbox);
+    assert.equal(disposals, 1);
+    assert.equal(oldState.apiDictation, false, 'already evaluated handlers can retain the previous state object');
+    assert.equal(sandbox.__cockpitEnhancements.apiDictation, false);
+    assert.equal(sandbox.__cockpitEnhancements.nativePatchState, 'pending');
+    assert.equal(sandbox.__cockpitNativeDictation, oldHook, 'already evaluated modules retain their hook object');
+    assert.equal(oldHook.scopedHandlers, nativeHandlers);
+    for (const value of [true, false, null]) {
+      assert.equal(oldHook.capability(value), value);
+      assert.equal(oldHook.capability(value, false), value);
+      assert.equal(oldHook.capability(value, true), value);
+    }
+    assert.equal(sandbox.document.draft, 'unsent user work');
   }
-  const disabled = load({ enabled: false }).api.transform(fixture, moduleUrl);
-  assert.equal(disabled.ok, false);
-  assert.equal(disabled.patchedSource, fixture);
 });
 
-const actualFixture = process.env.COCKPIT_NATIVE_DICTATION_FIXTURE || process.env.COCKPIT_NATIVE_FAST_FIXTURE;
-test('installed desktop artifact matches every gate and remains valid JavaScript', { skip: !actualFixture }, () => {
-  assert.equal(typeof vm.SourceTextModule, 'function', 'Run with --experimental-vm-modules for the artifact check');
-  const { api } = load();
-  const source = fs.readFileSync(actualFixture, 'utf8');
-  const transformed = api.transform(source, `app://-/assets/${path.basename(actualFixture)}`);
-  assert.equal(transformed.ok, true, JSON.stringify(transformed.diagnostics));
-  new vm.SourceTextModule(transformed.patchedSource);
-  for (const token of ['.useState(', '.useRef(', '.useEffect(', '.useInsertionEffect(', '.useSyncExternalStore(', '.c(122)']) {
-    assert.equal(transformed.patchedSource.split(token).length, source.split(token).length);
-  }
+test('fresh renderer rollback state does not create a dictation bridge or force capability', () => {
+  const sandbox = {};
+  sandbox.window = sandbox;
+  vm.runInNewContext(stateScript, sandbox);
+  assert.equal(sandbox.__cockpitEnhancements.apiDictation, false);
+  assert.equal(sandbox.__cockpitNativeDictation, undefined);
+  assert.equal(sandbox.__cockpitApiDictation, undefined);
 });
