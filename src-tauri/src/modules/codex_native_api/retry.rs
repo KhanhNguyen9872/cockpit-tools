@@ -762,7 +762,9 @@ async fn send_inner(
                 continue;
             }
             note_failed_route(state,route,503,wait,credential_scope,failure_message.as_deref(),deadline).await?;
-            return Ok(response);
+            if !policy.auto_retry_when_overload {
+                return Ok(response);
+            }
         }
         if retryable
             && !round_attempted

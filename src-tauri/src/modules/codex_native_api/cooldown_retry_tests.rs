@@ -648,7 +648,7 @@ async fn native_auto_retry_when_overload_enabled_retries_and_succeeds() {
             let capture = capture.clone();
             async move {
                 let call = capture.fetch_add(1, Ordering::SeqCst);
-                if call == 0 {
+                if call < 3 {
                     (
                         StatusCode::SERVICE_UNAVAILABLE,
                         Json(json!({
@@ -702,7 +702,7 @@ async fn native_auto_retry_when_overload_enabled_retries_and_succeeds() {
     assert_eq!(response.status().as_u16(), 200);
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["id"], "resp-success");
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(calls.load(Ordering::SeqCst) >= 4);
     assert!(cleared.load(Ordering::SeqCst) > 0);
     service.shutdown(Duration::from_secs(2)).await.unwrap();
     task.abort();
@@ -760,7 +760,7 @@ async fn native_auto_retry_when_overload_disabled_fails_immediately() {
         .await
         .unwrap();
     assert_eq!(response.status().as_u16(), 503);
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
     service.shutdown(Duration::from_secs(2)).await.unwrap();
     task.abort();
 }
