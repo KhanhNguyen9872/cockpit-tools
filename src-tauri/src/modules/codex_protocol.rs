@@ -738,6 +738,18 @@ fn codex_client_model_template(model_id: &str) -> (Value, bool) {
         return (model.clone(), true);
     }
 
+    // Terra has the same supported Codex reasoning levels and Fast tier as Luna.
+    // Use its client template until the bundled official catalog includes Terra.
+    if model_id.eq_ignore_ascii_case("gpt-6.1-terra") {
+        if let Some(luna) = models.iter().find(|model| model["slug"] == "gpt-6-luna") {
+            let mut terra = luna.clone();
+            terra["slug"] = json!("gpt-6.1-terra");
+            terra["display_name"] = json!("GPT-6.1 Terra");
+            terra["description"] = json!("GPT-6.1 Terra");
+            return (terra, true);
+        }
+    }
+
     if model_id.eq_ignore_ascii_case(CODEX_RESERVE_MODEL_ID) {
         if let Some(luna) = models
             .iter()
@@ -791,6 +803,7 @@ fn display_name_for_model(model_id: &str) -> String {
         "gpt-5.3-codex" => "GPT-5.3 Codex".to_string(),
         "gpt-5.3-codex-spark" => "GPT-5.3 Codex Spark".to_string(),
         "gpt-6.1-sol" => "GPT-6.1 Sol".to_string(),
+        "gpt-6.1-terra" => "GPT-6.1 Terra".to_string(),
         "gpt-6-astra" => "GPT-6 Astra".to_string(),
         "gpt-6-sol" => "GPT-6 Sol".to_string(),
         "gpt-6-luna" => "GPT-6 Luna".to_string(),
@@ -2546,5 +2559,27 @@ mod tests {
             assert_eq!(model["service_tiers"].as_array().unwrap().iter().any(|tier| tier["id"] == "ultrafast"), expected, "{slug}");
             assert_eq!(model["additional_speed_tiers"].as_array().unwrap().iter().any(|tier| tier == "ultrafast"), expected, "{slug}");
         }
+    }
+
+    #[test]
+    fn astra_catalog_keeps_current_native_tools_and_reasoning_update_capabilities() {
+        let response = build_codex_client_models_response(&["gpt-6-astra".into()]);
+        let model = &response["models"][0];
+        assert_eq!(
+            model["experimental_supported_tools"],
+            json!(["send_user_message_async", "clock"])
+        );
+        assert_eq!(model["multi_agent_reasoning_effort"], "xhigh");
+        assert_eq!(model["supports_reasoning_effort_updates"], true);
+        for slug in ["gpt-6-astra", "gpt-6-sol"] {
+            let catalog = build_codex_client_models_response(&[slug.into()]);
+            assert_eq!(catalog["models"][0]["node_repl_auto_review_required"], true);
+        }
+        assert_eq!(model["default_reasoning_level"], "medium");
+        assert!(model["service_tiers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tier| tier["id"] == "ultrafast"));
     }
 }

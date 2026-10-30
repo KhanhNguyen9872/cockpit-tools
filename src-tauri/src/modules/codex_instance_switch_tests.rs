@@ -154,7 +154,7 @@ fn old_reauth_status_does_not_hide_a_current_launch_setup_failure() {
     account.requires_reauth = true;
     account.reauth_reason = Some("refresh_token_expired".into());
     modules::codex_account::save_account(&account).unwrap();
-    for code in ["CODEX_SWITCH_BINDING_FAILED", "CODEX_PROCESS_SCAN_FAILED", "PROXY_ENTRY_PORT_UNAVAILABLE"] {
+    for code in ["CODEX_SWITCH_BINDING_FAILED", "CODEX_PROCESS_SCAN_FAILED", "PROXY_ENTRY_PORT_UNAVAILABLE", "APP_PATH_NOT_FOUND:codex"] {
         assert_eq!(modules::codex_account::format_account_switch_error(&account.id, code.into()), code);
     }
     assert!(modules::codex_account::load_account(&account.id).unwrap().requires_reauth);

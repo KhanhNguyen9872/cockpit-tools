@@ -11,12 +11,13 @@ export function codexAccountPoolDiagnosticReason(pool: CodexLocalAccessAccountPo
     return { key: `${prefix}poolScopeMismatchDetail`, values: {} };
   }
   if (pool.scopedAuths > 0 && [pool.unavailableAuths, pool.modelExcludedAuths,
-    pool.imagePolicyBlockedAuths].some((count) => count > 0)) {
+    pool.quotaReservedAuths, pool.imagePolicyBlockedAuths].some((count) => count > 0)) {
     return {
       key: `${prefix}poolBlockedDetail`,
       values: {
         unavailable: pool.unavailableAuths,
         modelExcluded: pool.modelExcludedAuths,
+        quotaReserved: pool.quotaReservedAuths,
         imageBlocked: pool.imagePolicyBlockedAuths,
       },
     };

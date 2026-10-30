@@ -1596,7 +1596,8 @@ fn inspect_experimental_model_catalog(
         .map(str::trim)
         .filter(|value| !value.is_empty());
     let cockpit_managed_catalog_configured = configured_catalog
-        .is_some_and(|value| catalog_ref_targets_cockpit_managed_file(value, base_dir));
+        .is_some_and(|value| catalog_ref_targets_cockpit_managed_file(value, base_dir)
+            || crate::modules::codex_native_speed_catalog::is_reference(base_dir, value));
     let policy_enabled = experimental_model_policy_enabled(base_dir);
     let enabled = policy_enabled;
 
@@ -2873,6 +2874,9 @@ fn sync_or_cleanup_account_model_catalog_for_dir(
     base_dir: &Path,
     account: &CodexAccount,
 ) -> Result<(), String> {
+    if !account.is_api_key_auth() || is_deepseek_account(account) {
+        crate::modules::codex_native_speed_catalog::clear_reference(base_dir)?;
+    }
     if account.is_api_key_auth() {
         cleanup_experimental_model_catalog_for_dir(base_dir)?;
     }

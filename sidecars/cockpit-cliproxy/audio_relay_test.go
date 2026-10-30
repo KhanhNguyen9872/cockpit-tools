@@ -52,7 +52,7 @@ func audioServerFixture(t *testing.T, upstream string, oauth bool) (*relayServer
 	tracker := newRequestUsageTracker()
 	s := &relayServer{manifest: m, policy: &requestPolicy{manifest: m, tracker: tracker, tokenLimiter: newAPIKeyTokenLimiter(m)}}
 	if oauth {
-		manager := coreauth.NewManager(nil, buildCoreAuthSelectorWithConcurrency(nil, &coreauth.RoundRobinSelector{}, m, tracker), nil)
+		manager := coreauth.NewManager(nil, buildCoreAuthSelectorWithConcurrency(nil, &coreauth.RoundRobinSelector{}, m, nil, tracker), nil)
 		manager.RegisterExecutor(executor.NewCodexExecutor(&config.Config{}))
 		_, err := manager.Register(context.Background(), &coreauth.Auth{ID: "voice-auth", Provider: "codex", Attributes: map[string]string{
 			"base_url": upstream + "/backend-api/codex", coreauth.AttributeAuthKind: coreauth.AuthKindOAuth,

@@ -158,6 +158,15 @@
     "providerClear": "Clear selection"
   },
   "common": {
+    "networkErrors": {
+      "upstream": "the upstream service",
+      "proxyConnection": "Failed to connect to {{target}} through proxy “{{proxy}}”. The proxy or network may be unavailable. Check the proxy or try another node.",
+      "proxyTimeout": "Connection to {{target}} through proxy “{{proxy}}” timed out. The proxy or network may be unavailable. Check the proxy or try another node.",
+      "proxyAuth": "Proxy “{{proxy}}” authentication failed. Check the proxy username or password.",
+      "localProxyUnavailable": "Cannot connect to local proxy “{{proxy}}”. Check that the proxy service is running.",
+      "directConnection": "Failed to connect to {{target}}. Check your network and retry.",
+      "directTimeout": "Connection to {{target}} timed out. Check your network and retry."
+    },
     "codexUsage": {
       "title": "Quota & usage",
       "session": "Current chat",
@@ -167,8 +176,8 @@
       "speed": "Output speed",
       "cache": "Cache hit rate",
       "cacheShort": "Cache",
-      "speedHint": "Weighted output speed of recent valid API requests in this conversation, excluding time to first response. Shows — when requests cannot be linked or timing is unavailable.",
-      "cacheHint": "Share of recent input tokens served from cache, weighted by input volume.",
+      "speedHint": "Average output speed of valid requests in this chat, excluding first-response wait. Missing measurements show —.",
+      "cacheHint": "Cache hit rate of valid requests in this chat, weighted by input tokens. Kept after generation stops; missing counters show —.",
       "aggregateHint": "Sum of account window percentages, without plan-capacity weighting. Colors follow account overview: ≥80% green, ≥40% yellow, ≥10% orange, below 10% red. Unknown values have no quota color.",
       "waiting": "Waiting for chat usage records",
       "refreshFailed": "Quota refresh failed. Previous results are retained. Try again.",
@@ -225,7 +234,11 @@
       "avgLatency": "Avg. latency",
       "successRate": "Success rate",
       "verifiedStatistics": "Verified stats",
-      "excludedHistory": "{{count}} historical records lack dispatch evidence and are excluded."
+      "excludedHistory": "{{count}} historical records lack dispatch evidence and are excluded.",
+      "averageSpeed": "Average output speed",
+      "serviceUnavailable": "API service unavailable. Please retry.",
+      "tierAdjusted": "Adjusted to Standard",
+      "averageCache": "Average cache hits"
     },
     "apiKeyAccount": "API Key account",
     "status": "Status",
@@ -1845,6 +1858,35 @@
       "refreshed": "Usage refreshed",
       "usage": "Usage",
       "tierOther": "Other"
+    },
+    "background": {
+      "title": "Background",
+      "description": "Change the app background. Account cards and controls keep their current appearance.",
+      "presets": "Background presets",
+      "default": "Default",
+      "mist": "Mist",
+      "forest": "Forest",
+      "dusk": "Dusk",
+      "sand": "Sand",
+      "custom": "Custom",
+      "chooseImage": "Choose image",
+      "replaceImage": "Replace image",
+      "imageHint": "JPG, PNG or WebP, up to 10 MB. Large images are resized locally.",
+      "preview": "Preview",
+      "strength": "Intensity",
+      "blur": "Blur",
+      "pixels": "{{count}} px",
+      "position": "Image position",
+      "center": "Center",
+      "top": "Top",
+      "bottom": "Bottom",
+      "localHint": "Changes apply immediately and save automatically on this device. Images are not uploaded. Restore default removes the saved image.",
+      "restore": "Restore default",
+      "imageType": "Choose a JPG, PNG or WebP image.",
+      "imageSize": "Choose an image smaller than 10 MB.",
+      "imageRead": "Could not read this image. Try another file.",
+      "storage": "Could not load or save the background. Retry; your saved background is preserved.",
+      "saveFailed": "The background is displayed but could not be saved. Retry; the previously saved background is preserved."
     }
   },
   "appPath": {
@@ -2570,7 +2612,18 @@
       "windowHint": "Thresholds follow actual durations: a week or longer uses the weekly threshold. Weekly-only accounts check only that quota. Missing durations keep the primary/secondary mapping.",
       "rule": "Short-cycle remaining <= {{shortCycle}}% or weekly remaining <= {{weekly}}%"
     },
+    "launchConfirmation": {
+      "title": "Launch unconfirmed",
+      "description": "The launch was requested, but the client status is not confirmed. It may already be open. Please avoid launching it again.",
+      "check": "Check status",
+      "notRunning": "The target instance has not been detected. Check again later, or close this dialog before retrying the launch.",
+      "checkFailed": "The running status could not be read. Please check again later.",
+      "maintenanceDeferred": "Session checks are temporarily unavailable. History was preserved and this maintenance step was skipped."
+    },
     "launchErrors": {
+      "sessionRestoreFailed": "Session repair failed and backup restoration is incomplete. Launch stopped; inspect the logs and backups before retrying.",
+      "sessionCheckTimeout": "Session checks timed out. Launch stopped; retry or inspect the logs.",
+      "sessionFileTooLarge": "A session file header is too large. Launch stopped; inspect the logs.",
       "bindingFailed": "Account binding could not be confirmed. Launch stopped; retry switching accounts.",
       "processScanFailed": "Could not inspect the old background processes. Launch stopped; retry.",
       "proxyEntryFailed": "The configured proxy entry could not start. No alternative route was used; retry."
@@ -3132,7 +3185,8 @@
         "audioNotSupported": "This OAuth account supports transcription only. Use an API Key provider for other audio operations.",
         "audioUnavailable": "Audio forwarding is unavailable.",
         "audioUpstreamFailed": "The audio upstream request failed.",
-        "modelNotAvailable": "Model {{model}} is not available for this API key."
+        "modelNotAvailable": "Model {{model}} is not available for this API key.",
+        "quotaReserved": "Account quota is reserved or awaiting confirmation. Retry shortly."
       },
       "testRateLimited": "Service is reachable, but upstream is rate limited or quota is exhausted: {{detail}}.",
       "testHttpFailed": "Service is reachable, but the request returned HTTP {{status}}: {{detail}}.",
@@ -3238,7 +3292,7 @@
           "poolUnavailable": "No available pool account",
           "poolUnavailableDetail": "No available account was selected for model {{model}}",
           "poolUnattributedDetail": "No per-account diagnostics were received, so this failure cannot be attributed to an account. Check this API key’s account scope and model configuration.",
-          "poolDiagnosticDetail": "Model {{model}}: {{candidate}} candidates, {{scoped}} in scope, {{available}} available, {{unavailable}} unavailable, {{modelExcluded}} model-excluded, {{imageBlocked}} image-policy blocked",
+          "poolDiagnosticDetail": "Model {{model}}: {{candidate}} candidates, {{scoped}} in scope, {{available}} available, {{unavailable}} unavailable, {{modelExcluded}} model-excluded, {{quotaReserved}} quota-reserved, {{imageBlocked}} image-policy blocked",
           "poolNoCandidatesDetail": "There are no candidate accounts for this request. Check the requested model and account loading status.",
           "poolScopeMismatchDetail": "No candidate matched this API key’s account scope, or its account mapping could not be recognized. Check the selected accounts and model configuration.",
           "inspectBinding": "Check binding",
@@ -3250,7 +3304,7 @@
           "boundAccountNotLoadedDetail": "This bound account is not loaded in the current service. Check account loading and pool synchronization.",
           "boundAccountNotCandidateDetail": "This bound account was loaded but is not a candidate for this request. Check the requested model, provider and request type.",
           "scopeUnknownDetail": "The scope diagnostic does not identify a specific cause. Check binding and service logs.",
-          "poolBlockedDetail": "In-scope filtering: {{unavailable}} unavailable (such as disabled, cooling down or authentication failure), {{modelExcluded}} model-excluded, {{imageBlocked}} image-policy blocked. Check member reasons and the corresponding settings.",
+          "poolBlockedDetail": "In-scope filtering: {{unavailable}} unavailable (such as disabled, cooling down or authentication failure), {{modelExcluded}} model-excluded, {{quotaReserved}} quota-reserved, {{imageBlocked}} image-policy blocked. Check member reasons and the corresponding settings.",
           "poolUnknownDetail": "The current diagnostics do not identify a specific cause. Check this API key’s account scope, model configuration and service logs.",
           "clearHint": "Clearing removes only this diagnostic record. It does not repair settings, tokens or quota; another failed request can create a new record.",
           "clearSuccess": "Diagnostic record cleared. This does not mean the account pool has recovered.",
@@ -3357,7 +3411,23 @@
         "imageGenerationConfirm": {
           "title": "Disable image_generation",
           "message": "When enabled, the API service removes the image_generation tool declaration in the local gateway before forwarding normal text chats, avoiding provider errors such as \"Image generation is not enabled\". gpt-image and other image models are not removed. Continue?"
-        }
+        },
+        "quotaReserveToggle": "Reserve OAuth quota",
+        "quotaReserveDesc": "The API service uses this OAuth account only while both the 5-hour and weekly remaining quotas are above the reserved values.",
+        "quotaReserveHourlyLabel": "5-hour reserve",
+        "quotaReserveWeeklyLabel": "Weekly reserve",
+        "quotaReserveInvalid": "Enter an integer from 1 to 100.",
+        "strictReserve": "Strict protection",
+        "strictReserveDesc": "Quota reserves are protected automatically with a safety margin. Near the reserve, each account allows one request and confirms fresh quota after completion. Other clients’ usage is outside this protection.",
+        "strictNativeOnly": "Strict protection requires the Rust engine. Turn it off before switching to Go.",
+        "safetyMargin": "Safety margin",
+        "safetyMarginUnit": "percentage points",
+        "safetyMarginInvalid": "Enter an integer from 1 to 20.",
+        "quotaInFlight": "In flight: {{count}}",
+        "quotaWaiting": "Awaiting quota confirmation",
+        "quotaStale": "Quota unavailable",
+        "quotaProtected": "Reserved",
+        "quotaUpdated": "Updated {{time}}"
       },
       "customRoutingEdit": "Edit Custom Routing",
       "customRoutingTitle": "Custom Routing",
@@ -4005,6 +4075,11 @@
       "windowReq": "{{count}} req",
       "reset": "Reset",
       "resetCredits": "Resets {{count}}",
+      "resetCreditExpiryHours": "{{hours}}h {{minutes}}m",
+      "resetCreditExpiryMinutes": "{{minutes}}m",
+      "resetCreditExpiryExpired": "Expired · view details",
+      "resetCreditExpiryUrgent": "Soon: {{time}} · {{duration}}",
+      "resetCreditExpiryNormal": "Expires {{time}} · {{duration}}",
       "resetCreditsTitle": "Resets left for the 5-hour window: {{count}}",
       "resetCreditConfirm": "Confirm?",
       "resetCreditDialogTitle": "Reset your usage?",
@@ -4020,7 +4095,7 @@
       "resetCreditStatusRedeemed": "Used",
       "resetCreditStatusExpired": "Expired",
       "resetCreditStatusUnknown": "Unknown",
-      "resetCreditNextExpiry": "Next expires: {{time}}",
+      "resetCreditNextExpiry": "Next reset expiry {{time}}",
       "resetCreditDetailsTitle": "Reset details",
       "resetCreditNoRecords": "No reset records",
       "resetCreditRecordsLoadFailed": "Failed to load reset records: {{error}}",
@@ -4331,6 +4406,7 @@
         "syncSessions": "Sync Sessions",
         "copyToInstance": "Copy to Instance",
         "repairVisibility": "Repair Visibility",
+        "repairIndex": "Repair chat index",
         "restoreSessions": "Restore Sessions",
         "exportSessions": "Export Sessions",
         "importSessions": "Import Sessions",
@@ -4364,6 +4440,10 @@
         "clear": "Clear"
       },
       "messages": {
+        "deleteNotConfirmed": "The client did not confirm deletion. Local cleanup was stopped and backups were retained: {{error}}",
+        "historyReadFailed": "Unable to safely read chat history: {{error}}",
+        "restoreIndexRetry": "The chat file was retained, but updating the chat list failed. The original remains in Trash; resolve the issue and retry: {{error}}",
+        "importIndexRetry": "Chat files were imported, but updating the chat list failed. The files and import package were retained; resolve the issue and retry: {{error}}",
         "pickOne": "Please select at least one session",
         "pickRestoreOne": "Please select at least one session to restore",
         "syncNeedTwo": "At least two instances are required to sync sessions",
@@ -4496,7 +4576,18 @@
         "previewAgain": "Preview Again",
         "preview": "Preview Changes",
         "previewFailedWithError": "Session repair preview failed: {{error}}",
-        "confirmRepair": "Confirm Repair"
+        "confirmRepair": "Confirm Repair",
+        "modeHistory": "Edit/branch repair",
+        "modeHistoryDesc": "Repair editing and chat branching failures caused by invalid indexes.",
+        "historyLiveHint": "You can repair while the client is running. Restart the client and reopen the chats afterward.",
+        "historyDescription": "Check selected chats and their ancestor history, resetting only invalid paginated indexes. Chat records, accounts and Provider settings stay unchanged. Repair can run while the client is open; restart it afterward to reload indexes.",
+        "historyPreview": "Found {{count}} invalid history indexes that can be rebuilt. Chat records stay unchanged.",
+        "historySuccess": "Reset {{count}} invalid history indexes. Restart the client and reopen the chats to rebuild them. Backups were retained.",
+        "historyNoChanges": "No invalid history indexes were found that can be safely rebuilt.",
+        "historyFailed": "History index repair did not complete: {{error}}",
+        "historyChanged": "Chat data changed during repair. This repair was not applied; try again shortly.",
+        "historyScan": "Checking history indexes ({{current}}/{{total}})…",
+        "historyReset": "Backing up and resetting invalid indexes…"
       },
       "transferModal": {
         "exportTitle": "Export Sessions",
@@ -4839,6 +4930,11 @@
       },
       "routing": {
         "optionsTitle": "Routing Options",
+        "sessionIdentityMapping": "Session ID mapping",
+        "sessionIdentityMappingEnableHint": "Enabling mapping gives each upstream account independent Session-Id and Thread-Id values when switching accounts. This strengthens identifier isolation but may reduce cache reuse across accounts. Existing mappings are still reused within the same account.",
+        "sessionIdentityMappingDisableHint": "Disabling mapping preserves the original client Session-Id and Thread-Id values. Different upstream accounts may share those identifiers, weakening isolation but potentially increasing cache reuse across accounts.",
+        "sessionIdentityMappingCacheNote": "Cache hit rates also depend on upstream rules, account scope and request content. Switching this setting does not guarantee a higher or lower hit rate.",
+        "sessionIdentityMappingSaveNote": "After confirming, save the settings to apply the change.",
         "sessionAffinity": "Session Affinity",
         "sessionAffinityTtl": "Expiration (seconds)",
         "responsesWebsockets": "Responses WebSocket",
@@ -6064,6 +6160,22 @@
       "label": "Active quota sync",
       "description": "No API Service needed. Active local accounts refresh every 5–30 seconds; session file changes trigger follow-up checks. Only recent file metadata is inspected, not conversation content. Account exclusions, plan filters and group policies still apply. Off by default.",
       "error": "Could not load or save the setting. Please retry."
+    },
+    "pathRecovery": {
+      "title": "Set Codex launch path",
+      "description": "No usable Codex client path was found. Select the app, or open Codex manually and detect it.",
+      "reload": "Reload",
+      "timeout": "The operation timed out. Retry when ready; startup will not continue automatically.",
+      "noCandidates": "Codex was not detected. Open the client manually and detect again, or select its path.",
+      "pathRequired": "Select or enter the Codex client path.",
+      "invalidPath": "This is not a valid Codex desktop client path. Select the app again.",
+      "candidates": "Detected apps",
+      "autoLaunchHint": "Turn this off to switch accounts without starting the desktop app. You can still start it manually.",
+      "manualLaunchHint": "Disabling automatic startup does not complete this manual launch. Saving settings only cancels this launch attempt.",
+      "saveAndRetry": "Save and retry",
+      "saveWithoutLaunch": "Save and continue",
+      "saveOnly": "Save only",
+      "validationBusy": "The previous path check is still running. Please retry shortly."
     }
   },
   "codebuddy": {

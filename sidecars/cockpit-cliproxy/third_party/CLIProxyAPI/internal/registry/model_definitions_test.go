@@ -87,15 +87,17 @@ func TestWithXAIBuiltinsIncludesImage20(t *testing.T) {
 func TestPaidCodexModelsIncludeGPT6FamilyButFreeDoesNot(t *testing.T) {
 	wantOrder := []string{
 		codexBuiltinGPT61SolModelID,
+		codexBuiltinGPT61TerraModelID,
 		codexBuiltinGPT6AstraModelID,
 		codexBuiltinGPT6SolModelID,
 		codexBuiltinGPT6LunaModelID,
 	}
 	wantDisplayNames := map[string]string{
-		codexBuiltinGPT61SolModelID:  "GPT-6.1 Sol",
-		codexBuiltinGPT6AstraModelID: "GPT-6 Astra",
-		codexBuiltinGPT6SolModelID:   "GPT-6 Sol",
-		codexBuiltinGPT6LunaModelID:  "GPT-6 Luna",
+		codexBuiltinGPT61SolModelID:   "GPT-6.1 Sol",
+		codexBuiltinGPT61TerraModelID: "GPT-6.1 Terra",
+		codexBuiltinGPT6AstraModelID:  "GPT-6 Astra",
+		codexBuiltinGPT6SolModelID:    "GPT-6 Sol",
+		codexBuiltinGPT6LunaModelID:   "GPT-6 Luna",
 	}
 
 	for _, models := range [][]*ModelInfo{
@@ -123,7 +125,11 @@ func TestPaidCodexModelsIncludeGPT6FamilyButFreeDoesNot(t *testing.T) {
 			if model == nil {
 				t.Fatalf("paid Codex models do not contain %s", modelID)
 			}
-			template := embeddedCodexClientModelForTest(t, modelID)
+			templateID := modelID
+			if modelID == codexBuiltinGPT61TerraModelID {
+				templateID = codexBuiltinGPT6LunaModelID
+			}
+			template := embeddedCodexClientModelForTest(t, templateID)
 			wantContext := int(template["context_window"].(float64))
 			if model.ContextLength != wantContext || model.MaxCompletionTokens != 128000 {
 				t.Fatalf("%s limits = %d/%d, want %d/128000", modelID, model.ContextLength, model.MaxCompletionTokens, wantContext)

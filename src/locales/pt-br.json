@@ -158,6 +158,15 @@
     "providerClear": "Limpar seleção"
   },
   "common": {
+    "networkErrors": {
+      "upstream": "este serviço de destino",
+      "proxyConnection": "Falha ao conectar a {{target}} pelo proxy “{{proxy}}”. Pode haver um problema no proxy ou na rede. Verifique o proxy ou tente outro nó.",
+      "proxyTimeout": "A conexão com {{target}} pelo proxy “{{proxy}}” excedeu o tempo limite. Pode haver um problema no proxy ou na rede. Verifique o proxy ou tente outro nó.",
+      "proxyAuth": "Falha na autenticação do proxy “{{proxy}}”. Verifique o usuário ou a senha do proxy.",
+      "localProxyUnavailable": "Não foi possível conectar ao proxy local “{{proxy}}”. Verifique se o serviço de proxy está em execução.",
+      "directConnection": "Falha ao conectar a {{target}}. Verifique a rede e tente novamente.",
+      "directTimeout": "A conexão com {{target}} excedeu o tempo limite. Verifique a rede e tente novamente."
+    },
     "codexUsage": {
       "title": "Cota e uso",
       "session": "Conversa atual",
@@ -167,8 +176,8 @@
       "speed": "Velocidade de saída",
       "cache": "Acertos de cache",
       "cacheShort": "Em cache",
-      "speedHint": "Velocidade de saída ponderada das solicitações API válidas recentes desta conversa, sem a espera pela primeira resposta. Exibe — quando não é possível associar as solicitações ou faltam dados de tempo.",
-      "cacheHint": "Proporção dos tokens de entrada recentes atendidos pelo cache, ponderada pelo volume de entrada.",
+      "speedHint": "Velocidade média de saída das solicitações válidas desta conversa, sem a espera pela primeira resposta. Sem medições: —.",
+      "cacheHint": "Taxa média de acertos de cache das solicitações válidas desta conversa, ponderada pelos tokens de entrada. Mantida após interromper a geração; sem contadores: —.",
       "aggregateHint": "Soma das porcentagens restantes, sem ponderação pela capacidade do plano. Cores iguais às da visão de contas: ≥80% verde, ≥40% amarelo, ≥10% laranja e abaixo de 10% vermelho. Valores desconhecidos não recebem cor de cota.",
       "waiting": "Aguardando registros de uso da conversa",
       "refreshFailed": "Falha ao atualizar a cota. Os resultados anteriores foram mantidos. Tente novamente.",
@@ -225,7 +234,11 @@
       "avgLatency": "Latência média",
       "successRate": "Taxa de sucesso",
       "verifiedStatistics": "Dados verificados",
-      "excludedHistory": "{{count}} registros históricos sem comprovação de envio foram excluídos da contagem."
+      "excludedHistory": "{{count}} registros históricos sem comprovação de envio foram excluídos da contagem.",
+      "averageSpeed": "Velocidade média",
+      "serviceUnavailable": "Serviço de API indisponível. Tente novamente.",
+      "tierAdjusted": "Ajustado para padrão",
+      "averageCache": "Acertos médios de cache"
     },
     "apiKeyAccount": "Conta API Key",
     "status": "Estado",
@@ -1625,6 +1638,35 @@
       "refreshed": "Uso atualizado",
       "usage": "Uso",
       "tierOther": "Outro"
+    },
+    "background": {
+      "title": "Fundo",
+      "description": "Altera apenas o fundo do aplicativo. Cartões de contas e controles mantêm a aparência atual.",
+      "presets": "Fundos predefinidos",
+      "default": "Padrão",
+      "mist": "Névoa",
+      "forest": "Floresta",
+      "dusk": "Entardecer",
+      "sand": "Areia",
+      "custom": "Pessoal",
+      "chooseImage": "Escolher imagem",
+      "replaceImage": "Trocar imagem",
+      "imageHint": "JPG, PNG ou WebP, até 10 MB. Imagens grandes são reduzidas localmente.",
+      "preview": "Prévia",
+      "strength": "Intensidade",
+      "blur": "Desfoque",
+      "pixels": "{{count}} píxeis",
+      "position": "Posição",
+      "center": "Centro",
+      "top": "Topo",
+      "bottom": "Base",
+      "localHint": "As alterações são aplicadas na hora e salvas automaticamente neste dispositivo. As imagens não são enviadas. Restaurar remove a imagem salva.",
+      "restore": "Restaurar",
+      "imageType": "Escolha uma imagem JPG, PNG ou WebP.",
+      "imageSize": "Escolha uma imagem menor que 10 MB.",
+      "imageRead": "Não foi possível ler a imagem. Tente outro arquivo.",
+      "storage": "Não foi possível carregar ou salvar o fundo. Tente novamente; o fundo anterior será mantido.",
+      "saveFailed": "O fundo está sendo exibido, mas não foi salvo. Tente novamente; o fundo salvo anteriormente será mantido."
     }
   },
   "appPath": {
@@ -2350,7 +2392,18 @@
       "windowHint": "Os limites seguem a duração real: uma semana ou mais usa o limite semanal. Contas com apenas cota semanal verificam somente essa cota. Sem duração, mantém-se o mapeamento das janelas principal e secundária.",
       "rule": "Saldo curto <= {{shortCycle}}% ou semanal <= {{weekly}}%"
     },
+    "launchConfirmation": {
+      "title": "Início não confirmado",
+      "description": "A inicialização foi solicitada, mas o estado do cliente ainda não foi confirmado. Ele pode já estar aberto. Evite iniciá-lo novamente.",
+      "check": "Verificar estado",
+      "notRunning": "A instância de destino ainda não foi detectada. Verifique mais tarde ou feche esta janela antes de tentar iniciar novamente.",
+      "checkFailed": "Não foi possível consultar o estado de execução. Verifique novamente mais tarde.",
+      "maintenanceDeferred": "A verificação de sessões está temporariamente indisponível. O histórico foi preservado e esta etapa de manutenção foi ignorada."
+    },
     "launchErrors": {
+      "sessionRestoreFailed": "A reparação das sessões falhou e a restauração está incompleta. Inicialização interrompida; verifique os logs e backups antes de tentar novamente.",
+      "sessionCheckTimeout": "A verificação das sessões excedeu o tempo. Inicialização interrompida; tente novamente ou consulte os logs.",
+      "sessionFileTooLarge": "O cabeçalho de um arquivo de sessão é muito grande. Inicialização interrompida; consulte os logs.",
       "bindingFailed": "Não foi possível confirmar a conta vinculada. Inicialização interrompida; tente trocar de conta novamente.",
       "processScanFailed": "Não foi possível verificar os processos anteriores em segundo plano. Inicialização interrompida; tente novamente.",
       "proxyEntryFailed": "Não foi possível iniciar o proxy configurado. Nenhuma rota alternativa foi usada; tente novamente."
@@ -2753,7 +2806,8 @@
         "audioNotSupported": "Esta conta OAuth só oferece transcrição. Use um provedor com API Key para outras operações de áudio.",
         "audioUnavailable": "O encaminhamento de áudio está indisponível.",
         "audioUpstreamFailed": "A solicitação de áudio ao provedor falhou.",
-        "modelNotAvailable": "O modelo {{model}} não está disponível para esta API Key."
+        "modelNotAvailable": "O modelo {{model}} não está disponível para esta API Key.",
+        "quotaReserved": "A cota da conta está reservada ou aguardando confirmação. Tente novamente em instantes."
       },
       "testRateLimited": "O serviço está acessível, mas o upstream está limitado ou a cota acabou: {{detail}}.",
       "testHttpFailed": "O serviço está acessível, mas a requisição retornou HTTP {{status}}: {{detail}}.",
@@ -2906,7 +2960,23 @@
         "imageGenerationConfirm": {
           "title": "Desativar image_generation",
           "message": "Ao ativar, o serviço API removerá a declaração da ferramenta image_generation no gateway local antes de encaminhar conversas de texto, evitando erros como \"Image generation is not enabled\". gpt-image e outros modelos de imagem não são removidos. Continuar?"
-        }
+        },
+        "quotaReserveToggle": "Reservar cota OAuth",
+        "quotaReserveDesc": "O serviço API usa esta conta OAuth somente enquanto as cotas restantes de 5 horas e semanal estiverem acima dos valores reservados.",
+        "quotaReserveHourlyLabel": "Reserva de 5 h",
+        "quotaReserveWeeklyLabel": "Reserva semanal",
+        "quotaReserveInvalid": "Digite um número inteiro de 1 a 100.",
+        "strictReserve": "Proteção rigorosa",
+        "strictReserveDesc": "A cota reservada é protegida automaticamente com uma margem de segurança. Perto do limite, cada conta permite uma solicitação e confirma a cota atual ao concluir. O uso de outros clientes não é limitado.",
+        "strictNativeOnly": "A proteção rigorosa exige o motor Rust. Desative-a antes de mudar para Go.",
+        "safetyMargin": "Margem de segurança",
+        "safetyMarginUnit": "pontos percentuais",
+        "safetyMarginInvalid": "Digite um inteiro de 1 a 20.",
+        "quotaInFlight": "Em andamento: {{count}}",
+        "quotaWaiting": "Aguardando confirmação da cota",
+        "quotaStale": "Cota indisponível",
+        "quotaProtected": "Reservado",
+        "quotaUpdated": "Atualizado: {{time}}"
       },
       "customRoutingEdit": "Editar roteamento personalizado",
       "customRoutingTitle": "Roteamento personalizado",
@@ -3028,7 +3098,7 @@
           "poolUnavailable": "Nenhuma conta disponível no pool",
           "poolUnavailableDetail": "Nenhuma conta disponível foi selecionada para o modelo {{model}}",
           "poolUnattributedDetail": "Nenhum diagnóstico por conta foi recebido, portanto esta falha não pode ser atribuída a uma conta. Verifique o escopo de contas e a configuração de modelos desta chave API.",
-          "poolDiagnosticDetail": "Modelo {{model}}: {{candidate}} candidatas, {{scoped}} no escopo, {{available}} disponíveis, {{unavailable}} indisponíveis, {{modelExcluded}} excluídas pelo modelo, {{imageBlocked}} bloqueadas pela política de imagens",
+          "poolDiagnosticDetail": "Modelo {{model}}: {{candidate}} candidatas, {{scoped}} no escopo, {{available}} disponíveis, {{unavailable}} indisponíveis, {{modelExcluded}} excluídas pelo modelo, {{quotaReserved}} reservadas pela cota, {{imageBlocked}} bloqueadas pela política de imagens",
           "poolNoCandidatesDetail": "Não há contas candidatas para esta solicitação. Verifique o modelo solicitado e o carregamento das contas.",
           "poolScopeMismatchDetail": "Nenhuma candidata corresponde ao escopo desta chave API, ou seu vínculo com a conta não foi reconhecido. Verifique as contas selecionadas e a configuração do modelo.",
           "inspectBinding": "Ver vínculo",
@@ -3040,7 +3110,7 @@
           "boundAccountNotLoadedDetail": "Esta conta vinculada não está carregada no serviço atual. Verifique o carregamento das contas e a sincronização do pool.",
           "boundAccountNotCandidateDetail": "Esta conta vinculada foi carregada, mas não é candidata para esta solicitação. Verifique o modelo, o provedor e o tipo de solicitação.",
           "scopeUnknownDetail": "O diagnóstico de escopo não indica uma causa específica. Verifique os vínculos e os registros do serviço.",
-          "poolBlockedDetail": "Filtro no escopo: {{unavailable}} indisponíveis (por desativação, espera ou falha de autenticação, por exemplo), {{modelExcluded}} excluídas por modelo, {{imageBlocked}} bloqueadas pela política de imagens. Verifique os motivos por conta e os ajustes.",
+          "poolBlockedDetail": "Filtro no escopo: {{unavailable}} indisponíveis (por desativação, espera ou falha de autenticação, por exemplo), {{modelExcluded}} excluídas por modelo, {{quotaReserved}} bloqueadas por reserva de cota, {{imageBlocked}} bloqueadas pela política de imagens. Verifique os motivos por conta e os ajustes.",
           "poolUnknownDetail": "O diagnóstico não identifica uma causa específica. Verifique o escopo da chave API, a configuração do modelo e os registros do serviço.",
           "clearHint": "Limpar remove apenas este diagnóstico. Não corrige ajustes, tokens nem cotas; outra solicitação com falha pode criar um novo registro.",
           "clearSuccess": "Diagnóstico removido. Isso não significa que o grupo de contas esteja disponível novamente.",
@@ -3155,7 +3225,7 @@
       "resetCreditStatusRedeemed": "Usada",
       "resetCreditStatusExpired": "Expirada",
       "resetCreditStatusUnknown": "Desconhecida",
-      "resetCreditNextExpiry": "Próximo vencimento: {{time}}",
+      "resetCreditNextExpiry": "Próximo vencimento da redefinição {{time}}",
       "resetCreditDetailsTitle": "Detalhes das redefinições",
       "resetCreditNoRecords": "Sem registros de redefinição",
       "resetCreditRecordsLoadFailed": "Falha ao carregar registros de redefinição: {{error}}",
@@ -3171,7 +3241,12 @@
       "codeReview": "Revisão de código",
       "codeReviewShort": "Revisão",
       "monthlyCreditsHint": "Créditos mensais restantes",
-      "monthlyCreditsInline": "Créditos: {{value}}"
+      "monthlyCreditsInline": "Créditos: {{value}}",
+      "resetCreditExpiryHours": "{{hours}} h {{minutes}} min",
+      "resetCreditExpiryMinutes": "{{minutes}} min",
+      "resetCreditExpiryExpired": "Expirado · detalhes",
+      "resetCreditExpiryUrgent": "Expira em breve: {{time}} · {{duration}}",
+      "resetCreditExpiryNormal": "Expira {{time}} · {{duration}}"
     },
     "quotaError": {
       "badge": "Erro de cota",
@@ -3448,6 +3523,7 @@
         "expand": "Expandir",
         "collapse": "Recolher",
         "repairVisibility": "Reparar visibilidade",
+        "repairIndex": "Reparar índice de chats",
         "restoreSessions": "Restaurar sessões",
         "exportSessions": "Exportar sessões",
         "importSessions": "Importar sessões",
@@ -3480,6 +3556,10 @@
         "clear": "Limpar"
       },
       "messages": {
+        "deleteNotConfirmed": "O cliente não confirmou a exclusão. A limpeza local foi interrompida e os backups foram preservados: {{error}}",
+        "historyReadFailed": "Não foi possível ler o histórico da conversa com segurança: {{error}}",
+        "restoreIndexRetry": "O arquivo da conversa foi preservado, mas não foi possível atualizar a lista. O original continua na lixeira. Resolva o problema e tente novamente: {{error}}",
+        "importIndexRetry": "Os arquivos foram importados, mas não foi possível atualizar a lista de conversas. Os arquivos e o pacote de importação foram preservados. Resolva o problema e tente novamente: {{error}}",
         "pickOne": "Selecione pelo menos uma sessão",
         "syncNeedTwo": "Pelo menos duas instâncias são necessárias para sincronizar sessões",
         "pickRestoreOne": "Selecione pelo menos uma sessão para restaurar",
@@ -3590,7 +3670,18 @@
         "title": "Reparar histórico",
         "description": "Normaliza provedores nos índices SQLite, no catálogo de sessões e nos espaços de trabalho. Os arquivos rollout mantêm todos os bytes originais; apenas as datas são corrigidas. Um backup local é criado antes.",
         "stopInstanceHint": "Feche completamente a instância selecionada do Codex App/ChatGPT antes do reparo completo. Você ainda pode visualizar as alterações primeiro.",
-        "encryptedContentWarning": "Foi detectado histórico criptografado por outro provedor ou conta. Os metadados podem ser migrados, mas continuar ou compactar essas sessões ainda pode falhar; volte ao provedor/conta original ou inicie uma nova sessão."
+        "encryptedContentWarning": "Foi detectado histórico criptografado por outro provedor ou conta. Os metadados podem ser migrados, mas continuar ou compactar essas sessões ainda pode falhar; volte ao provedor/conta original ou inicie uma nova sessão.",
+        "modeHistory": "Edição/ramificações",
+        "modeHistoryDesc": "Corrige falhas ao editar mensagens e ramificar chats causadas por índices inválidos.",
+        "historyLiveHint": "Você pode reparar com o cliente aberto. Depois, reinicie o cliente e reabra as conversas.",
+        "historyDescription": "Verifica as conversas selecionadas e seu histórico de origem, redefinindo apenas os índices de paginação inválidos. Mensagens, contas e configurações de Provider permanecem intactas. O reparo funciona com o cliente aberto; reinicie-o depois para recarregar os índices.",
+        "historyPreview": "Foram encontrados {{count}} índices de histórico inválidos que podem ser reconstruídos. As mensagens permanecem intactas.",
+        "historySuccess": "Foram redefinidos {{count}} índices de histórico inválidos. Reinicie o cliente e reabra as conversas para reconstruí-los. Os backups foram mantidos.",
+        "historyNoChanges": "Nenhum índice de histórico inválido pode ser reconstruído com segurança.",
+        "historyFailed": "O reparo dos índices de histórico não foi concluído: {{error}}",
+        "historyChanged": "Os dados da conversa mudaram durante o reparo. Este reparo não foi aplicado. Tente novamente em instantes.",
+        "historyScan": "Verificando índices de histórico ({{current}}/{{total}})…",
+        "historyReset": "Criando backups e redefinindo índices inválidos…"
       },
       "importModal": {
         "title": "Importar sessões",
@@ -4576,6 +4667,11 @@
       },
       "routing": {
         "optionsTitle": "Opções de rota",
+        "sessionIdentityMapping": "Mapeamento de ID",
+        "sessionIdentityMappingEnableHint": "Ao ativar o mapeamento, cada conta do provedor usa valores próprios de Session-Id e Thread-Id ao trocar de conta. Isso reforça o isolamento dos identificadores, mas pode reduzir a reutilização de cache entre contas. Na mesma conta, os mapeamentos existentes são reutilizados.",
+        "sessionIdentityMappingDisableHint": "Ao desativar, os valores originais de Session-Id e Thread-Id do cliente são mantidos. Contas diferentes do provedor podem compartilhar esses identificadores, reduzindo o isolamento, mas possivelmente aumentando a reutilização de cache entre contas.",
+        "sessionIdentityMappingCacheNote": "A taxa de acertos de cache também depende das regras do provedor, do escopo das contas e do conteúdo das solicitações. Essa configuração não garante aumento ou redução da taxa.",
+        "sessionIdentityMappingSaveNote": "Após confirmar, salve as configurações para aplicar a alteração.",
         "sessionAffinity": "Afinidade de sessão",
         "sessionAffinityTtl": "Expiração (segundos)",
         "responsesWebsockets": "Responses por WebSocket",
@@ -5844,6 +5940,22 @@
       "label": "Sincronizar cota ativa",
       "description": "Sem iniciar o serviço API. Contas locais ativas são atualizadas a cada 5–30 segundos; mudanças nos arquivos de sessão acionam novas consultas. Apenas metadados recentes são verificados, sem ler conversas. Exclusões de contas, filtros de plano e regras de grupo continuam válidos. Desativado por padrão.",
       "error": "Não foi possível carregar ou salvar a configuração. Tente novamente."
+    },
+    "pathRecovery": {
+      "title": "Definir caminho do Codex",
+      "description": "Nenhum caminho utilizável para o cliente Codex foi encontrado. Selecione o aplicativo ou abra o Codex manualmente e faça a detecção.",
+      "reload": "Recarregar",
+      "timeout": "O tempo da operação se esgotou. Tente novamente; a inicialização não continuará automaticamente.",
+      "noCandidates": "Codex não foi detectado. Abra o cliente manualmente e tente detectar novamente, ou selecione o caminho.",
+      "pathRequired": "Selecione ou informe o caminho do cliente Codex.",
+      "invalidPath": "Este caminho não corresponde a um cliente Codex válido para desktop. Selecione o aplicativo novamente.",
+      "candidates": "Aplicativos detectados",
+      "autoLaunchHint": "Desative esta opção para trocar de conta sem iniciar o aplicativo de desktop. Você ainda poderá abri-lo manualmente.",
+      "manualLaunchHint": "Desativar a inicialização automática não conclui esta tentativa manual. Salvar apenas as configurações cancela esta tentativa de inicialização.",
+      "saveAndRetry": "Salvar e tentar de novo",
+      "saveWithoutLaunch": "Salvar e continuar",
+      "saveOnly": "Apenas salvar",
+      "validationBusy": "A verificação do caminho anterior ainda está em andamento. Tente novamente em instantes."
     }
   },
   "githubCopilot": {

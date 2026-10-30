@@ -23,7 +23,6 @@ pub struct ResponsesStreamAdapter {
     refusal: Option<usize>,
     reasoning: Option<usize>,
     tools: BTreeMap<usize, Tool>,
-    bytes: usize,
     context: ToolContext,
 }
 impl ResponsesStreamAdapter {
@@ -42,7 +41,6 @@ impl ResponsesStreamAdapter {
             refusal: None,
             reasoning: None,
             tools: BTreeMap::new(),
-            bytes: 0,
             context,
         }
     }
@@ -50,13 +48,6 @@ impl ResponsesStreamAdapter {
         value["sequence_number"] = json!(self.sequence);
         self.sequence += 1;
         value
-    }
-    fn account(&mut self, size: usize) -> Result<(), ServiceError> {
-        self.bytes = self.bytes.saturating_add(size);
-        if self.bytes > 32 * 1024 * 1024 || self.output.len() > 4096 {
-            return Err(upstream_error("Chat stream exceeds bounded adapter state"));
-        }
-        Ok(())
     }
     fn add_text(
         &mut self,
@@ -67,7 +58,6 @@ impl ResponsesStreamAdapter {
         if text.is_empty() {
             return Ok(());
         }
-        self.account(text.len())?;
         let existing = match kind {
             "refusal" => self.refusal,
             "reasoning" => self.reasoning,
@@ -133,9 +123,6 @@ impl ResponsesStreamAdapter {
     }
     fn add_tool(&mut self, call: &Value, events: &mut Vec<Value>) -> Result<(), ServiceError> {
         let index = call["index"].as_u64().unwrap_or(0) as usize;
-        if index > 4096 {
-            return Err(upstream_error("Tool index exceeds bounded adapter state"));
-        }
         if !self.tools.contains_key(&index) {
             let output = self.output.len();
             self.output.push(Value::Null);
@@ -153,7 +140,6 @@ impl ResponsesStreamAdapter {
         let args = call[key][if custom { "input" } else { "arguments" }]
             .as_str()
             .unwrap_or("");
-        self.account(name.len() + args.len())?;
         let tool = self.tools.get_mut(&index).unwrap();
         tool.custom |= custom;
         if let Some(id) = call["id"].as_str().filter(|s| !s.is_empty()) {

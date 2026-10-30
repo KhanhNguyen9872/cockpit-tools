@@ -27,7 +27,7 @@ pub(super) fn response(
         encode(json!({"type":"response.created","sequence_number":0,"response":envelope})),
         encode(json!({"type":"response.in_progress","sequence_number":1,"response":envelope})),
     ]);
-    let limit = execution.state.options.max_response_bytes;
+    let limit = execution.event_limit();
     let (stream, json) = if is_sse(upstream.headers()) {
         (Some(upstream.bytes_stream().boxed()), None)
     } else {
@@ -131,7 +131,7 @@ impl BridgeStream {
         let events = if let Some(bytes) = next {
             self.execution.tracker.first_response();
             self.received = self.received.saturating_add(bytes.len());
-            if self.received > self.execution.state.options.max_response_bytes {
+            if self.received > self.execution.response_limit() {
                 return Err(ServiceError::new(
                     502,
                     "invalid_image_response",
@@ -190,7 +190,7 @@ impl BridgeStream {
                 &self.execution.state,
                 &mut images,
                 ImageResponseFormat::Base64,
-                self.execution.state.options.max_response_bytes,
+                self.execution.response_limit(),
                 self.execution.asset_budget(),
             )
             .await?;

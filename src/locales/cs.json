@@ -158,6 +158,15 @@
     "providerClear": "Zrušit výběr"
   },
   "common": {
+    "networkErrors": {
+      "upstream": "nadřazené službě",
+      "proxyConnection": "Připojení k {{target}} přes proxy „{{proxy}}“ selhalo. Může jít o problém proxy nebo sítě. Zkontrolujte proxy nebo zkuste jiný uzel.",
+      "proxyTimeout": "Vypršel čas připojení k {{target}} přes proxy „{{proxy}}“. Může jít o problém proxy nebo sítě. Zkontrolujte proxy nebo zkuste jiný uzel.",
+      "proxyAuth": "Ověření proxy „{{proxy}}“ selhalo. Zkontrolujte uživatelské jméno nebo heslo proxy.",
+      "localProxyUnavailable": "Nelze se připojit k místní proxy „{{proxy}}“. Zkontrolujte, zda služba proxy běží.",
+      "directConnection": "Připojení k {{target}} selhalo. Zkontrolujte síť a zkuste to znovu.",
+      "directTimeout": "Vypršel čas připojení k {{target}}. Zkontrolujte síť a zkuste to znovu."
+    },
     "codexUsage": {
       "title": "Kvóta a využití",
       "session": "Aktuální chat",
@@ -167,8 +176,8 @@
       "speed": "Rychlost výstupu",
       "cache": "Zásahy mezipaměti",
       "cacheShort": "Mezipaměť",
-      "speedHint": "Vážená rychlost výstupu nedávných platných požadavků API v této konverzaci bez čekání na první odpověď. Pokud požadavky nelze přiřadit nebo chybí časové údaje, zobrazí se —.",
-      "cacheHint": "Podíl nedávných vstupních tokenů obsloužených z mezipaměti, vážený objemem vstupu.",
+      "speedHint": "Průměrná rychlost výstupu platných požadavků v tomto chatu bez čekání na první odpověď. Chybějící měření: —.",
+      "cacheHint": "Průměrná úspěšnost mezipaměti platných požadavků v tomto chatu vážená vstupními tokeny. Zachová se po zastavení generování; chybějící počty: —.",
       "aggregateHint": "Součet zbývajících procent bez vážení kapacitou tarifu. Barvy jako v přehledu účtů: ≥80 % zelená, ≥40 % žlutá, ≥10 % oranžová, pod 10 % červená. Neznámé hodnoty nemají barvu kvóty.",
       "waiting": "Čekání na záznamy využití chatu",
       "refreshFailed": "Kvótu se nepodařilo obnovit. Předchozí výsledky jsou zachovány. Zkuste to znovu.",
@@ -225,7 +234,11 @@
       "avgLatency": "Prům. odezva",
       "successRate": "Úspěšnost",
       "verifiedStatistics": "Ověřené údaje",
-      "excludedHistory": "{{count}} historických záznamů bez potvrzení o odeslání není započítáno."
+      "excludedHistory": "{{count}} historických záznamů bez potvrzení o odeslání není započítáno.",
+      "averageSpeed": "Průměrná rychlost",
+      "serviceUnavailable": "Služba API není dostupná. Zkuste to znovu.",
+      "tierAdjusted": "Upraveno na standardní",
+      "averageCache": "Průměr zásahů mezipaměti"
     },
     "apiKeyAccount": "Účet API Key",
     "status": "Stav",
@@ -1625,6 +1638,35 @@
       "refreshed": "Usage obnoveno",
       "usage": "Využití",
       "tierOther": "Jiné"
+    },
+    "background": {
+      "title": "Pozadí",
+      "description": "Mění pouze pozadí aplikace. Karty účtů a ovládací prvky si zachovají vzhled.",
+      "presets": "Předvolby pozadí",
+      "default": "Výchozí",
+      "mist": "Mlha",
+      "forest": "Les",
+      "dusk": "Soumrak",
+      "sand": "Písek",
+      "custom": "Vlastní",
+      "chooseImage": "Vybrat obrázek",
+      "replaceImage": "Změnit obrázek",
+      "imageHint": "JPG, PNG nebo WebP, do 10 MB. Velké obrázky se zmenší místně.",
+      "preview": "Náhled",
+      "strength": "Intenzita",
+      "blur": "Rozostření",
+      "pixels": "{{count}} pixelů",
+      "position": "Poloha",
+      "center": "Střed",
+      "top": "Nahoře",
+      "bottom": "Dole",
+      "localHint": "Změny se projeví ihned a automaticky se uloží v tomto zařízení. Obrázky se neodesílají. Obnovení odstraní uložený obrázek.",
+      "restore": "Obnovit",
+      "imageType": "Vyberte obrázek JPG, PNG nebo WebP.",
+      "imageSize": "Vyberte obrázek menší než 10 MB.",
+      "imageRead": "Obrázek nelze načíst. Zkuste jiný soubor.",
+      "storage": "Pozadí nelze načíst nebo uložit. Zkuste to znovu; původní pozadí zůstane zachováno.",
+      "saveFailed": "Pozadí se zobrazuje, ale nepodařilo se je uložit. Zkuste to znovu; dříve uložené pozadí zůstává zachováno."
     }
   },
   "appPath": {
@@ -2350,7 +2392,18 @@
       "windowHint": "Prahy odpovídají skutečné délce: týden a více používá týdenní práh. Účty pouze s týdenní kvótou kontrolují jen ji. Bez délky se zachová mapování hlavního a vedlejšího okna.",
       "rule": "Krátkodobý zůstatek <= {{shortCycle}}% nebo týdenní zůstatek <= {{weekly}}%"
     },
+    "launchConfirmation": {
+      "title": "Spuštění nepotvrzeno",
+      "description": "Požadavek na spuštění byl odeslán, ale stav klienta není potvrzen. Může již být otevřený. Nespouštějte jej znovu.",
+      "check": "Ověřit stav",
+      "notRunning": "Cílová instance zatím nebyla nalezena. Zkuste kontrolu později, nebo před dalším spuštěním zavřete tento dialog.",
+      "checkFailed": "Stav spuštění nelze načíst. Zkuste kontrolu později.",
+      "maintenanceDeferred": "Kontrola relací je dočasně nedostupná. Historie zůstala zachována a tento krok údržby byl přeskočen."
+    },
     "launchErrors": {
+      "sessionRestoreFailed": "Oprava relací selhala a obnova zálohy není dokončena. Spuštění bylo zastaveno; před dalším pokusem zkontrolujte protokoly a zálohy.",
+      "sessionCheckTimeout": "Kontrola relací vypršela. Spuštění bylo zastaveno; zkuste to znovu nebo zkontrolujte protokoly.",
+      "sessionFileTooLarge": "Záhlaví souboru relace je příliš velké. Spuštění bylo zastaveno; zkontrolujte protokoly.",
       "bindingFailed": "Nelze potvrdit přiřazení účtu. Spuštění zastaveno. Zkuste účet přepnout znovu.",
       "processScanFailed": "Nelze zkontrolovat předchozí procesy na pozadí. Spuštění zastaveno. Zkuste to znovu.",
       "proxyEntryFailed": "Nakonfigurovaný proxy server nelze spustit. Jiná trasa nebyla použita. Zkuste to znovu."
@@ -2753,7 +2806,8 @@
         "audioNotSupported": "Tento účet OAuth podporuje pouze přepis. Pro jiné zvukové operace použijte poskytovatele s API Key.",
         "audioUnavailable": "Předávání zvuku není dostupné.",
         "audioUpstreamFailed": "Zvukový požadavek poskytovateli selhal.",
-        "modelNotAvailable": "Model {{model}} není pro tento API Key dostupný."
+        "modelNotAvailable": "Model {{model}} není pro tento API Key dostupný.",
+        "quotaReserved": "Kvóta účtu je rezervována nebo čeká na ověření. Zkuste to za chvíli."
       },
       "testRateLimited": "Služba je dosažitelná, ale upstream je omezen nebo kvóta vyčerpána: {{detail}}.",
       "testHttpFailed": "Služba je dosažitelná, ale požadavek vrátil HTTP {{status}}: {{detail}}.",
@@ -2906,7 +2960,23 @@
         "imageGenerationConfirm": {
           "title": "Zakázat image_generation",
           "message": "Po zapnutí služba API v místní bráně před přeposláním běžných textových konverzací odstraní deklaraci nástroje image_generation, aby se předešlo chybám typu „Image generation is not enabled“. Modely obrázků jako gpt-image se nemažou. Pokračovat?"
-        }
+        },
+        "quotaReserveToggle": "Rezervovat kvótu OAuth",
+        "quotaReserveDesc": "Služba API používá tento účet OAuth jen tehdy, když je zbývající 5hodinová i týdenní kvóta vyšší než rezervovaná hodnota.",
+        "quotaReserveHourlyLabel": "Rezerva 5 hodin",
+        "quotaReserveWeeklyLabel": "Týdenní rezerva",
+        "quotaReserveInvalid": "Zadejte celé číslo od 1 do 100.",
+        "strictReserve": "Přísná ochrana",
+        "strictReserveDesc": "Rezervovanou kvótu automaticky chrání bezpečnostní rezerva. Blízko limitu se povolí jeden požadavek na účet a po dokončení se ověří aktuální kvóta. Využití ostatních klientů není omezeno.",
+        "strictNativeOnly": "Přísná ochrana vyžaduje modul Rust. Před přepnutím na Go ji vypněte.",
+        "safetyMargin": "Bezpečnostní rezerva",
+        "safetyMarginUnit": "procentních bodů",
+        "safetyMarginInvalid": "Zadejte celé číslo od 1 do 20.",
+        "quotaInFlight": "Probíhá: {{count}}",
+        "quotaWaiting": "Čeká na potvrzení kvóty",
+        "quotaStale": "Kvóta není dostupná",
+        "quotaProtected": "Rezervováno",
+        "quotaUpdated": "Aktualizováno: {{time}}"
       },
       "customRoutingEdit": "Upravit vlastní směrování",
       "customRoutingTitle": "Vlastní směrování",
@@ -3028,7 +3098,7 @@
           "poolUnavailable": "Ve fondu není dostupný účet",
           "poolUnavailableDetail": "Pro model {{model}} nebyl vybrán žádný dostupný účet",
           "poolUnattributedDetail": "Diagnostika jednotlivých účtů nebyla přijata, proto nelze chybu přiřadit konkrétnímu účtu. Zkontrolujte rozsah účtů a nastavení modelů tohoto klíče API.",
-          "poolDiagnosticDetail": "Model {{model}}: kandidátů {{candidate}}, v rozsahu {{scoped}}, dostupných {{available}}, nedostupných {{unavailable}}, vyloučených modelem {{modelExcluded}}, blokovaných zásadou obrázků {{imageBlocked}}",
+          "poolDiagnosticDetail": "Model {{model}}: kandidátů {{candidate}}, v rozsahu {{scoped}}, dostupných {{available}}, nedostupných {{unavailable}}, vyloučených modelem {{modelExcluded}}, rezervovaných kvótou {{quotaReserved}}, blokovaných zásadou obrázků {{imageBlocked}}",
           "poolNoCandidatesDetail": "Pro tento požadavek nejsou žádné kandidátní účty. Zkontrolujte požadovaný model a načítání účtů.",
           "poolScopeMismatchDetail": "Žádný kandidát neodpovídá rozsahu účtů tohoto klíče API nebo nebylo rozpoznáno přiřazení účtu. Zkontrolujte vybrané účty a konfiguraci modelu.",
           "inspectBinding": "Prověřit vazbu",
@@ -3040,7 +3110,7 @@
           "boundAccountNotLoadedDetail": "Tento přiřazený účet není načten v aktuální službě. Zkontrolujte načítání účtů a synchronizaci fondu.",
           "boundAccountNotCandidateDetail": "Tento přiřazený účet je načten, ale není kandidátem pro tento požadavek. Zkontrolujte model, poskytovatele a typ požadavku.",
           "scopeUnknownDetail": "Diagnostika rozsahu neurčuje konkrétní příčinu. Zkontrolujte vazby a protokoly služby.",
-          "poolBlockedDetail": "Filtr v rozsahu: {{unavailable}} nedostupných (např. zakázaných, v čekání nebo s chybou ověření), {{modelExcluded}} vyloučených modelem, {{imageBlocked}} blokovaných pravidly obrázků. Zkontrolujte důvody u účtů a nastavení.",
+          "poolBlockedDetail": "Filtr v rozsahu: {{unavailable}} nedostupných (např. zakázaných, v čekání nebo s chybou ověření), {{modelExcluded}} vyloučených modelem, {{quotaReserved}} blokovaných rezervou kvóty, {{imageBlocked}} blokovaných pravidly obrázků. Zkontrolujte důvody u účtů a nastavení.",
           "poolUnknownDetail": "Diagnostika neurčuje konkrétní příčinu. Zkontrolujte rozsah klíče API, konfiguraci modelu a protokoly služby.",
           "clearHint": "Smazání odstraní pouze tento diagnostický záznam. Neopraví nastavení, tokeny ani kvótu; další neúspěšný požadavek může vytvořit nový záznam.",
           "clearSuccess": "Diagnostický záznam smazán. To neznamená, že je fond účtů opět dostupný.",
@@ -3155,7 +3225,7 @@
       "resetCreditStatusRedeemed": "Použito",
       "resetCreditStatusExpired": "Vypršelo",
       "resetCreditStatusUnknown": "Neznámé",
-      "resetCreditNextExpiry": "Nejbližší expirace: {{time}}",
+      "resetCreditNextExpiry": "Nejbližší vypršení resetu {{time}}",
       "resetCreditDetailsTitle": "Podrobnosti resetů",
       "resetCreditNoRecords": "Žádné záznamy resetů",
       "resetCreditRecordsLoadFailed": "Načtení záznamů resetů selhalo: {{error}}",
@@ -3171,7 +3241,12 @@
       "codeReview": "Kontrola kódu",
       "codeReviewShort": "Recenze",
       "monthlyCreditsHint": "Zbývající měsíční kredity",
-      "monthlyCreditsInline": "Kredity: {{value}}"
+      "monthlyCreditsInline": "Kredity: {{value}}",
+      "resetCreditExpiryHours": "{{hours}} h {{minutes}} min",
+      "resetCreditExpiryMinutes": "{{minutes}} min",
+      "resetCreditExpiryExpired": "Vypršelo · podrobnosti",
+      "resetCreditExpiryUrgent": "Brzy vyprší: {{time}} · {{duration}}",
+      "resetCreditExpiryNormal": "Vyprší {{time}} · {{duration}}"
     },
     "quotaError": {
       "badge": "Chyba kvóty",
@@ -3448,6 +3523,7 @@
         "expand": "Rozbalit",
         "collapse": "Sbalit",
         "repairVisibility": "Opravit viditelnost",
+        "repairIndex": "Opravit index chatů",
         "restoreSessions": "Obnovit relace",
         "exportSessions": "Exportovat relace",
         "importSessions": "Importovat relace",
@@ -3480,6 +3556,10 @@
         "clear": "Vymazat"
       },
       "messages": {
+        "deleteNotConfirmed": "Klient nepotvrdil odstranění. Místní čištění bylo zastaveno a zálohy byly zachovány: {{error}}",
+        "historyReadFailed": "Historii chatu nelze bezpečně přečíst: {{error}}",
+        "restoreIndexRetry": "Soubor chatu byl zachován, ale seznam chatů se nepodařilo aktualizovat. Originál zůstává v koši. Vyřešte problém a zkuste to znovu: {{error}}",
+        "importIndexRetry": "Soubory chatů byly importovány, ale seznam se nepodařilo aktualizovat. Soubory i importní balíček byly zachovány. Vyřešte problém a zkuste to znovu: {{error}}",
         "pickOne": "Vyberte prosím alespoň jednu relaci",
         "syncNeedTwo": "Pro synchronizaci relací jsou potřeba alespoň dvě instance",
         "pickRestoreOne": "Vyberte prosím alespoň jednu relaci k obnovení",
@@ -3590,7 +3670,18 @@
         "title": "Opravit historii",
         "description": "Normalizuje poskytovatele v indexech SQLite, katalogu relací a pracovních prostorech. Původní soubory rollout zůstávají zachovány po bajtech; opraví se pouze časové údaje. Nejprve se vytvoří místní záloha.",
         "stopInstanceHint": "Před úplnou opravou zcela ukončete vybranou instanci Codex App/ChatGPT. Změny můžete nejprve zobrazit v náhledu.",
-        "encryptedContentWarning": "Byla zjištěna historie zašifrovaná jiným poskytovatelem nebo účtem. Metadata lze převést, ale pokračování či komprimace těchto relací může selhat; vraťte se k původnímu poskytovateli/účtu nebo začněte novou relaci."
+        "encryptedContentWarning": "Byla zjištěna historie zašifrovaná jiným poskytovatelem nebo účtem. Metadata lze převést, ale pokračování či komprimace těchto relací může selhat; vraťte se k původnímu poskytovateli/účtu nebo začněte novou relaci.",
+        "modeHistory": "Úpravy/větvení",
+        "modeHistoryDesc": "Oprava úprav zpráv a větvení chatů, které selhávají kvůli neplatným indexům.",
+        "historyLiveHint": "Opravu lze provést za běhu klienta. Poté klienta restartujte a znovu otevřete chaty.",
+        "historyDescription": "Zkontroluje vybrané chaty a jejich zdrojovou historii a obnoví pouze neplatné indexy stránek. Zprávy, účty a nastavení Provider zůstanou beze změny. Oprava funguje za běhu klienta; poté jej restartujte pro načtení indexů.",
+        "historyPreview": "Nalezeno {{count}} chybných indexů historie, které lze obnovit. Záznamy chatů zůstanou beze změn.",
+        "historySuccess": "Obnoveno {{count}} neplatných indexů historie. Restartujte klienta a znovu otevřete chaty pro jejich sestavení. Zálohy byly zachovány.",
+        "historyNoChanges": "Nebyly nalezeny chybné indexy historie, které lze bezpečně obnovit.",
+        "historyFailed": "Oprava indexů historie nebyla dokončena: {{error}}",
+        "historyChanged": "Data chatu se během opravy změnila. Tato oprava nebyla použita. Zkuste to za chvíli znovu.",
+        "historyScan": "Kontrola indexů historie ({{current}}/{{total}})…",
+        "historyReset": "Zálohování a resetování chybných indexů…"
       },
       "importModal": {
         "title": "Import relací",
@@ -4576,6 +4667,11 @@
       },
       "routing": {
         "optionsTitle": "Volby směrování",
+        "sessionIdentityMapping": "Mapování ID relace",
+        "sessionIdentityMappingEnableHint": "Zapnuté mapování při přepínání účtů používá samostatné hodnoty Session-Id a Thread-Id pro každý účet poskytovatele. To posiluje oddělení identifikátorů, ale může omezit opětovné využití mezipaměti mezi účty. V rámci stejného účtu se používají stávající mapování.",
+        "sessionIdentityMappingDisableHint": "Vypnuté mapování zachová původní hodnoty Session-Id a Thread-Id klienta. Různé účty poskytovatele mohou tyto identifikátory sdílet, což oslabuje jejich oddělení, ale může zvýšit opětovné využití mezipaměti mezi účty.",
+        "sessionIdentityMappingCacheNote": "Úspěšnost mezipaměti závisí také na pravidlech poskytovatele, rozsahu účtů a obsahu požadavků. Změna nastavení nezaručuje její zvýšení ani snížení.",
+        "sessionIdentityMappingSaveNote": "Po potvrzení uložte nastavení, aby se změna projevila.",
         "sessionAffinity": "Vazba relace",
         "sessionAffinityTtl": "Vypršení (sekundy)",
         "responsesWebsockets": "Responses přes WebSocket",
@@ -5844,6 +5940,22 @@
       "label": "Synchronizace kvóty",
       "description": "Bez spuštění služby API. Aktivní místní účty se obnovují každých 5–30 sekund; změny souborů relací spustí další kontrolu. Čtou se jen aktuální metadata souborů, nikoli obsah konverzací. Vyloučení účtů, filtry tarifů a pravidla skupin zůstávají platné. Ve výchozím stavu vypnuto.",
       "error": "Nastavení se nepodařilo načíst nebo uložit. Zkuste to znovu."
+    },
+    "pathRecovery": {
+      "title": "Nastavit cestu ke Codexu",
+      "description": "Nebyla nalezena použitelná cesta ke klientovi Codex. Vyberte aplikaci nebo ji ručně spusťte a nechte vyhledat.",
+      "reload": "Načíst znovu",
+      "timeout": "Operace překročila časový limit. Zkuste to znovu; spuštění nebude automaticky pokračovat.",
+      "noCandidates": "Codex nebyl nalezen. Spusťte klienta ručně a opakujte hledání nebo vyberte jeho cestu.",
+      "pathRequired": "Vyberte nebo zadejte cestu ke klientovi Codex.",
+      "invalidPath": "Toto není platná cesta k desktopovému klientovi Codex. Vyberte aplikaci znovu.",
+      "candidates": "Nalezené aplikace",
+      "autoLaunchHint": "Vypněte tuto volbu, pokud chcete pouze přepínat účty bez spuštění desktopové aplikace. Ruční spuštění zůstane dostupné.",
+      "manualLaunchHint": "Vypnutí automatického spouštění nedokončí toto ruční spuštění. Pouhé uložení nastavení tento pokus zruší.",
+      "saveAndRetry": "Uložit a opakovat",
+      "saveWithoutLaunch": "Uložit a pokračovat",
+      "saveOnly": "Pouze uložit",
+      "validationBusy": "Kontrola předchozí cesty stále probíhá. Zkuste to za chvíli znovu."
     }
   },
   "githubCopilot": {

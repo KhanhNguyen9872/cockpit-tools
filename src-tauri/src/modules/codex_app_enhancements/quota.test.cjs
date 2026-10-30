@@ -47,6 +47,7 @@ function load() {
   context.window = context; context.globalThis = context;
   vm.runInNewContext(fastScript, context);
   vm.runInNewContext(script, context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'quota_current.js'), 'utf8'), context);
   return { api: context.module.exports, context };
 }
 
@@ -307,10 +308,143 @@ test('unknown or ambiguous module contracts are never partially transformed', ()
   }
 });
 
+test('live quota plan anchors after both submit gates without changing other blocks', () => {
+  const h = composerHarness();
+  const location = h.transformed.diagnostics.location;
+  assert.equal(location.url, primaryUrl);
+  assert.equal(location.hardVariable, 'reserve');
+  assert.equal(location.guardVariable, 'generic');
+  assert.equal(location.hostVariable, 'host');
+  const line = primary.split('\n')[location.lineNumber];
+  assert.equal(line.slice(location.columnNumber, location.columnNumber + 12), 'let disabled');
+});
+
+test('live quota condition updates evaluated V8 locals without pausing or reloading', async () => {
+  const h = composerHarness();
+  h.context.__cockpitEnhancements.apiService = true;
+  const { Session } = require('node:inspector');
+  const session = new Session();
+  session.connect();
+  const post = (method, params = {}) => new Promise((resolve, reject) => {
+    session.post(method, params, (error, result) => error ? reject(error) : resolve(result));
+  });
+  let pauses = 0;
+  session.on('Debugger.paused', () => { pauses++; session.post('Debugger.resume'); });
+  try {
+    await post('Debugger.enable');
+    // Preserve offsets while removing the synthetic module import for the VM.
+    vm.runInNewContext(primary.replace(/^import[^;]+;/m, match => ' '.repeat(match.length)),
+      h.context, { filename: primaryUrl });
+    assert.equal(h.render().submitDisabled, true);
+    const plan = h.transformed.diagnostics.location;
+    const condition = `(window.__cockpitEnhancements?.apiService===true&&window.__cockpitEnhancements?.quotaCompat===true&&(${plan.hardVariable}=false,${plan.guardVariable}=false),false)`;
+    const breakpoint = await post('Debugger.setBreakpointByUrl', {
+      url: plan.url, lineNumber: plan.lineNumber, columnNumber: plan.columnNumber, condition,
+    });
+    assert.ok(breakpoint.locations.length > 0, 'the native gate location resolves');
+    for (const reserve of [false, true]) for (const generic of [false, true]) {
+      Object.assign(h.values, { reserve, generic });
+      assert.equal(h.render().submitDisabled, false);
+      assert.equal(h.render({ submitDisabled: true }).submitDisabled, true);
+    }
+    h.context.__cockpitEnhancements.apiService = false;
+    assert.equal(h.render().submitDisabled, true, 'revoking the binding restores native gates');
+    assert.equal(pauses, 0);
+    await post('Debugger.removeBreakpoint', { breakpointId: breakpoint.breakpointId });
+    h.context.__cockpitEnhancements.apiService = true;
+    assert.equal(h.render().submitDisabled, true, 'removing the condition restores native behavior');
+  } finally {
+    await post('Debugger.disable');
+    session.disconnect();
+  }
+});
+
+test('live quota install rewrites only the main usage snapshot and refreshes the mounted composer', () => {
+  const { api, context } = load();
+  Object.assign(context.__cockpitEnhancements, { apiService: true });
+  let dispatched = 0;
+  const hook = { memoizedState: vm.runInNewContext('new Set()', context),
+    queue: { dispatch: () => { dispatched++; } }, next: null };
+  const type = function Composer() {};
+  type.toString = () => 'function Composer(){let disabled=other||reserve||generic,next;return{submitDisabled:disabled}}';
+  const composer = { __reactFiber$test: { type, memoizedState: hook, return: null } };
+  const aside = {
+    innerText: 'Codex 和工作使用额度已用完 工作空间额度已用完',
+    style: { setProperty() {}, removeProperty() {} },
+    setAttribute() {}, removeAttribute() {},
+  };
+  const usage = {
+    user_id: 'user',
+    rate_limit: { allowed: false, limit_reached: true, primary_window: { used_percent: 100 } },
+    rate_limit_reached_type: { type: 'workspace_member_credits_depleted' },
+    rate_limit_upsell: { banner_type: 'workspace_member_credits_depleted', model_slug: null },
+    credits: { balance: 0 },
+  };
+  const query = { queryKey: ['rate-limit-status'], state: { data: usage } };
+  const imageQuery = { queryKey: ['rate-limit-status', 'image-generation'], state: { data: { rate_limit: { allowed: false } } } };
+  let subscribed = 0, unsubscribed = 0, published = usage, cacheListener;
+  const client = {
+    getQueryCache: () => ({ findAll: () => [query, imageQuery],
+      subscribe: listener => { cacheListener = listener; subscribed++; return () => { unsubscribed++; }; } }),
+    setQueryData(key, value) {
+      const target = key[1] === 'image-generation' ? imageQuery : query;
+      target.state.data = typeof value === 'function' ? value(target.state.data) : value;
+      if (target === query) published = target.state.data;
+    },
+  };
+  const originalSetter = client.setQueryData;
+  Object.assign(context, {
+    document: {
+      body: { innerText: aside.innerText },
+      documentElement: {},
+      querySelectorAll(selector) {
+        if (selector === '[data-codex-composer-root]') return [composer];
+        if (selector === 'aside[role="status"]') return [aside];
+        if (selector === '[data-cockpit-hidden-usage="true"]') return [aside];
+        return [];
+      },
+    },
+    MutationObserver: class { observe() {} disconnect() {} },
+  });
+  const finder = { __reactFiber$test: null };
+  finder.__reactFiber$test = { child: null, sibling: null, memoizedProps: { client }, return: null };
+  context.document.getElementById = () => finder;
+  const result = api.installLiveQuotaGuard({
+    hardVariable: 'reserve', guardVariable: 'generic', hostVariable: 'host',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.client, true);
+  assert.equal(published.rate_limit.allowed, true);
+  assert.equal(published.rate_limit.limit_reached, false);
+  assert.equal(published.rate_limit_upsell, null);
+  assert.equal(published.rate_limit_reached_type, null);
+  assert.deepEqual(published.credits, { balance: 0 });
+  assert.equal(imageQuery.state.data.rate_limit.allowed, false, 'image quota data is never changed');
+  assert.equal(dispatched, 1);
+  assert.equal(subscribed, 1);
+  assert.equal(context.__cockpitEnhancements.nativePatchState, 'active');
+  assert.equal(context.__cockpitEnhancements.nativePatchMode, 'live-quota');
+  const updatedUsage = { ...usage, credits: { balance: 7 } };
+  query.state.data = updatedUsage;
+  cacheListener({ query });
+  assert.equal(published.rate_limit.allowed, true, 'fresh cache updates retain compatibility');
+  assert.equal(published.credits.balance, 7, 'real balances remain intact');
+  client.setQueryData(['rate-limit-status'], previous => {
+    assert.equal(previous.rate_limit.allowed, false, 'updaters receive the original snapshot');
+    return { ...previous, credits: { balance: 8 } };
+  });
+  assert.equal(published.rate_limit.allowed, true);
+  context.__cockpitQuotaCompat.disposeLiveQuotaGuard();
+  assert.equal(unsubscribed, 1);
+  assert.equal(published.rate_limit.allowed, false, 'cleanup restores the latest original quota');
+  assert.equal(published.credits.balance, 8, 'cleanup preserves newer data');
+  assert.equal(client.setQueryData, originalSetter);
+});
+
 function bundleBrowser() {
   const result = load(), { context } = result, listeners = new Map(), elements = [], blobs = new Map(), revoked = [];
   const nativeTest = fs.readFileSync(path.join(__dirname, 'native_dictation.test.cjs'), 'utf8');
-  const fixtureMatch = /const fixture = (`[\s\S]*?`);\n\nfunction load/.exec(nativeTest);
+  const fixtureMatch = /const fixture = (`[\s\S]*?`);\r?\n\r?\nfunction load/.exec(nativeTest);
   assert.ok(fixtureMatch, 'native capability fixture must remain available');
   const capabilityFixture = vm.runInNewContext(fixtureMatch[1]);
   let serial = 0;
@@ -496,13 +630,23 @@ test('the installed shared usage renderer hides the unified-path notice while pr
 }, () => {
   const React = require('react'), { renderToStaticMarkup } = require('react-dom/server');
   const { api, context } = load();
-  const source = fs.readFileSync(process.env.COCKPIT_NATIVE_FAST_FIXTURE, 'utf8');
-  const result = api.transform(source, `app://-/assets/${path.basename(process.env.COCKPIT_NATIVE_FAST_FIXTURE)}`);
+  let source = fs.readFileSync(process.env.COCKPIT_NATIVE_FAST_FIXTURE, 'utf8');
+  const initialUrl = `app://-/assets/${path.basename(process.env.COCKPIT_NATIVE_FAST_FIXTURE)}`;
+  let result = api.transform(source, initialUrl);
+  const current = result.diagnostics?.bindings?.layout === 'adapter-v1';
+  if (current) {
+    const names = [...new Set([...source.matchAll(/["'`]\.\/(app-primary-[A-Za-z0-9_-]+\.js)["'`]/g)].map(match => match[1]))];
+    assert.equal(names.length, 1);
+    source = fs.readFileSync(path.join(path.dirname(process.env.COCKPIT_NATIVE_FAST_FIXTURE), names[0]), 'utf8');
+    result = api.transformComposer(source, `app://-/assets/${names[0]}`, initialUrl, result.diagnostics.bindings);
+  }
   assert.equal(result.ok, true);
   const parse = require('@babel/parser').parse;
   const ast = parse(result.patchedSource, { sourceType: 'module' });
-  const exported = ast.program.body.find(node => node.type === 'ExportNamedDeclaration').specifiers
-    .find(node => node.exported.name === 'Pjt').local.name;
+  const exported = current ? ast.program.body.find(node => node.type === 'FunctionDeclaration'
+    && result.patchedSource.slice(node.start, node.end).includes('let __cockpitSharedScope=')).id.name
+    : ast.program.body.find(node => node.type === 'ExportNamedDeclaration').specifiers
+      .find(node => node.exported.name === 'Pjt').local.name;
   const native = ast.program.body.find(node => node.type === 'FunctionDeclaration' && node.id.name === exported);
   const nativeSource = result.patchedSource.slice(native.start, native.end);
   let hooks = 0;
@@ -511,6 +655,10 @@ test('the installed shared usage renderer hides the unified-path notice while pr
     MLo: { jsx: React.createElement }, $S: () => ({ data: false, status: 'success' }),
     KPo: () => ({}), kLo: () => 'usage_limit', OLo: () => false,
     oLo: () => React.createElement('aside', { 'data-native-notice': '' }, 'native usage notice'),
+    m0t: { c: () => [] }, h0t: { ...React, useRef(value) { hooks++; return React.useRef(value); } },
+    zR: { jsx: React.createElement }, KTe: () => ({ data: false, status: 'success' }), NQt: () => ({}),
+    p0t: () => 'usage_limit', f0t: () => false,
+    q1t: () => React.createElement('aside', { 'data-native-notice': '' }, 'native usage notice'),
   });
   vm.runInNewContext(nativeSource, context);
   context.__cockpitEnhancements.nativePatchState = 'active';
@@ -533,7 +681,10 @@ test('the installed shared usage renderer hides the unified-path notice while pr
     assert.match(render(undefined, { banner: { banner_type: type } }), /data-native-notice/);
   }
   for (const key of ['model_slug', 'blocked_model_slug']) {
-    assert.match(render(undefined, { banner: { [key]: 'limited-model' } }), /data-native-notice/);
+    if (current) {
+      assert.equal(render(undefined, { banner: { [key]: 'limited-model' } }), '');
+      assert.match(render(undefined, { provider: 'openai', banner: { [key]: 'limited-model' } }), /data-native-notice/);
+    } else assert.match(render(undefined, { banner: { [key]: 'limited-model' } }), /data-native-notice/);
   }
   assert.match(render(undefined, { imageLimit: {} }), /data-native-notice/);
   assert.equal(render(undefined, { fallback: React.createElement('p', null, 'Safety notice') }), '<p>Safety notice</p>');
@@ -565,32 +716,57 @@ test('installed desktop initial and primary modules validate and parse together'
   const rewritten = await context.__cockpitNativeFast.rewriteModule(result.patchedSource, primary);
   const parsed = new vm.SourceTextModule(rewritten);
   assert.ok(parsed.dependencySpecifiers.every(specifier => !specifier.startsWith('.')));
-  assert.ok(result.patchedSource.includes('||((wt||vn)&&!globalThis.__cockpitQuotaCompat.enabledFor(bt,un,__cockpitQuotaProvider))'));
-  assert.ok(result.patchedSource.includes('wrapComposer(PZ,FZ.jsx,bt,un,__cockpitQuotaProvider,'));
-  assert.ok(result.patchedSource.includes('shouldHideBanner(__cockpitBannerScope,p,o,i)'));
-  const originalAst = require('@babel/parser').parse(composer, { sourceType: 'module' });
-  const patchedAst = require('@babel/parser').parse(result.patchedSource, { sourceType: 'module' });
-  const originalComposer = originalAst.program.body.find(node => node.type === 'FunctionDeclaration' && node.id.name === 'Cpt');
-  const patchedComposer = patchedAst.program.body.find(node => node.type === 'FunctionDeclaration' && node.id.name === 'Cpt');
+  const current = contract.diagnostics.bindings.layout === 'adapter-v1';
+  let nativeComposerSource = composer, patchedComposerSource = result.patchedSource, adapterUrl, adapter;
+  if (current) {
+    const adapterName = path.basename(contract.diagnostics.bindings.adapterPath);
+    adapterUrl = new URL(contract.diagnostics.bindings.adapterPath, url).href;
+    adapter = fs.readFileSync(path.join(path.dirname(process.env.COCKPIT_NATIVE_FAST_FIXTURE), adapterName), 'utf8');
+    const adapted = api.transformAdapter(adapter, adapterUrl, url, primary, result.diagnostics.bindings);
+    assert.equal(adapted.ok, true, JSON.stringify(adapted.diagnostics));
+    nativeComposerSource = adapter; patchedComposerSource = adapted.patchedSource;
+    assert.match(patchedComposerSource, /\|\|\(\(Rn\|\|Ur\)&&!globalThis\.__cockpitQuotaCompat\.enabledForComposer\(/);
+    assert.ok(result.patchedSource.includes('shouldHideCurrentBanner(__cockpitBannerScope,'));
+    assert.ok(result.patchedSource.includes('shouldHideCurrentBanner(__cockpitSharedScope,'));
+  } else {
+    assert.ok(result.patchedSource.includes('||((wt||vn)&&!globalThis.__cockpitQuotaCompat.enabledFor(bt,un,__cockpitQuotaProvider))'));
+    assert.ok(result.patchedSource.includes('wrapComposer(PZ,FZ.jsx,bt,un,__cockpitQuotaProvider,'));
+    assert.ok(result.patchedSource.includes('shouldHideBanner(__cockpitBannerScope,p,o,i)'));
+    assert.ok(contract.patchedSource.includes('shouldHideBanner(__cockpitSharedScope,'));
+  }
+  const originalAst = require('@babel/parser').parse(nativeComposerSource, { sourceType: 'module' });
+  const patchedAst = require('@babel/parser').parse(patchedComposerSource, { sourceType: 'module' });
+  const wrappedName = current ? 'wrapCurrentComposer' : 'wrapComposer';
+  const patchedComposer = patchedAst.program.body.find(node => node.type === 'FunctionDeclaration'
+    && patchedComposerSource.slice(node.start, node.end).includes(`return globalThis.__cockpitQuotaCompat.${wrappedName}(`));
+  const originalComposer = originalAst.program.body.find(node => node.type === 'FunctionDeclaration' && node.id.name === patchedComposer.id.name);
   const returned = patchedComposer.body.body.findLast(node => node.type === 'ReturnStatement').argument;
-  assert.equal(returned.callee.property.name, 'wrapComposer', 'wrap the actual outer return, not a nested callback');
+  assert.equal(returned.callee.property.name, wrappedName, 'wrap the actual outer return, not a nested callback');
   for (const node of originalComposer.body.body.filter(node => node.type === 'FunctionDeclaration')) {
     const patched = patchedComposer.body.body.find(item => item.type === 'FunctionDeclaration' && item.id.name === node.id.name);
-    assert.equal(result.patchedSource.slice(patched.start, patched.end), composer.slice(node.start, node.end));
+    assert.equal(patchedComposerSource.slice(patched.start, patched.end), nativeComposerSource.slice(node.start, node.end));
   }
-  assert.ok(contract.patchedSource.includes('shouldHideBanner(__cockpitSharedScope,'));
   context.__cockpitEnhancements.apiService = true;
   context.document = { scripts: [{ src: 'app://-/assets/index-fixture.js' }] };
-  context.fetch = async target => ({ ok: true, text: async () => target === url ? source : target === primary ? composer : `import "./${initialName}";` });
+  context.fetch = async target => ({ ok: true, text: async () => target === url ? source : target === primary ? composer : target === adapterUrl ? adapter : `import "./${initialName}";` });
   const bundle = await context.__cockpitNativeFast.prepareDocument();
-  assert.equal(bundle.ok, true, JSON.stringify(bundle));
-  assert.equal(bundle.modules.length, 1);
+  assert.equal(bundle.ok, true, JSON.stringify({ reason: bundle.reason, diagnostics: bundle.diagnostics }));
+  assert.equal(bundle.modules.length, current ? 2 : 1);
+  if (current) assert.equal(bundle.modules[1].url, adapterUrl);
   assert.equal(bundle.modules[0].url, primary);
   assert.equal(bundle.patchedSource.includes('__cockpitNativeDictation'), false, 'quota activation never suppresses the native dictation entry');
   assert.equal(bundle.patchedSource.includes('__cockpitApiDictation'), false, 'quota activation never installs a transcription bridge');
   const originalAudio = require('@babel/parser').parse(source, { sourceType: 'module' });
   const patchedAudio = require('@babel/parser').parse(bundle.patchedSource, { sourceType: 'module' });
-  for (const name of ['l6u', 'YLo', 'XLo']) {
+  const audioNames = current ? [
+    ['dictationEnabled', 'whisper_killswitch'], ['fetch(`/transcribe`', 'multipart/form-data'],
+    ['safePost(`/transcribe`', 'onRequestSuccess'],
+  ].map(markers => {
+    const found = originalAudio.program.body.filter(node => node.type === 'FunctionDeclaration'
+      && markers.every(marker => source.slice(node.start, node.end).includes(marker)));
+    assert.equal(found.length, 1); return found[0].id.name;
+  }) : ['l6u', 'YLo', 'XLo'];
+  for (const name of audioNames) {
     const before = originalAudio.program.body.find(node => node.type === 'FunctionDeclaration' && node.id.name === name);
     const after = patchedAudio.program.body.find(node => node.type === 'FunctionDeclaration' && node.id.name === name);
     assert.ok(before && after, `native dictation ${name} function remains available`);
@@ -599,5 +775,51 @@ test('installed desktop initial and primary modules validate and parse together'
   }
   assert.equal(bundle.patchedSource.includes('cockpitDictationScope'), false);
   new vm.SourceTextModule(bundle.patchedSource);
-  new vm.SourceTextModule(bundle.modules[0].source);
+  for (const module of bundle.modules) new vm.SourceTextModule(module.source);
+});
+
+test('a pending live-quota retry cannot overwrite newly activated Fast features', () => {
+  for (const mode of ['full', 'fast-only']) {
+    const { api, context } = load();
+    const timers = new Map(); let serial = 0;
+    Object.assign(context.__cockpitEnhancements, { apiService: true });
+    Object.assign(context, { setTimeout(fn) { timers.set(++serial, fn); return serial; },
+      clearTimeout(id) { timers.delete(id); }, document: { querySelectorAll: () => [] } });
+    api.installLiveQuotaGuard({ hardVariable: 'h', guardVariable: 'g', hostVariable: 'host' });
+    assert.equal(timers.size, 1);
+    const pending = [...timers.values()][0];
+    const state = context.__cockpitEnhancements;
+    Object.assign(state, { nativePatchState: 'active', nativePatchMode: mode,
+      nativePatchFeatures: mode === 'full' ? '1111' : '1010', nativePatchRequestedFeatures: '1111',
+      nativeQuotaPatchState: mode === 'full' ? 'active' : 'unsupported',
+      nativeQuotaPatchReason: mode === 'full' ? undefined : 'quota-shared-banner-contract-mismatch' });
+    const before = JSON.stringify(state);
+    pending();
+    assert.equal(timers.size, 0);
+    assert.equal(JSON.stringify(state), before);
+    assert.equal(api.installLiveQuotaGuard({}).preservedNativeFast, true);
+    assert.equal(JSON.stringify(state), before);
+  }
+});
+
+
+test('a late live-quota retry preserves quota-only full modules without claiming Fast', () => {
+  const { api, context } = load(), timers = new Map(); let serial = 0;
+  Object.assign(context.__cockpitEnhancements, { apiService: true });
+  Object.assign(context, { setTimeout(fn) { timers.set(++serial, fn); return serial; },
+    clearTimeout(id) { timers.delete(id); }, document: { querySelectorAll: () => [] } });
+  api.installLiveQuotaGuard({ hardVariable: 'h', guardVariable: 'g', hostVariable: 'host' });
+  const pending = [...timers.values()][0];
+  assert.equal(typeof pending, 'function');
+  Object.assign(context.__cockpitEnhancements, { nativeFast: false, nativePatchState: 'active',
+    nativePatchMode: 'full', nativePatchFeatures: '0101', nativePatchRequestedFeatures: '0101',
+    nativePatchReason: 'module-evaluated' });
+  const before = JSON.stringify(context.__cockpitEnhancements);
+  pending();
+  assert.equal(timers.size, 0);
+  assert.equal(JSON.stringify(context.__cockpitEnhancements), before);
+  const retained = api.installLiveQuotaGuard({});
+  assert.equal(retained.preservedNativeModule, true);
+  assert.equal(retained.preservedNativeFast, undefined);
+  assert.equal(JSON.stringify(context.__cockpitEnhancements), before);
 });

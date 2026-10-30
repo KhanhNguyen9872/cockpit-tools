@@ -413,8 +413,7 @@ fn load_stats_from_disk() -> Result<CodexLocalAccessStats, String> {
                 .into_iter()
                 .filter(|event| event.timestamp >= retention_since)
             {
-                apply_usage_event_to_current_windows(&mut parsed, &event, now);
-                push_recent_usage_event(&mut parsed.events, event);
+                apply_snapshot_usage_event_to_current_windows(&mut parsed, event, now);
             }
         }
     }
@@ -593,6 +592,7 @@ fn replace_stats_window_if_more_complete(
 }
 
 fn ensure_stats_maintenance_started() {
+    ensure_request_log_error_maintenance_started();
     if GATEWAY_STATS_MAINTENANCE_COMPLETED.load(Ordering::SeqCst) {
         return;
     }
@@ -1706,6 +1706,9 @@ fn sanitize_collection_structure(
         changed = true;
     }
 
+    let has_bound_oauth_account = collection.bound_oauth_account_id.is_some();
+    changed |= normalize_bound_oauth_quota_reserve(&mut collection.bound_oauth_quota_reserve, has_bound_oauth_account);
+
     let original_custom_routing_rules = std::mem::take(&mut collection.custom_routing_rules);
     let normalized_custom_routing_rules = normalize_custom_routing_rules(
         original_custom_routing_rules.clone(),
@@ -1883,6 +1886,7 @@ fn sanitize_collection_with_accounts(
     if let Some(bound_id) = collection.bound_oauth_account_id.as_deref() {
         if !keep_reference(bound_id, &valid_bound_oauth_account_ids) {
             collection.bound_oauth_account_id = None;
+            changed |= normalize_bound_oauth_quota_reserve(&mut collection.bound_oauth_quota_reserve, false);
             changed = true;
         }
     }
@@ -2064,6 +2068,7 @@ async fn ensure_runtime_loaded_without_start_with_profile_restore(
                 model_pricings: Vec::new(),
                 excluded_models: Vec::new(),
                 session_affinity: true,
+                session_identity_mapping_enabled: true,
                 session_affinity_ttl_ms: DEFAULT_SESSION_AFFINITY_TTL_MS,
                 session_affinity_default_enabled_migrated: true,
                 responses_websockets_enabled: false,
@@ -2082,7 +2087,7 @@ async fn ensure_runtime_loaded_without_start_with_profile_restore(
                 account_concurrency_default_migrated: true,
                 account_concurrency_wait_ms: DEFAULT_ACCOUNT_CONCURRENCY_WAIT_MS,
                 bound_oauth_account_id: None,
-
+                bound_oauth_quota_reserve: None,
                 account_ids: Vec::new(),
                 created_at: now_ms(),
                 updated_at: now_ms(),
@@ -2187,6 +2192,7 @@ async fn ensure_runtime_loaded_without_start() -> Result<(), String> {
 
 async fn ensure_runtime_loaded() -> Result<(), String> {
     ensure_runtime_loaded_without_start().await?;
+    ensure_bound_oauth_quota_monitor_started();
 
     let should_start = {
         let runtime = gateway_runtime().lock().await;
@@ -2202,11 +2208,13 @@ async fn ensure_runtime_loaded() -> Result<(), String> {
         ensure_local_access_profile_takeovers_from_runtime().await?;
     }
 
+    trigger_bound_oauth_quota_refresh_in_background("API service quota monitor", BOUND_OAUTH_QUOTA_RESERVE_REFRESH_INTERVAL);
     Ok(())
 }
 
 async fn ensure_runtime_loaded_for_app_startup() -> Result<(), String> {
     ensure_runtime_loaded_without_start_with_profile_restore(false).await?;
+    ensure_bound_oauth_quota_monitor_started();
 
     let should_start = {
         let runtime = gateway_runtime().lock().await;
@@ -2232,6 +2240,7 @@ async fn ensure_runtime_loaded_for_app_startup() -> Result<(), String> {
         }
     }
 
+    trigger_bound_oauth_quota_refresh_in_background("API service quota monitor", BOUND_OAUTH_QUOTA_RESERVE_REFRESH_INTERVAL);
     Ok(())
 }
 
@@ -2308,6 +2317,10 @@ pub async fn on_account_quota_refreshed(account_id: &str, refresh_succeeded: boo
     if account_id.is_empty() {
         return;
     }
+    notify_quota_reserve_changed(account_id);
+    if let Ok(mut failures) = bound_oauth_quota_refresh_failures().lock() {
+        if refresh_succeeded { failures.remove(account_id); } else { failures.insert(account_id.to_string()); }
+    }
     let refreshed_account = if refresh_succeeded {
         let account_id = account_id.to_owned();
         tokio::task::spawn_blocking(move || codex_account::load_account(&account_id)).await.ok().flatten()
@@ -2323,7 +2336,12 @@ pub async fn on_account_quota_refreshed(account_id: &str, refresh_succeeded: boo
     if let Some(collection) = collection.filter(|collection| {
         collection_gateway_mode(collection) == CodexLocalAccessGatewayMode::Sidecar
     }) {
-        if let Err(error) = write_sidecar_quota_pool_state(&collection) {
+        let reserve_collection = collection.clone();
+        if let Err(error) = tokio::task::spawn_blocking(move || {
+            write_sidecar_quota_pool_state(&collection)?;
+            write_sidecar_quota_reserve_state(&reserve_collection)?;
+            Ok::<_, String>(())
+        }).await.unwrap_or_else(|error| Err(error.to_string())) {
             logger::log_codex_api_warn(&format!(
                 "[CodexLocalAccess] API 服务额度池快照更新失败: {}",
                 error
@@ -2473,4 +2491,122 @@ async fn ensure_gateway_matches_runtime_locked() -> Result<(), String> {
     }
 
     Err(last_error.unwrap_or_else(|| "API 服务启动失败".to_string()))
+}
+
+fn bound_oauth_quota_refresh_control() -> &'static TokioMutex<BoundOauthQuotaRefreshControl> {
+    BOUND_OAUTH_QUOTA_REFRESH_CONTROL
+        .get_or_init(|| TokioMutex::new(BoundOauthQuotaRefreshControl::default()))
+}
+
+async fn bound_oauth_quota_refresh_target() -> Option<String> {
+    let runtime = gateway_runtime().lock().await;
+    let collection = runtime.collection.as_ref()?;
+    if (!runtime.running && !native_api_running()) || !collection.enabled || collection.bound_oauth_quota_reserve.is_none() {
+        return None;
+    }
+    normalize_optional_account_ref(collection.bound_oauth_account_id.as_deref())
+}
+
+async fn refresh_bound_oauth_quota_if_due(reason: &'static str, min_interval: Duration) {
+    let Some(account_id) = bound_oauth_quota_refresh_target().await else {
+        return;
+    };
+
+    {
+        let control = bound_oauth_quota_refresh_control().lock().await;
+        if control.in_flight { return; }
+        if control.last_account_id.as_deref() == Some(account_id.as_str())
+            && (control.retry_at.is_some_and(|at| at > Instant::now())
+                || control.last_started_at.is_some_and(|at| at.elapsed() < min_interval.min(Duration::from_secs(5)))) {
+            return;
+        }
+    }
+    let read_id = account_id.clone();
+    let account = tokio::task::spawn_blocking(move || codex_account::load_account(&read_id)).await.ok().flatten();
+    let dynamic = bound_oauth_dynamic_refresh_interval(account.as_ref());
+    let critical = {
+        let runtime = quota_reserve_coordinator().lock().ok();
+        runtime.as_ref().and_then(|runtime| runtime.watched_reserve.as_ref().map(|reserve|
+            account.as_ref().is_none_or(|account| {
+                let decision = quota_reserve_decision(reserve, account, runtime.accounts.get(&account.id));
+                decision.0 || decision.1
+            }))).unwrap_or(true)
+    };
+    let min_interval = if critical { min_interval.min(dynamic) } else { dynamic };
+    {
+        let mut control = bound_oauth_quota_refresh_control().lock().await;
+        if control.in_flight { return; }
+        if control.last_account_id.as_deref() != Some(account_id.as_str()) {
+            control.failures = 0;
+            control.retry_at = None;
+        }
+        if control.retry_at.is_some_and(|at| at > Instant::now()) { return; }
+        if control.last_account_id.as_deref() == Some(account_id.as_str())
+            && control
+                .last_started_at
+                .map(|started_at| started_at.elapsed() < min_interval)
+                .unwrap_or(false)
+        {
+            return;
+        }
+        control.in_flight = true;
+        control.last_account_id = Some(account_id.clone());
+        control.last_started_at = Some(Instant::now());
+    }
+
+    let refresh_started = Instant::now();
+    let result = timeout(Duration::from_secs(10), codex_quota::refresh_account_quota_background(&account_id))
+        .await.unwrap_or_else(|_| Err("OAuth quota refresh timed out".to_string()));
+    {
+        let mut control = bound_oauth_quota_refresh_control().lock().await;
+        control.in_flight = false;
+        if result.is_ok() {
+            control.failures = 0;
+            control.retry_at = None;
+        } else {
+            control.failures = control.failures.saturating_add(1);
+            control.retry_at = Some(Instant::now() + quota_refresh_failure_backoff(control.failures,
+                result.as_ref().err().map(String::as_str)));
+        }
+    }
+    if result.is_err() {
+        note_gateway_quota_refresh_failure(&account_id, refresh_started);
+    }
+
+    match result {
+        Ok(_) => logger::log_codex_api_info(&format!(
+            "[CodexLocalAccess] 绑定 OAuth 配额刷新完成: reason={}, account_id={}",
+            reason, account_id
+        )),
+        Err(error) => logger::log_codex_api_warn(&format!(
+            "[CodexLocalAccess] 绑定 OAuth 配额刷新失败: reason={}, account_id={}, error={}",
+            reason, account_id, error
+        )),
+    }
+}
+
+fn trigger_bound_oauth_quota_refresh_in_background(reason: &'static str, min_interval: Duration) {
+    tauri::async_runtime::spawn(refresh_bound_oauth_quota_if_due(reason, min_interval));
+}
+
+fn ensure_bound_oauth_quota_monitor_started() {
+    if BOUND_OAUTH_QUOTA_MONITOR_STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(BOUND_OAUTH_QUOTA_RESERVE_MONITOR_TICK);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            refresh_bound_oauth_quota_if_due(
+                "API 服务定时监控",
+                BOUND_OAUTH_QUOTA_RESERVE_REFRESH_INTERVAL,
+            )
+            .await;
+        }
+    });
+}
+
+pub async fn reevaluate_bound_oauth_quota_reserve_after_refresh(account_id: &str, refresh_succeeded: bool) {
+    on_account_quota_refreshed(account_id, refresh_succeeded).await;
 }

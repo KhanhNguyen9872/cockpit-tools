@@ -8,7 +8,7 @@ use crate::models::codex_local_access::{
     CodexLocalAccessChatMessage, CodexLocalAccessChatResult, CodexLocalAccessClientBaseUrlHost,
     CodexLocalAccessCustomRoutingRule, CodexLocalAccessGatewayMode,
     CodexLocalAccessImageGenerationPolicy, CodexLocalAccessModelAlias,
-    CodexLocalAccessModelPricing, CodexLocalAccessPortCleanupResult,
+    CodexLocalAccessModelPricing, CodexLocalAccessPortCleanupResult, CodexLocalAccessQuotaReserve,
     CodexLocalAccessRequestKind, CodexLocalAccessRoutingStrategy, CodexLocalAccessScope,
     CodexLocalAccessState, CodexLocalAccessTestFailure, CodexLocalAccessTestResult,
     CodexLocalAccessTimeoutPreset, CodexLocalAccessTimeouts, CodexLocalAccessUsageEventPage,
@@ -36,6 +36,7 @@ use tauri_plugin_opener::OpenerExt;
 // - codex_local_access_commands.rs：本地 API 服务、API Key 与网关管理命令。
 // 各片段中的公开命令仍由本模块统一导出，调用方无需改变。
 include!("codex_account_commands.rs");
+include!("codex_path_recovery_commands.rs");
 include!("codex_model_provider_commands.rs");
 include!("codex_local_access_commands.rs");
 include!("codex_temp_login_commands.rs");

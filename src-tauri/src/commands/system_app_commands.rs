@@ -35,36 +35,76 @@ pub fn save_tray_platform_layout(
     Ok(())
 }
 
+/// Explicit launch validation; settings may still save an unfinished or empty path.
 #[tauri::command]
-pub fn set_app_path(app: String, path: String) -> Result<(), String> {
+pub async fn validate_codex_app_path(path: String) -> Result<(), String> {
+    static VALIDATION_SLOT: std::sync::LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
+        std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::sync::Semaphore::new(1)));
+    let selected = modules::process::normalize_windows_user_facing_path(&path);
+    // A network-mounted selection can block metadata/PE reads. The timed
+    // worker is read-only and can never save a stale path after timeout.
+    run_codex_path_validation(
+        VALIDATION_SLOT.clone(),
+        move || modules::process::validate_codex_app_path(&selected),
+        Duration::from_secs(5),
+    )
+    .await
+}
+
+async fn run_codex_path_validation(
+    slot: std::sync::Arc<tokio::sync::Semaphore>,
+    validate: impl FnOnce() -> Result<(), String> + Send + 'static,
+    timeout: Duration,
+) -> Result<(), String> {
+    let permit = slot
+        .try_acquire_owned()
+        .map_err(|_| "CODEX_APP_PATH_VALIDATION_BUSY".to_string())?;
+    let validation = tauri::async_runtime::spawn_blocking(move || {
+        // Cancellation or timeout ends only the caller's wait. Retain the slot
+        // until the OS file read really returns, so retries cannot pile up workers.
+        let _permit = permit;
+        validate()
+    });
+    tokio::time::timeout(timeout, validation)
+        .await
+        .map_err(|_| "CODEX_APP_PATH_VALIDATION_TIMEOUT".to_string())?
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn set_app_path(app: String, path: String) -> Result<(), String> {
     let normalized_path = modules::process::normalize_windows_user_facing_path(&path);
-    config::patch_user_config(move |current| {
-        match app.as_str() {
-            "antigravity" | "antigravity_ide" | "antigravity_legacy" => {
-                current.antigravity_app_path = normalized_path
+    tauri::async_runtime::spawn_blocking(move || {
+        config::patch_user_config(move |current| {
+            match app.as_str() {
+                "antigravity" | "antigravity_ide" | "antigravity_legacy" => {
+                    current.antigravity_app_path = normalized_path
+                }
+                "codex" => current.codex_app_path = normalized_path,
+                "claude" => current.claude_app_path = normalized_path,
+                "zed" => current.zed_app_path = normalized_path,
+                "vscode" => current.vscode_app_path = normalized_path,
+                "windsurf" => current.windsurf_app_path = normalized_path,
+                "kiro" => current.kiro_app_path = normalized_path,
+                "cursor" => current.cursor_app_path = normalized_path,
+                "codebuddy" => current.codebuddy_app_path = normalized_path,
+                "codebuddy_cn" => current.codebuddy_cn_app_path = normalized_path,
+                "qoder" => current.qoder_app_path = normalized_path,
+                "zcode" => current.zcode_app_path = normalized_path,
+                "trae" => current.trae_app_path = normalized_path,
+                "trae_solo" => current.trae_solo_app_path = normalized_path,
+                "trae_cn" => current.trae_cn_app_path = normalized_path,
+                "trae_solo_cn" => current.trae_solo_cn_app_path = normalized_path,
+                "workbuddy" => current.workbuddy_app_path = normalized_path,
+                "opencode" => current.opencode_app_path = normalized_path,
+                _ => return Err("未知应用类型".to_string()),
             }
-            "codex" => current.codex_app_path = normalized_path,
-            "claude" => current.claude_app_path = normalized_path,
-            "zed" => current.zed_app_path = normalized_path,
-            "vscode" => current.vscode_app_path = normalized_path,
-            "windsurf" => current.windsurf_app_path = normalized_path,
-            "kiro" => current.kiro_app_path = normalized_path,
-            "cursor" => current.cursor_app_path = normalized_path,
-            "codebuddy" => current.codebuddy_app_path = normalized_path,
-            "codebuddy_cn" => current.codebuddy_cn_app_path = normalized_path,
-            "qoder" => current.qoder_app_path = normalized_path,
-            "zcode" => current.zcode_app_path = normalized_path,
-            "trae" => current.trae_app_path = normalized_path,
-            "trae_solo" => current.trae_solo_app_path = normalized_path,
-            "trae_cn" => current.trae_cn_app_path = normalized_path,
-            "trae_solo_cn" => current.trae_solo_cn_app_path = normalized_path,
-            "workbuddy" => current.workbuddy_app_path = normalized_path,
-            "opencode" => current.opencode_app_path = normalized_path,
-            _ => return Err("未知应用类型".to_string()),
-        }
+            Ok(())
+        })?;
         Ok(())
-    })?;
-    Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

@@ -301,7 +301,7 @@ export const useCodexAccountStore = create<CodexAccountState>((set, get) => ({
     console.info('[Codex Switch][Store] switchAccount started', {
       accountId,
     });
-    const accounts = await codexService.listCodexAccounts();
+    const accounts = (await codexService.listCodexAccounts()).map(reconcileQuotaUpdate);
     console.info('[Codex Switch][Store] listCodexAccounts finished', {
       accountId,
       elapsedMs: Math.round(performance.now() - flowStartedAt),
@@ -326,10 +326,12 @@ export const useCodexAccountStore = create<CodexAccountState>((set, get) => ({
         reauthTokenGeneration: options?.reauthTokenGeneration,
         launchAfterSwitch: options?.launchAfterSwitch,
       });
+      account = reconcileQuotaUpdate(account);
     } catch (error) {
-      // Token Authority 可能已把账号标记为 requires_reauth。立即回读账号库，
-      // 让账号卡片和切号弹框都展示最新的 API-only / 需授权状态。
-      void get().fetchAccounts();
+      // 失败既可能发生在凭据预检，也可能发生在已切号后的启动阶段。
+      // 后台回读账号库与真实 current，不能凭错误猜测是否已完成落盘，
+      // 也不能让回读阻塞当前错误提示。
+      void Promise.allSettled([get().fetchAccounts(), get().fetchCurrentAccount()]);
       throw error;
     }
     console.info('[Codex Switch][Store] switchCodexAccount finished', {
@@ -348,19 +350,13 @@ export const useCodexAccountStore = create<CodexAccountState>((set, get) => ({
         error: null,
       };
     });
-    const refreshAfterSwitch = get()
-      .fetchAccounts()
-      .then(() => {
-        console.info('[Codex Switch][Store] background fetchAccounts after switch finished', {
-          accountId,
-          elapsedMs: Math.round(performance.now() - flowStartedAt),
-        });
-      });
+    // The command already returned the authoritative, persisted account. Avoid
+    // another full-list read and render/aggregation wave on every successful switch.
     if (options?.reconcileAfterSwitch) {
-      await refreshAfterSwitch;
+      await get().fetchAccounts();
       await get().fetchCurrentAccount();
     } else {
-      void refreshAfterSwitch;
+      void get().hydrateAccountProfilesIfNeeded([account.id]);
     }
     await emitCurrentAccountChanged({
       platformId: 'codex',

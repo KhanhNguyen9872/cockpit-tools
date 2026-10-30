@@ -398,17 +398,17 @@ fn spawn_switch_account(platform: PlatformId, account_id: String) {
             PlatformId::Codex
                 if modules::codex_instance::is_api_service_bind_account_id(&account_id) =>
             {
-                commands::codex::codex_local_access_activate(app, None, None)
+                commands::codex::codex_local_access_activate(app, None, None, None, None)
                     .await
                     .map(|_| ())
             }
             PlatformId::Codex => {
-                { commands::codex::switch_codex_account(app, account_id, None, None, None) }
+                { commands::codex::switch_codex_account(app, account_id, None, None, None, None) }
                     .await
                     .map(|_| ())
             }
             PlatformId::Claude => {
-                commands::claude::switch_claude_account(app, account_id).map(|_| ())
+                commands::claude::switch_claude_account(app, account_id).await.map(|_| ())
             }
             PlatformId::GitHubCopilot => {
                 commands::github_copilot::inject_github_copilot_to_vscode(app, account_id)

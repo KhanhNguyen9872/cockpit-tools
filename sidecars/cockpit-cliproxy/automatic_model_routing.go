@@ -123,7 +123,7 @@ func (s *relayServer) providerRouteSelector() coreauth.Selector {
 		if s.manifest != nil {
 			base.locale = normalizeCockpitLocale(s.manifest.Locale)
 		}
-		s.automaticSelector = buildCoreAuthSelectorWithConcurrency(nil, base, s.manifest, tracker)
+		s.automaticSelector = buildCoreAuthSelectorWithConcurrency(nil, base, s.manifest, nil, tracker)
 	})
 	return s.automaticSelector
 }

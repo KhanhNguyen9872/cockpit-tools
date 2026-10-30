@@ -21,6 +21,8 @@ use std::{
 
 #[path = "output_terminal_http_tests.rs"]
 mod output_terminal_tests;
+#[path = "go_limits_http_tests.rs"]
+mod go_limits_tests;
 
 struct PolicyHost {
     url: String,
@@ -317,7 +319,7 @@ async fn native_transport_terminal_record_survives_tracker_drop() {
 }
 
 #[tokio::test]
-async fn native_transport_websocket_initial_deadline_uses_policy() {
+async fn go_limits_websocket_first_create_has_no_upstream_initial_deadline() {
     let policy = ExecutionPolicy {
         websocket_initial_timeout: Duration::from_millis(100),
         ..Default::default()
@@ -331,12 +333,14 @@ async fn native_transport_websocket_initial_deadline_uses_policy() {
         .headers_mut()
         .insert("authorization", "Bearer key".parse().unwrap());
     let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
-    let event = tokio::time::timeout(Duration::from_millis(700), socket.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    assert!(event.to_text().unwrap().contains("websocket_start_timeout"));
+    // Go waits for the client's first create without consuming the upstream timer.
+    assert!(tokio::time::timeout(Duration::from_millis(200), socket.next()).await.is_err());
+    use futures_util::SinkExt;
+    use tokio_tungstenite::tungstenite::Message;
+    socket.send(Message::Ping(b"still-open".to_vec().into())).await.unwrap();
+    let event = tokio::time::timeout(Duration::from_secs(2), socket.next())
+        .await.unwrap().unwrap().unwrap();
+    assert!(matches!(event, Message::Pong(value) if value.as_ref() == b"still-open"));
     drop(socket);
     shutdown(handle, task, path).await;
 }

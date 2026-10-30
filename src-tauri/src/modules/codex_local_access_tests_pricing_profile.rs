@@ -673,7 +673,7 @@
         assert_eq!(loaded.0, "Production Key");
         assert_eq!(loaded.1, long_error);
         assert!(loaded.1.contains("tail-marker"));
-        assert_eq!(loaded.2, 7);
+        assert_eq!(loaded.2, DEFAULT_MODEL_PRICING_VERSION as i64);
 
         drop(conn);
         let _ = fs::remove_dir_all(dir);
@@ -1023,8 +1023,8 @@
             token_breakdown: None,
         };
         for (request_id, timestamp, pricing_version) in [
-            ("req-stale", 1_700_000_000_000, 7),
-            ("req-current", 1_700_000_000_001, 8),
+            ("req-stale", 1_700_000_000_000, DEFAULT_MODEL_PRICING_VERSION - 1),
+            ("req-current", 1_700_000_000_001, DEFAULT_MODEL_PRICING_VERSION),
         ] {
             let event = append_usage_event(
                 &mut events,
@@ -1062,17 +1062,19 @@
             insert_local_access_usage_event(&conn, &event).expect("insert request log");
         }
 
+        conn.execute("UPDATE request_logs SET model_pricing_version = ?1 WHERE request_id = ?2", rusqlite::params![DEFAULT_MODEL_PRICING_VERSION - 1, "req-stale"]).unwrap();
+
         let model_ids = vec!["gpt-5.4".to_string()];
         assert_eq!(
-            count_request_logs_for_model_ids(&conn, Some(&model_ids), Some(8))
+            count_request_logs_for_model_ids(&conn, Some(&model_ids), Some(DEFAULT_MODEL_PRICING_VERSION))
                 .expect("count stale rows"),
             1
         );
         let mut cursors = HashMap::from([("gpt-5.4".to_string(), 0_i64)]);
-        let rows = read_request_log_reprice_batch(&conn, &mut cursors, 10, Some(8))
+        let rows = read_request_log_reprice_batch(&conn, &mut cursors, 10, Some(DEFAULT_MODEL_PRICING_VERSION))
             .expect("read stale rows");
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].previous_model_pricing_version, 7);
+        assert_eq!(rows[0].previous_model_pricing_version, DEFAULT_MODEL_PRICING_VERSION - 1);
 
         drop(conn);
         let _ = fs::remove_dir_all(dir);
@@ -2422,6 +2424,31 @@ supports_websockets = false
         assert_eq!(snapshot.totals.request_count, 7);
         assert!(snapshot.events.is_empty());
         assert_eq!(stats.events.len(), 1);
+    }
+
+    #[test]
+    fn gpt_6_1_terra_catalog_and_official_pricing() {
+        assert!(super::api_service_supported_codex_model_ids().iter().any(|id| id == "gpt-6.1-terra"));
+        assert_eq!(super::normalize_known_openai_codex_model("codex/gpt-6.1-terra-2026-10-26").as_deref(), Some("gpt-6.1-terra"));
+        for (tokens, tier, expected) in [
+            (272_000, None, (1.0, 0.05, 5.0)),
+            (272_001, None, (2.0, 0.1, 7.5)),
+            (272_001, Some("priority"), (4.0, 0.2, 15.0)),
+            (272_001, Some("flex"), (1.0, 0.05, 3.75)),
+        ] {
+            let usage = UsageCapture { input_tokens: tokens, ..Default::default() };
+            let price = resolve_effective_model_pricing(None, Some("gpt-6.1-terra"), Some(&usage), tier).unwrap();
+            assert_eq!((price.input_usd_per_million, price.cached_input_usd_per_million.unwrap(), price.output_usd_per_million), expected);
+        }
+        let mut breakdown = CodexTokenBreakdown::default();
+        breakdown.schema_version = 2;
+        breakdown.quality = "complete".into();
+        breakdown.input.cache_write_tokens = 100_000;
+        breakdown.input.total_tokens = 100_000;
+        breakdown.total_tokens = 100_000;
+        let usage = UsageCapture { input_tokens: 100_000, total_tokens: 100_000, token_breakdown: Some(breakdown), ..Default::default() };
+        let price = resolve_effective_model_pricing(None, Some("gpt-6.1-terra"), Some(&usage), None).unwrap();
+        assert!((calculate_usage_cost_usd(Some(&usage), Some(&price)) - 0.125).abs() < 1e-10);
     }
 
     #[test]

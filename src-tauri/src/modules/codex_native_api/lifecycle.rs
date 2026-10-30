@@ -345,8 +345,12 @@ impl RequestTracker {
         }
     }
 
-    pub(super) fn deadline(&self, timeout: Duration) -> tokio::time::Instant {
-        tokio::time::Instant::now() + timeout.saturating_sub(self.started.elapsed())
+    pub(super) fn deadline(&self, timeout: Duration) -> super::deadline::Deadline {
+        if timeout.is_zero() {
+            super::deadline::Deadline::NONE
+        } else {
+            (tokio::time::Instant::now() + timeout.saturating_sub(self.started.elapsed())).into()
+        }
     }
 
     /// Called only immediately before dispatching a real upstream operation.
@@ -494,6 +498,20 @@ impl RequestTracker {
         }
     }
 
+    pub(super) fn check_quota_before_send(&self) -> Result<(), ServiceError> {
+        // Routing stages a candidate without recording a send. Fence that exact
+        // candidate, including an official route whose quota account is None.
+        let account_id = match &self.pending_dispatch {
+            Some(candidate) => candidate.quota_account.as_deref(),
+            None => self.quota_account.as_deref(),
+        };
+        if let Some(account_id) = account_id {
+            self.host.check_quota_before_send(account_id)
+                .map_err(|error| error.with_upstream_not_sent(true))?;
+            self.host.quota_request_started(account_id);
+        }
+        Ok(())
+    }
 
     pub(super) fn quota_event(&self, event: &serde_json::Value) {
         if let (Some(account_id), Some(snapshot)) = (&self.quota_account,

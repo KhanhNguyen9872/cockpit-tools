@@ -42,20 +42,42 @@
   }
   const statuses = () => !finite(accountCount) || accountCount === 0 ? '' : '<div class="health"><span>ChatGPT</span><span>' + dot('green') + esc(label('available')) + ' <strong>' + number(availableAccountCount) + '/' + number(accountCount) + '</strong></span><span>' + dot('') + esc(label('issues')) + ' <strong>' + number(abnormalAccountCount) + '</strong></span><span>' + dot('') + esc(label('cooling')) + ' <strong>' + number(cooldownAccountCount) + '</strong></span></div>';
   const segmented = (name, choices, selected) => '<div class="segmented">' + choices.map(([value,key]) => '<button type="button" data-cockpit-dialog-action="' + name + '" data-value="' + value + '" aria-pressed="' + (value === selected) + '">' + esc(label(key)) + '</button>').join('') + '</div>';
+  const binding = root => typeof root.usageState?.__binding?.binding === 'string' ? root.usageState.__binding.binding : null;
+  const retryDelays = [2000, 5000, 10000];
 
   function state(root) {
-    if (!root.dialogState || root.dialogState.threadId !== (root.threadId || null)) {
-      root.dialogState = {threadId:root.threadId || null, tab:'overview', scope:'chat', period:'week', rows:[], nextCursor:null,
-        summary:null, session:null, pending:null, handled:null, loaded:false, available:null, error:false, requestedAt:0, paged:false};
+    if (!root.dialogState || root.dialogState.threadId !== (root.threadId || null) || root.dialogState.binding !== binding(root)) {
+      if (root.dialogState) cancel(root);
+      root.dialogState = {threadId:root.threadId || null, binding:binding(root), tab:'overview', scope:'chat', period:'week', rows:[], nextCursor:null,
+        summary:null, session:null, pending:null, handled:null, loaded:false, available:null, unavailableReason:null,
+        error:false, requestedAt:0, paged:false, retryCount:0, retryAt:null, hostAvailable:root.hostAvailable !== false,
+        scopeCaches:Object.create(null), summaryCaches:Object.create(null)};
     }
     return root.dialogState;
   }
-  function issue(root, cursor = null) {
+  function issue(root, cursor = null, automaticRetry = false) {
     const s = state(root);
+    if (!automaticRetry) s.retryCount = 0;
+    s.retryAt = null;
     s.pending = {requestToken:Date.now().toString(36) + '-' + Math.random().toString(36).slice(2),
-      threadId:s.threadId,scope:s.scope,period:s.period,cursor,view:s.tab};
+      threadId:s.threadId,binding:s.binding,scope:s.scope,period:s.period,cursor,view:s.tab};
     s.requestedAt = Date.now();
     s.error = false;
+    if (s.available === false) s.available = null;
+    s.unavailableReason = null;
+    // The persistent CDP binding is optional. A disconnected binding leaves the
+    // same token available to the bounded host poller, rather than losing it.
+    if (typeof window.__cockpitUsageRequest === 'function') {
+      try { window.__cockpitUsageRequest(JSON.stringify(s.pending)); } catch { /* Poll fallback. */ }
+    }
+  }
+  function scheduleRetry(s) {
+    s.retryAt = s.retryCount < retryDelays.length ? Date.now() + retryDelays[s.retryCount] : null;
+  }
+  function fail(s) {
+    s.error = true;
+    s.handled = s.pending.requestToken;
+    scheduleRetry(s);
   }
   function accept(root) {
     const s = state(root), q = s.pending;
@@ -64,12 +86,21 @@
     if (!response || response.loading || s.handled === q.requestToken) return;
     if (response.requestToken !== q.requestToken) return;
     // Never show a response from a former chat, scope, period or pagination request.
-    if (['threadId','scope','period','cursor','view'].some(key => (response[key] ?? null) !== (q[key] ?? null))) return;
-    if (response.error) { s.error = true; s.handled = q.requestToken; return; }
+    if (['threadId','binding','scope','period','cursor','view'].some(key => (response[key] ?? null) !== (q[key] ?? null))) return;
+    if (response.error) { fail(s); return; }
     s.handled = q.requestToken;
     s.available = response.available === true;
+    s.unavailableReason = response.unavailableReason || null;
+    // Unavailability is not an empty successful query. Keep only the already
+    // verified snapshot in this exact thread/service binding and scope.
+    if (!s.available) {
+      if (s.unavailableReason === 'service_unavailable') scheduleRetry(s);
+      return;
+    }
+    s.retryCount = 0;
+    s.retryAt = null;
     const page = response.requests;
-    if (page && Array.isArray(page.rows)) {
+    if (q.view === 'logs' && page && Array.isArray(page.rows)) {
       if (q.cursor == null) s.rows = [];
       const known = new Set(s.rows.map(row => row.id));
       for (const row of page.rows) if (row && !known.has(row.id)) { s.rows.push(row); known.add(row.id); }
@@ -78,20 +109,46 @@
     }
     if (q.view === 'overview') {
       s.summary = response.summary || null;
+      s.summaryCaches[s.period] = s.summary;
     }
-    s.session = response.session?.threadId === s.threadId && s.threadId ? response.session : null;
+    if (q.view === 'overview') s.session = response.session?.threadId === s.threadId && s.threadId ? response.session : null;
   }
   function query(root) {
     if (!root.quotaDetailsOpen) return null;
     const s = state(root);
     accept(root);
+    const wasAvailable = s.hostAvailable;
+    s.hostAvailable = root.hostAvailable !== false;
+    if (!s.hostAvailable) return null;
+    // A restored bridge must use a fresh token: a former failed token stays
+    // settled in both the renderer and host cache. Keep the verified snapshot.
+    if (!wasAvailable && s.pending && (s.error || s.available === false || loading(s))) {
+      issue(root,s.pending.cursor);
+    }
+    if (loading(s) && Date.now() - s.requestedAt > 10000) {
+      fail(s);
+    }
     const completed = !s.pending || s.handled === s.pending.requestToken;
+    if (completed && s.retryAt !== null && Date.now() >= s.retryAt) {
+      s.retryCount += 1;
+      issue(root,s.pending?.cursor || null,true);
+    }
     // Do not refresh a paginated snapshot underneath the reader. A manual refresh starts a new one.
-    if (!s.pending || (completed && !s.error && !s.paged && Date.now() - s.requestedAt > 5000 && root.hostAvailable !== false)) issue(root);
+    else if (!s.pending || (completed && !s.error && s.available !== false && !s.paged && Date.now() - s.requestedAt > 5000)) issue(root);
     return s.pending;
   }
   function loading(s) { return Boolean(s.pending && s.handled !== s.pending.requestToken); }
-  function reset(root) { delete root.dialogState; }
+  function cancel(root) {
+    if (typeof window.__cockpitUsageRequest === 'function') {
+      try { window.__cockpitUsageRequest('null'); } catch { /* Disconnected host. */ }
+    }
+    if (root.dialogState) {
+      root.dialogState.pending = null;
+      root.dialogState.retryCount = 0;
+      root.dialogState.retryAt = null;
+    }
+  }
+  function reset(root) { cancel(root); delete root.dialogState; }
   function refresh(root) {
     const s = state(root);
     s.paged = false;
@@ -105,6 +162,25 @@
   }
   function rate(value) { return finite(value) && value > 0 ? (value >= 1 ? String(Math.round(value)) : value < 0.1 ? '< 0.1' : value.toFixed(1)) + ' tok/s' : missingLabel; }
   function metricList(items) { return '<dl class="cell-metrics">' + items.map(([key,value]) => '<div><dt>' + esc(label(key)) + '</dt><dd>' + esc(value) + '</dd></div>').join('') + '</dl>'; }
+  function tiers(row) {
+    // Keep parity with requestServiceTierPresentation and the explicit
+    // recordedServiceTierAdaptation evidence used by API Service.
+    const requested = String(row.requestedServiceTier || '').trim();
+    const response = String(row.responseServiceTier || '').trim();
+    const legacy = !requested && !response ? String(row.serviceTier || '').trim() : '';
+    const value = row.serviceTierAdaptation;
+    const adaptation = value?.reason === 'official_default_only' && value.sentTier === 'default'
+      && typeof value.requestedTier === 'string' && value.requestedTier.trim() ? value : null;
+    const tierLabel = tier => {
+      const keys = {priority:'tierFast',fast:'tierFast',ultrafast:'tierUltrafast',standard:'tierStandard',default:'tierStandard',auto:'tierAuto'};
+      return tier ? Object.hasOwn(keys,tier.toLowerCase()) ? label(keys[tier.toLowerCase()]) : tier : label('tierUnknown');
+    };
+    const entry = (key,tier) => '<span class="cell-tier" title="' + esc(label('tierHint')) + '">'
+      + esc(label(key).replace(/\{\{\s*tier\s*\}\}/g, key === 'requestTier' ? tierLabel(tier) : tier || label('tierUnknown'))) + '</span>';
+    return entry('requestTier',adaptation?.requestedTier || requested) + entry('responseTier',response)
+      + (legacy ? entry('legacyTier',legacy) : '')
+      + (adaptation ? '<span class="cell-tier adjusted" title="' + esc(label('tierHint')) + '">' + esc(label('tierAdjusted')) + '</span>' : '');
+  }
   function requestRow(row) {
     const date = finite(row.timestamp) && row.timestamp > 0 ? new Date(row.timestamp) : null;
     const timestamp = date && Number.isFinite(date.getTime()) ? date : null;
@@ -120,7 +196,7 @@
       + '</span><time class="cell-time">' + esc(timestamp ? timestamp.toLocaleTimeString(undefined, {hour12:false}) : missingLabel) + '</time></td>'
       + '<td><span class="cell-email" title="' + esc(email) + '">' + esc(email) + '</span>' + badge(row.plan) + '<span class="cell-route">' + esc(route) + '</span></td>'
       + '<td><span class="cell-model" title="' + esc(row.requestedModel || row.model || missingLabel) + '">' + esc(row.requestedModel || row.model || missingLabel) + '</span>'
-      + (row.upstreamModel ? '<span class="cell-upstream" title="' + esc(row.upstreamModel) + '">↳ ' + esc(row.upstreamModel) + '</span>' : '') + '<span class="cell-muted">' + esc(row.reasoningEffort || missingLabel) + '</span></td>'
+      + (row.upstreamModel ? '<span class="cell-upstream" title="' + esc(row.upstreamModel) + '">↳ ' + esc(row.upstreamModel) + '</span>' : '') + '<span class="cell-muted">' + esc(row.reasoningEffort || missingLabel) + '</span>' + tiers(row) + '</td>'
       + '<td>' + metricList([['input',number(row.inputTokens)],['output',number(row.outputTokens)],['cached',number(row.cachedTokens)],['total',number(row.totalTokens)]]) + '</td>'
       + '<td>' + metricList([['firstResponse',ms(row.firstResponseMs)],['totalDuration',ms(row.latencyMs)],['speed',rate(rowSpeed(row))]]) + '</td>'
       + '<td><span class="cell-result ' + (outcome === 'success' ? '' : 'failed') + '">' + dot(outcome === 'success' ? 'green' : '') + esc(label(outcome)) + '</span>'
@@ -166,14 +242,16 @@
     return '<div class="overview-sections"><section class="business-section quota-block" data-resource-kind="' + esc(input.badgeKind) + '"><div class="business-label"><h3 class="section-title">' + dot('purple') + esc(input.badgeKind === 'deepseek' ? balanceLabel : label('quotaTitle')) + '</h3></div><div class="business-content">' + quotaContent(root,input) + '</div></section>'
       + '<section class="business-section session-block"><div class="business-label"><h3 class="section-title">' + dot('blue') + esc(label('session')) + '</h3></div><div class="business-content session-metrics"><dl class="session-metric model"><dt>' + esc(label('model')) + '</dt><dd title="' + esc(sessionModel) + '">' + esc(sessionModel) + '</dd>'
       + (session?.upstreamModel && session.upstreamModel !== sessionModel ? '<dd class="metric-sub" title="' + esc(session.upstreamModel) + '">↳ ' + esc(session.upstreamModel) + '</dd>' : '') + '<dd class="metric-sub">' + esc(session?.reasoningEffort || '') + '</dd></dl>'
-      + metric(label('speed'),input.speed) + metric(label('cache'),input.cache) + metric(label('firstResponse'),ms(session?.firstResponseMs)) + '</div></section>'
+      + metric(label('averageSpeed'),input.averageSpeed || missingLabel) + metric(label('averageCache'),input.averageCache || missingLabel) + metric(label('firstResponse'),ms(session?.firstResponseMs)) + '</div></section>'
       + '<section class="business-section stats-block"><div class="business-label"><h3 class="section-title" title="' + esc(statsHint) + '">' + dot('green') + esc(statsTitle) + '</h3>' + segmented('period',[['today','periodToday'],['week','periodWeek']],s.period) + '</div><div class="business-content"><div class="stats-grid">'
       + '<dl><dt>' + esc(label('requestsCount')) + '</dt><dd>' + number(summary?.requests) + '</dd><dd class="stats-sub">' + esc(label('successRate')) + ' ' + esc(successRate) + '</dd></dl>'
       + '<dl><dt>' + esc(label('totalTokens')) + '</dt><dd>' + number(summary?.totalTokens) + '</dd></dl><dl><dt>' + esc(label('estimatedValue')) + '</dt><dd class="value">' + esc(cost) + '</dd></dl><dl><dt>' + esc(label('avgLatency')) + '</dt><dd>' + metricValue(ms(summary?.averageLatencyMs)) + '</dd></dl></div><p class="stats-date">' + esc(range) + '</p></div></section></div>';
   }
   function logs(root) {
     const s = state(root), busy = loading(s);
-    const empty = busy ? label('loading') : !s.threadId && s.scope === 'chat' ? label('unlinkedSession') : s.available === false ? label('statsUnavailable') : label('noRequests');
+    const empty = root.hostAvailable === false ? label('hostUnavailable') : s.error ? label('dataFailed') : busy ? label('loading')
+      : !s.threadId && s.scope === 'chat' || s.unavailableReason === 'unlinked_session' ? label('unlinkedSession')
+      : s.available === false ? label('serviceUnavailable') : label('noRequests');
     return '<section class="logs-view"><div class="log-toolbar">' + segmented('scope',[['chat','scopeChat'],['service','scopeService']],s.scope) + '<span class="log-caption">' + esc(label('newestFirst')) + '</span></div>'
       + '<div class="request-scroll" role="region" tabindex="0" aria-label="' + esc(label('requestsTitle')) + '"><table class="request-table"><colgroup>' + ['time','account','model','token','performance','result'].map(name => '<col class="' + name + '-col">').join('') + '</colgroup><thead><tr>'
       + ['requestTime','account','model','token','performance','result'].map(key => '<th scope="col">' + esc(label(key)) + '</th>').join('') + '</tr></thead><tbody>' + s.rows.map(requestRow).join('')
@@ -205,13 +283,14 @@
     query(root);
     const s = state(root), busy = loading(s);
     const disabled = root.refreshing || root.hostAvailable === false;
-    const error = root.refreshError ? usageLabels[root.refreshError] || label('refreshFailed') : s.error ? label('dataFailed') : '';
+    const unavailable = s.available === false ? label(s.unavailableReason === 'unlinked_session' ? 'unlinkedSession' : 'serviceUnavailable') : '';
+    const error = root.refreshError ? usageLabels[root.refreshError] || label('refreshFailed') : s.error ? label('dataFailed') : unavailable;
     details.__cockpitOverviewHtml = overview(root,input);
     const html = '<header class="topbar"><span>' + esc(label('title')) + '</span><button class="close" type="button" data-cockpit-quota-close aria-label="' + esc(closeLabel) + '">×</button></header>'
       + '<nav class="tabs" role="tablist" aria-label="' + esc(label('title')) + '">' + [['overview','overview'],['logs','requestsTitle']].map(([value,key]) => '<button class="tab" role="tab" id="cockpit-dialog-tab-' + value + '" aria-controls="cockpit-dialog-panel" aria-selected="' + (s.tab === value) + '" tabindex="' + (s.tab === value ? '0' : '-1') + '" type="button" data-cockpit-dialog-action="tab" data-value="' + value + '">' + esc(label(key)) + '</button>').join('') + '</nav>'
       + '<div id="cockpit-dialog-panel" role="tabpanel" aria-labelledby="cockpit-dialog-tab-' + s.tab + '" class="panel modal-body cockpit-usage-body" data-view="' + s.tab + '">' + (s.tab === 'overview' ? details.__cockpitOverviewHtml : logs(root)) + '</div>'
       + '<footer class="footer"><div class="cockpit-usage-feedback" role="status" aria-live="polite">' + (error ? '<span role="alert" data-cockpit-quota-error>' + esc(error) + '</span>' : '')
-      + (s.error ? '<button type="button" class="retry" data-cockpit-dialog-action="retry">' + esc(label('retry')) + '</button>' : '')
+      + (s.error || s.available === false ? '<button type="button" class="retry" data-cockpit-dialog-action="retry">' + esc(label('retry')) + '</button>' : '')
       + (root.hostAvailable === false ? '<span>' + esc(label('hostUnavailable')) + '</span>' : busy ? '<span class="feedback">' + esc(label('loading')) + '</span>' : '')
       + '</div><button class="refresh" type="button" data-cockpit-quota-refresh' + (disabled ? ' disabled' : '') + '>' + esc(root.refreshing ? label('refreshing') : label('refreshData')) + '</button></footer>';
     if (details.__cockpitDialogHtml !== html) {
@@ -244,9 +323,15 @@
       button.onclick = () => {
         if (button.disabled) return;
         const action = button.getAttribute('data-cockpit-dialog-action'), value = button.getAttribute('data-value');
-        if (action === 'tab' && ['overview','logs'].includes(value)) { s.tab = value; s.resetScroll = true; s.paged = false; if (value === 'logs') { s.rows = []; s.nextCursor = null; s.loaded = false; } issue(root); }
-        else if (action === 'scope' && ['chat','service'].includes(value)) { s.scope = value; s.resetScroll = true; s.rows = []; s.nextCursor = null; s.paged = false; s.loaded = false; issue(root); }
-        else if (action === 'period' && ['today','week'].includes(value)) { s.period = value; s.summary = null; issue(root); }
+        if (action === 'tab' && ['overview','logs'].includes(value)) { if (s.tab === value) return; s.tab = value; s.resetScroll = true; s.paged = false; issue(root); }
+        else if (action === 'scope' && ['chat','service'].includes(value)) {
+          if (s.scope === value) return;
+          s.scopeCaches[s.scope] = {rows:s.rows,nextCursor:s.nextCursor,paged:s.paged,loaded:s.loaded,available:s.available,unavailableReason:s.unavailableReason};
+          s.scope = value; s.resetScroll = true;
+          Object.assign(s,s.scopeCaches[value] || {rows:[],nextCursor:null,paged:false,loaded:false,available:null,unavailableReason:null});
+          issue(root);
+        }
+        else if (action === 'period' && ['today','week'].includes(value)) { if (s.period === value) return; s.period = value; s.summary = s.summaryCaches[value] || null; issue(root); }
         else if (action === 'more' && s.nextCursor) { s.paged = true; issue(root,s.nextCursor); }
         else if (action === 'retry') { issue(root,s.pending?.cursor || null); }
         else return;
@@ -258,10 +343,10 @@
         else if (event.key === 'Home') next = 'overview';
         else if (event.key === 'End') next = 'logs';
         else return;
-        event.preventDefault(); s.tab = next; s.resetScroll = true; s.paged = false; if (next === 'logs') { s.rows = []; s.nextCursor = null; s.loaded = false; } issue(root); root.render();
+        event.preventDefault(); if (next !== s.tab) { s.tab = next; s.resetScroll = true; s.paged = false; issue(root); root.render(); }
         details.querySelector('[data-cockpit-dialog-action="tab"][data-value="' + next + '"]')?.focus();
       };
     });
   }
-  return {render, fit, query, reset, refresh, rowSpeed, quotaTone};
+  return {render, fit, query, reset, cancel, refresh, rowSpeed, quotaTone};
 })()

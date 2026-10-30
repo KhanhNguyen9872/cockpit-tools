@@ -13,16 +13,27 @@ fn native_is_oauth_authorization_account(account: &CodexAccount) -> bool {
     !account.is_api_key_auth() || native_is_chatgpt_plan_account(account)
 }
 
+fn native_default_codex_model(model: &str) -> bool {
+    // The client catalog also contains third-party provider models. It is not
+    // evidence that a ChatGPT credential can serve those models.
+    // Reserve is an explicit official capability, not a provider-catalog model.
+    native_is_reserve_model(model)
+        || default_codex_model_ids()
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(model.trim()))
+        || (is_gpt_or_codex_namespace_model(model)
+            && api_service_routable_codex_model_ids()
+                .iter()
+                .chain(api_service_supported_codex_model_ids().iter())
+                .any(|candidate| candidate.eq_ignore_ascii_case(model.trim())))
+}
+
 fn native_chatgpt_plan_model(account: &CodexAccount, model: &str) -> Option<String> {
     if account.api_model_catalog.is_empty() {
         // Cold catalog is not absent consent. Retain the existing public/key
         // model ACL and only route locally known Codex models until GET /models
         // supplies this grant's real catalog; never expose arbitrary models.
-        return api_service_routable_codex_model_ids()
-            .iter()
-            .chain(api_service_supported_codex_model_ids().iter())
-            .any(|candidate| candidate.eq_ignore_ascii_case(model.trim()))
-            .then(|| model.trim().to_owned());
+        return native_default_codex_model(model).then(|| model.trim().to_owned());
     }
     account
         .api_model_catalog
@@ -426,6 +437,12 @@ fn native_plan_account_model(
                     .into_iter()
                     .find(|(client, _)| client.trim().eq_ignore_ascii_case(model.trim()))
                     .map(|(_, upstream)| upstream);
+            }
+            if !account.is_api_key_auth()
+                && !codex_account::is_grok_upstream_provider(account)
+                && !native_default_codex_model(&model)
+            {
+                return None;
             }
             // Native/empty Responses pools accept the existing hidden routable models,
             // not names that are declared only by a different provider's route.
@@ -1530,7 +1547,85 @@ async fn native_acquire_account_permit_impl(
     accounts: &[CodexAccount],
     reserve_permit: bool,
 ) -> Result<(usize, Option<Arc<dyn Send + Sync>>), native_contract::ServiceError> {
-    native_acquire_account_concurrency_permit(host, collection, accounts, reserve_permit).await
+    if !reserve_permit {
+        return native_acquire_account_concurrency_permit(host, collection, accounts, false).await;
+    }
+    let local_reserved = collection.bound_oauth_quota_reserve.is_some()
+        && accounts.iter().any(|account| {
+            !native_is_chatgpt_plan_account(account)
+                && collection.bound_oauth_account_id.as_deref() == Some(account.id.as_str())
+        });
+    let shared_reserved = quota_reserve_coordinator()
+        .lock()
+        .ok()
+        .is_some_and(|runtime| {
+            runtime.strict_policy.as_ref().is_some_and(|(id, _)| {
+                accounts
+                    .iter()
+                    .any(|account| !native_is_chatgpt_plan_account(account) && &account.id == id)
+            })
+        });
+    if !local_reserved && !shared_reserved {
+        return native_acquire_account_concurrency_permit(host, collection, accounts, true).await;
+    }
+    let deadline = Instant::now() + native_account_concurrency_wait(collection);
+    let mut candidates: Vec<usize> = (0..accounts.len()).collect();
+    let mut last_error = None;
+    while !candidates.is_empty() {
+        let available: Vec<_> = candidates
+            .iter()
+            .map(|index| accounts[*index].clone())
+            .collect();
+        let mut settings = collection.clone();
+        settings.account_concurrency_wait_ms = deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis() as u64;
+        let (position, concurrency) =
+            native_acquire_account_concurrency_permit(host, &settings, &available, true).await?;
+        let index = candidates[position];
+        // This check runs after the semaphore wait, against the latest shared evidence.
+        let quota = if native_is_chatgpt_plan_account(&accounts[index]) {
+            Ok(None)
+        } else {
+            acquire_quota_admission(collection, &accounts[index])
+        };
+        match quota {
+            Ok(quota) => {
+                let permit = if concurrency.is_none() && quota.is_none() {
+                    None
+                } else {
+                    Some(Arc::new((concurrency, quota)) as Arc<dyn Send + Sync>)
+                };
+                return Ok((index, permit));
+            }
+            Err(error) if error.code == "quota_reserved" => {
+                drop(concurrency);
+                last_error = Some(error);
+                candidates.remove(position);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        native_error(
+            503,
+            "no_available_account",
+            "No compatible account is available for this model",
+        )
+    }))
+}
+
+// Match Go's account wait queue and release the slot on success, timeout or cancellation.
+const NATIVE_ACCOUNT_MAX_WAITING: u64 = 100;
+struct NativeAccountWaitGuard<'a>(&'a AtomicU64);
+impl Drop for NativeAccountWaitGuard<'_> {
+    fn drop(&mut self) { self.0.fetch_sub(1, Ordering::AcqRel); }
+}
+fn native_account_wait_slot(host: &NativeHostBridge) -> Result<NativeAccountWaitGuard<'_>, native_contract::ServiceError> {
+    host.account_waiters.fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+        (count < NATIVE_ACCOUNT_MAX_WAITING).then_some(count + 1)
+    }).map_err(|_| native_error(429, "account_busy", "Account concurrency wait queue is full"))?;
+    Ok(NativeAccountWaitGuard(&host.account_waiters))
 }
 
 async fn native_acquire_account_concurrency_permit(
@@ -1581,6 +1676,7 @@ async fn native_acquire_account_concurrency_permit(
             "Account concurrency limit reached",
         ));
     }
+    let _wait_slot = native_account_wait_slot(host)?;
     // Wait once for any candidate, without multiplying the configured wait by
     // the pool size. Dropping the other futures cancels their reservations.
     let mut waiting: futures_util::stream::FuturesUnordered<_> = gates
@@ -1623,6 +1719,19 @@ async fn native_route_for_reserved_account(
             "account_binding_unavailable",
             "Selected official authorization changed",
         ));
+    }
+    if let Some(reserve) = quota_reserve_policy(collection, &account.id)
+        .filter(|_| !native_is_chatgpt_plan_account(&account))
+    {
+        let runtime = quota_reserve_coordinator().lock().map_err(|_| {
+            native_error(503, "quota_unavailable", "Quota admission is unavailable")
+        })?;
+        if quota_reserve_decision(&reserve, &account, runtime.accounts.get(&account.id)).0 {
+            return Err(
+                native_error(429, "quota_reserved", "OAuth quota is reserved")
+                    .with_retry_after(Some(Duration::from_secs(5))),
+            );
+        }
     }
     let chatgpt_plan = native_is_chatgpt_plan_account(&account);
     let chatgpt = !account.is_api_key_auth() && !chatgpt_plan;

@@ -30,7 +30,7 @@ impl SseDecoder {
             limit,
             scan_from: 0,
             data_lines: IndependentDataLines::default(),
-            output: Some(super::output_items::OutputCollector::new(limit)),
+            output: Some(super::output_items::OutputCollector::new()),
             terminal: false,
             done: false,
         }
@@ -157,9 +157,7 @@ impl SseDecoder {
                 else {
                     break;
                 };
-                if end.saturating_sub(consumed) > self.limit {
-                    return Err(event_too_large());
-                }
+                self.check_line_size(&self.pending[consumed..end])?;
                 let raw = self.pending[consumed..end].to_vec();
                 let delimiter = if repaired {
                     b"\n\n".to_vec()
@@ -205,9 +203,7 @@ impl SseDecoder {
         }
         let mut frames = Vec::new();
         while let Some((end, separator)) = self.data_lines.boundary(&self.pending, true) {
-            if end > self.limit {
-                return Err(event_too_large());
-            }
+            self.check_line_size(&self.pending[..end])?;
             let raw = self.pending[..end].to_vec();
             frames.push(self.decode_frame(&raw, b"\n\n")?);
             self.pending.drain(..end + separator);
@@ -241,7 +237,20 @@ impl SseDecoder {
             .first
             .filter(|(end, _)| *end <= self.limit)
             .map_or(0, |(end, separator)| end.saturating_add(separator));
-        self.limit.saturating_add(prefix)
+        // Go's Scanner limits the data line; a preceding event field does not
+        // consume that line's budget. Retain a finite pending buffer as well.
+        let metadata = self.pending.split_inclusive(|byte| *byte == b'\n')
+            .take_while(|line| !line.starts_with(b"data:"))
+            .map(|line| line.len()).sum::<usize>();
+        let metadata = if metadata < self.pending.len() { metadata } else { 0 };
+        self.limit.saturating_add(prefix).saturating_add(metadata)
+    }
+
+    fn check_line_size(&self, bytes: &[u8]) -> Result<(), ServiceError> {
+        if bytes.split(|byte| *byte == b'\n').any(|line| line.len() >= self.limit) {
+            return Err(event_too_large());
+        }
+        Ok(())
     }
 
     pub(super) fn has_partial_event(&self) -> bool {
@@ -385,9 +394,8 @@ impl SseDecoder {
             wire.extend_from_slice(wire_value.to_string().as_bytes());
             wire.extend_from_slice(b"\n\n");
         }
-        if wire.len() > self.limit.saturating_add(4) {
-            return Err(event_too_large());
-        }
+        // Go bounds upstream lines, not a terminal rebuilt from prior output items.
+        if !repaired_output { self.check_line_size(&wire)?; }
         Ok(SseFrame {
             value: Some(value),
             identity_event: original.filter(|_| repaired_output && !identity_restored),

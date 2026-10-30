@@ -36,9 +36,10 @@
   min-width: 0;
   padding: 7px 9px;
   gap: 3px 5px;
-  border: 1px solid var(--border-light);
+  border: 1px solid transparent;
   border-radius: 8px;
-  background: var(--bg-card);
+  background: transparent;
+  box-shadow: none;
   color: var(--text-primary);
   text-align: start;
   white-space: normal;
@@ -48,9 +49,9 @@
 
 .codex-proxy-display-sample-card.codex-account-proxy-card-open { cursor: default; }
 
-.btn.codex-account-proxy-card-open:hover {
-  background: color-mix(in srgb, var(--proxy-card-accent) 3%, var(--bg-card));
-  border-color: color-mix(in srgb, var(--proxy-card-accent) 35%, var(--border));
+.btn.codex-account-proxy-card-open:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--proxy-card-accent) 5%, transparent);
+  border-color: color-mix(in srgb, var(--proxy-card-accent) 25%, transparent);
 }
 
 .btn.codex-account-proxy-card-open:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -83,8 +84,7 @@
 .codex-account-proxy-card-checked > time { font-variant-numeric: tabular-nums; }
 
 /* Keep mode, node and latency on one row; extra nodes alone add rows. */
-.codex-account-proxy-card.is-summary .codex-account-proxy-card-open { grid-template-columns: 14px fit-content(80px) minmax(0, 1fr) 12px; gap: 0 5px; padding: 5px 8px; background: color-mix(in srgb, var(--proxy-card-accent) 2%, var(--bg-card)); }
-.codex-account-proxy-card.is-summary .codex-account-proxy-card-open:hover { background: color-mix(in srgb, var(--proxy-card-accent) 5%, var(--bg-card)); }
+.codex-account-proxy-card.is-summary .codex-account-proxy-card-open { grid-template-columns: 14px fit-content(80px) minmax(0, 1fr) 12px; gap: 0 5px; padding: 5px 8px; }
 .codex-account-proxy-card.is-summary .codex-account-proxy-card-emblem { grid-column: 1; grid-row: 1; }
 .codex-account-proxy-card.is-summary .codex-account-proxy-card-heading { grid-column: 2; grid-row: 1; }
 .codex-account-proxy-card.is-summary .codex-account-proxy-card-chevron { grid-column: 4; grid-row: 1; }

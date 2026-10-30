@@ -1442,6 +1442,7 @@ fn apply_provider_gateway_template_settings(
     collection.model_pricings = template.model_pricings.clone();
     collection.excluded_models = template.excluded_models.clone();
     collection.session_affinity = template.session_affinity;
+    collection.session_identity_mapping_enabled = template.session_identity_mapping_enabled;
     collection.session_affinity_ttl_ms = template.session_affinity_ttl_ms;
     collection.session_affinity_default_enabled_migrated =
         template.session_affinity_default_enabled_migrated;
@@ -2765,6 +2766,8 @@ async fn spawn_provider_gateway_sidecar(
         .arg(&launch_config.config_path)
         .arg("--manifest")
         .arg(&launch_config.manifest_path)
+        .arg("--quota-reserve-state")
+        .arg(&launch_config.quota_reserve_path)
         .arg("--quota-pool-state")
         .arg(&launch_config.quota_pool_path)
         .arg("--parent-pid")

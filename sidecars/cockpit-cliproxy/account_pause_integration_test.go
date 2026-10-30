@@ -68,7 +68,7 @@ func newPausedRuntimeFixture(t *testing.T, paused, scope []string) *pausedRuntim
 	f.m = loadAutomaticRoutingManifest(t, string(payload))
 	f.spec = f.m.apiKeyByValue["client-key"]
 	cfg := &config.Config{}
-	selector := buildCoreAuthSelector(nil, &orderedAuthSelector{order: []string{"pause-a.json", "pause-b.json", "pause-c.json"}}, f.m)
+	selector := buildCoreAuthSelector(nil, &orderedAuthSelector{order: []string{"pause-a.json", "pause-b.json", "pause-c.json"}}, f.m, nil)
 	manager := coreauth.NewManager(nil, selector, nil)
 	manager.SetConfig(cfg)
 	manager.SetRetryConfig(0, 0, 3)

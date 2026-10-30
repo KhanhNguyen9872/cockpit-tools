@@ -6,8 +6,8 @@
 //! - API 服务及混合模型路由：前端语音创建请求转入实例网关。
 //!
 //! 该模块只连接实例自己的 loopback CDP 端口，不修改官方 app.asar，
-//! 也不修改官方额度或速度逻辑。缓存用量在后台读取本实例的 rollout 尾部，
-//! 输出速度与最近使用账号只按当前聊天、实例及 API Key 的真实请求记录确认。
+//! 也不修改官方额度或速度逻辑。输出速度与缓存命中率在后台读取真实请求记录，
+//! 严格关联当前聊天、实例、API Key、所选模型与速度档位。
 
 #[path = "codex_app_injection_recent_account.rs"]
 mod recent_account;
@@ -23,6 +23,12 @@ mod dialog_data;
 
 #[path = "codex_app_injection_pool.rs"]
 mod pool;
+
+#[path = "codex_app_injection_live.rs"]
+mod live;
+
+#[path = "codex_app_injection_binding.rs"]
+mod binding;
 
 use crate::commands::codex::{
     codex_model_provider_deepseek_balance_url, query_deepseek_balance_snapshot,
@@ -649,7 +655,7 @@ pub fn start_for_profile(
     start_profile(app, instance_id, profile_dir, port, bind_account_id, false);
 }
 
-/// Only the unified launch transaction grants one clean startup reload.
+/// Only the unified launch transaction may arm first-document adaptation.
 pub fn start_for_launched_profile(
     app: AppHandle,
     instance_id: String,
@@ -1701,6 +1707,7 @@ fn deepseek_balance_injection_script(
     let handled_refresh_token =
         serde_json::to_string(&handled_refresh_token).unwrap_or_else(|_| "null".to_string());
     let badge_layout = include_str!("codex_app_injection_layout.js");
+    let usage_metrics = include_str!("codex_app_injection_usage.js");
     format!(
         r#"(() => {{
       const balance = {balance};
@@ -1717,6 +1724,7 @@ fn deepseek_balance_injection_script(
       const handledRefreshToken = {handled_refresh_token};
       const hostHeartbeatTimeoutMs = 8000;
       const badgeLayout = {badge_layout};
+      const usageMetrics = {usage_metrics};
       const root = window.__cockpitDeepSeekBalance || (window.__cockpitDeepSeekBalance = {{}});
       root.hostHeartbeatAt = Date.now();
       root.hostAvailable = true;
@@ -1730,9 +1738,10 @@ fn deepseek_balance_injection_script(
         if (staleQuotaRoot.resizeHandler) window.removeEventListener('resize', staleQuotaRoot.resizeHandler);
         if (staleQuotaRoot.scrollHandler) window.removeEventListener('scroll', staleQuotaRoot.scrollHandler, true);
         if (staleQuotaRoot.keyHandler) window.removeEventListener('keydown', staleQuotaRoot.keyHandler);
+        if (staleQuotaRoot.focusHandler) window.removeEventListener('focusin', staleQuotaRoot.focusHandler);
         if (staleQuotaRoot.outsidePointerHandler) window.removeEventListener('pointerdown', staleQuotaRoot.outsidePointerHandler, true);
         badgeLayout.disconnect(staleQuotaRoot);
-        for (const key of ['keyHandler', 'outsidePointerHandler', 'statuslineVersion', 'layoutCard', 'card', 'threadId', 'usageState', 'poolState', 'lastTrigger', 'lastTriggerIndex', 'refreshError', 'refreshResultKey']) delete staleQuotaRoot[key];
+        for (const key of ['keyHandler', 'focusHandler', 'outsidePointerHandler', 'statuslineVersion', 'layoutCard', 'card', 'threadId', 'usageState', 'poolState', 'lastTrigger', 'lastTriggerIndex', 'refreshError', 'refreshResultKey']) delete staleQuotaRoot[key];
         delete staleQuotaRoot.watchdogTimer;
         delete staleQuotaRoot.observer;
         delete staleQuotaRoot.resizeHandler;
@@ -1775,8 +1784,11 @@ fn deepseek_balance_injection_script(
       const render = () => {{
         let host = document.querySelector('[data-cockpit-deepseek-balance]');
         let details = document.querySelector('[data-cockpit-deepseek-balance-details]');
-        const permissions = [...document.querySelectorAll('[data-composer-navigation-target="permissions"]')].find((node) => node.getClientRects().length > 0);
-        const footer = permissions?.closest('[class*="_ComposerLayoutFooter_"]') || permissions?.closest('[class*="_footer_"]') || permissions?.parentElement;
+        const card = usageMetrics.visibleCard(root.card);
+        const footer = card?.querySelector('[class*="_ComposerLayoutFooter_"], [class*="_footer_"]') || card;
+        const permissions = footer && [...footer.querySelectorAll('[data-composer-navigation-target="permissions"]')].find((node) => node.getClientRects().length > 0);
+        if (root.card !== card) root.detailsOpen = false;
+        root.card = card;
         if (!permissions || !footer || !balance) {{
           if (host) host.style.display = 'none';
           if (details) details.style.display = 'none';
@@ -1855,6 +1867,10 @@ fn deepseek_balance_injection_script(
         root.scrollHandler = () => root.scheduleRender();
         window.addEventListener('scroll', root.scrollHandler, {{passive:true,capture:true}});
       }}
+      if (!root.focusHandler) {{
+        root.focusHandler = () => root.scheduleRender();
+        window.addEventListener('focusin', root.focusHandler);
+      }}
       if (!root.observer) {{
         root.observer = new MutationObserver((mutations) => {{
           const host = document.querySelector('[data-cockpit-deepseek-balance]');
@@ -1910,6 +1926,31 @@ struct InjectionEvalResult {
     selected_model: Option<String>,
     thread_id: Option<String>,
     dialog_request: Option<dialog_data::DialogQuery>,
+    usage_selection: Option<output_speed::OutputSpeedSelection>,
+}
+
+fn usage_selection_from_cdp_response(value: &Value) -> Option<output_speed::OutputSpeedSelection> {
+    let selected = value
+        .pointer("/result/result/value/usageSelection")?
+        .as_object()?;
+    let model = selected
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|model| {
+            !model.is_empty() && model.len() <= 256 && !model.chars().any(char::is_control)
+        })
+        .map(str::to_string);
+    let service_tier = selected
+        .get("serviceTier")
+        .and_then(Value::as_str)
+        .and_then(output_speed::normalize_service_tier);
+    // Explicit null represents an unconfirmed native selection. It must not
+    // fall back to the previous model/tier while the picker is changing.
+    Some(output_speed::OutputSpeedSelection {
+        model,
+        service_tier,
+    })
 }
 
 async fn evaluate_target(
@@ -2025,9 +2066,12 @@ async fn evaluate_target(
                 return Some(InjectionEvalResult {
                     refresh_request_token: refresh_request_token_from_cdp_response(&value),
                     selected_model: selected_model_from_cdp_response(&value),
-                    dialog_request: value.pointer("/result/result/value/dialogRequest")
+                    usage_selection: usage_selection_from_cdp_response(&value),
+                    dialog_request: value
+                        .pointer("/result/result/value/dialogRequest")
                         .and_then(dialog_data::parse_query),
-                    thread_id: value.pointer("/result/result/value/threadId")
+                    thread_id: value
+                        .pointer("/result/result/value/threadId")
                         .and_then(Value::as_str)
                         .filter(|id| uuid::Uuid::parse_str(id).is_ok())
                         .map(str::to_string),
@@ -3315,8 +3359,9 @@ async fn run_injection_loop(
     let mut balance_snapshot_pending = false;
     let mut snapshot_wait_started: Option<Instant> = None;
     let mut usage_poller = InjectionUsagePoller::new(&profile_dir);
-    let mut dialog_poller = InjectionDialogPoller::new(&profile_dir);
     let mut pool_poller = pool::PoolPoller::default();
+    let mut binding_poller = binding::BindingPoller::new(&profile_dir);
+    let live_dialog = live::LiveDialogBridge::new(&profile_dir);
     let mut quota_refresh_error: Option<&str> = None;
     let mut voice_failure_logged = false;
     loop {
@@ -3340,7 +3385,8 @@ async fn run_injection_loop(
         let mut refreshed_empty_pool = false;
         let mut usage_state = usage_poller.collect();
         if let Some(state) = usage_state.as_object_mut() {
-            state.insert("__dialog".into(), dialog_poller.collect());
+            state.insert("__dialog".into(), live_dialog.collect());
+            state.insert("__binding".into(), binding_poller.collect());
         }
         if let Some(result) = quota_fetch_tasks.try_join_next() {
             // A completed manual refresh supersedes a fetch already in flight.
@@ -3613,7 +3659,10 @@ async fn run_injection_loop(
         }
         let gateway = read_profile_gateway_config(&profile_dir);
         if let Some(state) = usage_state.as_object_mut() {
-            state.insert("__accountPool".into(), pool_poller.collect(gateway.as_ref()));
+            state.insert(
+                "__accountPool".into(),
+                pool_poller.collect(gateway.as_ref()),
+            );
         }
         let provider_name = gateway
             .as_ref()
@@ -3637,6 +3686,7 @@ async fn run_injection_loop(
             quota_refresh_error,
         );
         let targets = query_targets(&client, port).await;
+        live_dialog.reconcile(&targets, port);
         let mut refresh_request_token = None;
         let mut visible_model = None;
         let mut model_reported = false;
@@ -3644,9 +3694,18 @@ async fn run_injection_loop(
         let mut dialog_requests = Vec::new();
         for target in &targets {
             if let Some(result) = evaluate_target(target, &script, QUOTA_SCRIPT_KIND).await {
-                if let Some(query) = result.dialog_request { dialog_requests.push(query); }
+                if !live_dialog.ready(target) {
+                    if let Some(query) = result.dialog_request {
+                        dialog_requests.push(query);
+                    }
+                }
                 if let Some(thread_id) = result.thread_id {
-                    visible_threads.push(thread_id);
+                    visible_threads.push((
+                        thread_id,
+                        result
+                            .usage_selection
+                            .unwrap_or_else(|| binding_poller.selection()),
+                    ));
                 }
                 if let Some(token) = result.refresh_request_token {
                     if handled_refresh_token.as_deref() != Some(token.as_str()) {
@@ -3658,8 +3717,8 @@ async fn run_injection_loop(
                 }
             }
         }
-        usage_poller.request(visible_threads);
-        dialog_poller.request(dialog_requests);
+        usage_poller.request_with_selection(visible_threads);
+        live_dialog.request(dialog_requests);
         if let Some(model) = visible_model {
             model_reported = true;
             if observed_model.as_deref() != Some(model.as_str()) {

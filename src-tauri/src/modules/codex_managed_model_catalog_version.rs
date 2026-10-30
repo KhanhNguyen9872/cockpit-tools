@@ -17,7 +17,8 @@ use std::path::{Path, PathBuf};
 /// 5：删除退役型号的内置模板与兼容槽位。
 /// 6：Grok 4.7 真实上下文、推理档位与默认推理强度。
 /// 7：GPT-6.1 Sol 与 GPT-6 Astra 声明官方 Ultrafast 速度档位。
-pub(crate) const MANAGED_MODEL_CATALOG_GENERATOR_VERSION: u32 = 7;
+/// 8：Ultrafast 说明回退到官方客户端的内置翻译。
+pub(crate) const MANAGED_MODEL_CATALOG_GENERATOR_VERSION: u32 = 8;
 
 const META_FILE_NAME: &str = "cockpit-model-catalog.meta.json";
 

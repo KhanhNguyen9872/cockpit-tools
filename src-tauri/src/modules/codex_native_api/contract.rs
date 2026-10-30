@@ -69,6 +69,7 @@ pub struct ExecutionPolicy {
     pub image_idle_timeout: Duration,
     /// Total opening attempts for a streaming request, including its first try.
     pub stream_open_max_attempts: u8,
+    /// Zero matches Go: no overall deadline for ordinary requests.
     pub total_timeout: Duration,
     /// Maximum distinct credentials per selection round, including the first.
     /// Zero means no credential-count limit (pool, time and replay fences still apply).
@@ -98,7 +99,7 @@ impl Default for ExecutionPolicy {
             image_open_timeout: Duration::from_secs(60),
             image_idle_timeout: Duration::from_secs(180),
             stream_open_max_attempts: 1,
-            total_timeout: Duration::from_secs(3600),
+            total_timeout: Duration::ZERO,
             credential_retries: 0,
             retry_max_delay: Duration::from_secs(1),
             send_retries: 0,
@@ -338,6 +339,8 @@ pub trait Host: Send + Sync + 'static {
         _request_started: std::time::Instant,
     ) {
     }
+    fn quota_request_started(&self, _account_id: &str) {}
+    fn check_quota_before_send(&self, _account_id: &str) -> Result<(), ServiceError> { Ok(()) }
     /// A runtime policy notification; must not perform blocking I/O.
     fn set_cooling_disabled(&self, _disabled: bool) {}
     /// Disabling affinity clears only the transient routing preference cache.

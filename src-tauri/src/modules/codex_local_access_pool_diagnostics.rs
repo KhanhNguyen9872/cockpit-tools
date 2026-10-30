@@ -182,6 +182,7 @@ fn apply_sidecar_account_pool_health(
         health.available_auths = event.available_auths;
         health.unavailable_auths = event.unavailable_auths;
         health.model_excluded_auths = event.model_excluded_auths;
+        health.quota_reserved_auths = event.quota_reserved_auths;
         health.image_policy_blocked_auths = event.image_policy_blocked_auths;
         health.scope_diagnostics = event
             .scope_diagnostics

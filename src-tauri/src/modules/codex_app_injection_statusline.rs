@@ -179,6 +179,10 @@ fn injection_script(
             "noRequests",
             "unlinkedSession",
             "statsUnavailable",
+            "serviceUnavailable",
+            "averageSpeed",
+            "averageCache",
+            "tierAdjusted",
             "requestTime",
             "account",
             "token",
@@ -233,6 +237,17 @@ fn injection_script(
                 )),
             )
         })
+        .chain([
+            ("requestTier", "codex.apiService.logs.requestedTier"),
+            ("responseTier", "codex.apiService.logs.responseTier"),
+            ("legacyTier", "codex.apiService.logs.legacyTier"),
+            ("tierHint", "codex.apiService.logs.serviceTierHint"),
+            ("tierFast", "codex.speed.fast"),
+            ("tierUltrafast", "codex.speed.ultrafast"),
+            ("tierStandard", "codex.speed.standard"),
+            ("tierAuto", "codex.contextOverride.automatic"),
+            ("tierUnknown", "common.requestProxy.unknown"),
+        ].into_iter().map(|(name, key)| (name.to_string(), json!(i18n::translate(locale, key, &[])))))
         .collect(),
     )
     .to_string();

@@ -106,25 +106,23 @@ async fn websocket_shutdown_after_parser_error_closes_only_idle_transport() {
 }
 
 #[tokio::test]
-async fn websocket_invalid_first_frames_do_not_extend_initial_absolute_deadline() {
+async fn go_limits_websocket_invalid_first_frames_remain_recoverable_without_a_start_timer() {
     let (app, source) = interrupted_source();
     let (mut handle, host, task, _dir) =
         fixture(app, WireApi::Responses, false, native::Options::default()).await;
-    host.initial_timeout_ms.store(1000, Ordering::SeqCst);
+    host.initial_timeout_ms.store(50, Ordering::SeqCst);
     let mut ws = socket(&handle).await;
-    ws.send(Message::Text("bad".into())).await.unwrap();
-    assert_eq!(terminal(&mut ws).await["status"], 400);
-    tokio::time::sleep(Duration::from_millis(600)).await;
-    ws.send(Message::Text("still bad".into())).await.unwrap();
-    assert_eq!(terminal(&mut ws).await["status"], 400);
-    let timeout = tokio::time::timeout(Duration::from_millis(800), terminal(&mut ws))
-        .await
-        .unwrap();
-    assert_eq!(timeout["status"], 408);
-    assert_eq!(timeout["error"]["code"], "websocket_start_timeout");
+    for text in ["bad", "still bad"] {
+        ws.send(Message::Text(text.into())).await.unwrap();
+        assert_eq!(terminal(&mut ws).await["status"], 400);
+        tokio::time::sleep(Duration::from_millis(60)).await;
+    }
+    ws.send(Message::Ping(b"alive".to_vec().into())).await.unwrap();
+    let reply = tokio::time::timeout(Duration::from_secs(2), ws.next()).await.unwrap().unwrap().unwrap();
+    assert!(matches!(reply, Message::Pong(value) if value.as_ref() == b"alive"));
     assert!(source.requests.lock().unwrap().is_empty());
     handle.shutdown(Duration::from_secs(2)).await.unwrap();
     assert!(host.reports.lock().unwrap().is_empty(),
-        "invalid first frames and local initial timeout never reached upstream");
+        "invalid first frames and an idle shutdown must not create upstream inference");
     task.abort();
 }

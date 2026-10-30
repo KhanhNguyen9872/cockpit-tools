@@ -158,6 +158,15 @@
     "providerClear": "Bỏ chọn"
   },
   "common": {
+    "networkErrors": {
+      "upstream": "dịch vụ thượng nguồn",
+      "proxyConnection": "Không thể kết nối đến {{target}} qua proxy “{{proxy}}”. Có thể do proxy hoặc mạng. Hãy kiểm tra proxy hoặc thử nút khác.",
+      "proxyTimeout": "Kết nối đến {{target}} qua proxy “{{proxy}}” đã hết thời gian chờ. Có thể do proxy hoặc mạng. Hãy kiểm tra proxy hoặc thử nút khác.",
+      "proxyAuth": "Xác thực proxy “{{proxy}}” thất bại. Hãy kiểm tra tên người dùng hoặc mật khẩu proxy.",
+      "localProxyUnavailable": "Không thể kết nối đến proxy cục bộ “{{proxy}}”. Hãy kiểm tra dịch vụ proxy có đang chạy không.",
+      "directConnection": "Không thể kết nối đến {{target}}. Hãy kiểm tra mạng và thử lại.",
+      "directTimeout": "Kết nối đến {{target}} đã hết thời gian chờ. Hãy kiểm tra mạng và thử lại."
+    },
     "codexUsage": {
       "title": "Hạn mức và sử dụng",
       "session": "Cuộc trò chuyện này",
@@ -167,8 +176,8 @@
       "speed": "Tốc độ đầu ra",
       "cache": "Tỷ lệ trúng bộ nhớ đệm",
       "cacheShort": "Bộ nhớ đệm",
-      "speedHint": "Tốc độ đầu ra có trọng số của các yêu cầu API hợp lệ gần đây trong cuộc trò chuyện này, không tính thời gian chờ phản hồi đầu tiên. Hiển thị — khi không thể liên kết yêu cầu hoặc thiếu dữ liệu thời gian.",
-      "cacheHint": "Tỷ lệ token đầu vào gần đây được phục vụ từ bộ nhớ đệm, tính trọng số theo lượng đầu vào.",
+      "speedHint": "Tốc độ đầu ra trung bình của các yêu cầu hợp lệ trong cuộc trò chuyện này, không tính thời gian chờ phản hồi đầu tiên. Thiếu số đo: —.",
+      "cacheHint": "Tỷ lệ trúng bộ nhớ đệm trung bình của các yêu cầu hợp lệ trong cuộc trò chuyện này, được tính trọng số theo token đầu vào. Giữ nguyên sau khi dừng tạo; thiếu số liệu đếm: —.",
       "aggregateHint": "Tổng tỷ lệ hạn mức còn lại, không tính trọng số theo dung lượng gói. Màu giống tổng quan tài khoản: ≥80% xanh lá, ≥40% vàng, ≥10% cam, dưới 10% đỏ. Giá trị chưa xác định không tô màu hạn mức.",
       "waiting": "Đang chờ bản ghi sử dụng cuộc trò chuyện",
       "refreshFailed": "Không thể làm mới hạn mức. Đã giữ lại kết quả trước. Vui lòng thử lại.",
@@ -225,7 +234,11 @@
       "avgLatency": "Độ trễ TB",
       "successRate": "Tỷ lệ thành công",
       "verifiedStatistics": "Số liệu xác minh",
-      "excludedHistory": "{{count}} bản ghi cũ thiếu bằng chứng gửi yêu cầu nên không được tính."
+      "excludedHistory": "{{count}} bản ghi cũ thiếu bằng chứng gửi yêu cầu nên không được tính.",
+      "averageSpeed": "Tốc độ trung bình",
+      "serviceUnavailable": "Dịch vụ API chưa khả dụng. Vui lòng thử lại.",
+      "tierAdjusted": "Đã chuyển sang chuẩn",
+      "averageCache": "Tỷ lệ bộ nhớ đệm TB"
     },
     "apiKeyAccount": "Tài khoản API Key",
     "status": "Trạng thái",
@@ -1625,6 +1638,35 @@
       "refreshed": "Đã làm mới usage",
       "usage": "Lượng dùng",
       "tierOther": "Khác"
+    },
+    "background": {
+      "title": "Nền",
+      "description": "Chỉ đổi nền ứng dụng. Thẻ tài khoản và nút điều khiển giữ nguyên giao diện.",
+      "presets": "Mẫu nền",
+      "default": "Mặc định",
+      "mist": "Sương",
+      "forest": "Rừng",
+      "dusk": "Hoàng hôn",
+      "sand": "Cát",
+      "custom": "Tùy chỉnh",
+      "chooseImage": "Chọn ảnh",
+      "replaceImage": "Đổi ảnh",
+      "imageHint": "JPG, PNG hoặc WebP, tối đa 10 MB. Ảnh lớn được thu nhỏ ngay trên thiết bị.",
+      "preview": "Xem trước",
+      "strength": "Độ đậm",
+      "blur": "Độ mờ",
+      "pixels": "{{count}} điểm ảnh",
+      "position": "Vị trí ảnh",
+      "center": "Giữa",
+      "top": "Trên",
+      "bottom": "Dưới",
+      "localHint": "Thay đổi có hiệu lực ngay và tự động lưu trên thiết bị này. Ảnh không được tải lên. Khôi phục sẽ xóa ảnh đã lưu.",
+      "restore": "Khôi phục",
+      "imageType": "Hãy chọn ảnh JPG, PNG hoặc WebP.",
+      "imageSize": "Hãy chọn ảnh nhỏ hơn 10 MB.",
+      "imageRead": "Không đọc được ảnh. Hãy thử tệp khác.",
+      "storage": "Không tải hoặc lưu được nền. Hãy thử lại; nền đã lưu vẫn được giữ.",
+      "saveFailed": "Nền đang hiển thị nhưng chưa lưu được. Hãy thử lại; nền đã lưu trước đó vẫn được giữ."
     }
   },
   "appPath": {
@@ -2350,7 +2392,18 @@
       "windowHint": "Ngưỡng dựa trên thời lượng thực tế: từ một tuần trở lên dùng ngưỡng tuần. Tài khoản chỉ có hạn mức tuần chỉ kiểm tra hạn mức đó. Khi thiếu thời lượng, giữ ánh xạ cửa sổ chính/phụ.",
       "rule": "Còn lại ngắn hạn <= {{shortCycle}}% hoặc tuần <= {{weekly}}%"
     },
+    "launchConfirmation": {
+      "title": "Chưa xác nhận khởi chạy",
+      "description": "Đã gửi yêu cầu khởi chạy nhưng chưa xác nhận được trạng thái ứng dụng. Có thể ứng dụng đã mở. Vui lòng không khởi chạy lại.",
+      "check": "Kiểm tra",
+      "notRunning": "Chưa phát hiện phiên bản đích. Hãy kiểm tra lại sau hoặc đóng hộp thoại này trước khi thử khởi chạy lại.",
+      "checkFailed": "Không thể đọc trạng thái hoạt động. Vui lòng kiểm tra lại sau.",
+      "maintenanceDeferred": "Tạm thời không thể kiểm tra phiên. Lịch sử được giữ nguyên và bước bảo trì này đã được bỏ qua."
+    },
     "launchErrors": {
+      "sessionRestoreFailed": "Sửa phiên thất bại và khôi phục bản sao lưu chưa hoàn tất. Đã dừng khởi chạy; hãy kiểm tra nhật ký và bản sao lưu trước khi thử lại.",
+      "sessionCheckTimeout": "Kiểm tra phiên đã hết thời gian chờ. Đã dừng khởi chạy; hãy thử lại hoặc xem nhật ký.",
+      "sessionFileTooLarge": "Dòng đầu của tệp phiên quá lớn. Đã dừng khởi chạy; hãy xem nhật ký.",
       "bindingFailed": "Không thể xác nhận tài khoản liên kết. Đã dừng khởi động; hãy thử chuyển tài khoản lại.",
       "processScanFailed": "Không thể kiểm tra các tiến trình nền cũ. Đã dừng khởi động; hãy thử lại.",
       "proxyEntryFailed": "Không thể khởi động proxy đã cấu hình. Không sử dụng tuyến thay thế; hãy thử lại."
@@ -2753,7 +2806,8 @@
         "audioNotSupported": "Tài khoản OAuth này chỉ hỗ trợ phiên âm. Hãy dùng nhà cung cấp có API Key cho các thao tác âm thanh khác.",
         "audioUnavailable": "Không thể chuyển tiếp âm thanh.",
         "audioUpstreamFailed": "Yêu cầu âm thanh tới nhà cung cấp thất bại.",
-        "modelNotAvailable": "Mô hình {{model}} không khả dụng với API Key này."
+        "modelNotAvailable": "Mô hình {{model}} không khả dụng với API Key này.",
+        "quotaReserved": "Hạn mức tài khoản đã được dự trữ hoặc đang chờ xác nhận. Vui lòng thử lại sau ít phút."
       },
       "testRateLimited": "Dịch vụ truy cập được nhưng upstream bị giới hạn hoặc hết hạn mức: {{detail}}.",
       "testHttpFailed": "Dịch vụ truy cập được nhưng yêu cầu trả về HTTP {{status}}: {{detail}}.",
@@ -2906,7 +2960,23 @@
         "imageGenerationConfirm": {
           "title": "Tắt image_generation",
           "message": "Khi bật, dịch vụ API sẽ bỏ khai báo công cụ image_generation trong cổng cục bộ trước khi chuyển tiếp hội thoại văn bản để tránh lỗi như \"Image generation is not enabled\". Không xóa gpt-image hay các mô hình tạo ảnh khác. Tiếp tục?"
-        }
+        },
+        "quotaReserveToggle": "Giữ lại hạn mức OAuth",
+        "quotaReserveDesc": "Dịch vụ API chỉ dùng tài khoản OAuth này khi hạn mức còn lại của 5 giờ và tuần đều cao hơn mức giữ lại.",
+        "quotaReserveHourlyLabel": "Giữ lại 5 giờ",
+        "quotaReserveWeeklyLabel": "Giữ lại theo tuần",
+        "quotaReserveInvalid": "Nhập số nguyên từ 1 đến 100.",
+        "strictReserve": "Bảo vệ nghiêm ngặt",
+        "strictReserveDesc": "Hạn mức dự trữ tự động được bảo vệ bằng biên an toàn. Gần ngưỡng, mỗi tài khoản chỉ gửi một yêu cầu rồi xác nhận hạn mức mới sau khi hoàn tất. Việc sử dụng của ứng dụng khác không bị giới hạn.",
+        "strictNativeOnly": "Bảo vệ nghiêm ngặt cần bộ máy Rust. Hãy tắt trước khi chuyển sang Go.",
+        "safetyMargin": "Biên an toàn",
+        "safetyMarginUnit": "điểm phần trăm",
+        "safetyMarginInvalid": "Nhập số nguyên từ 1 đến 20.",
+        "quotaInFlight": "Đang chạy: {{count}}",
+        "quotaWaiting": "Chờ xác nhận hạn mức",
+        "quotaStale": "Chưa có hạn mức mới",
+        "quotaProtected": "Đã dự trữ",
+        "quotaUpdated": "Cập nhật lúc {{time}}"
       },
       "customRoutingEdit": "Sửa định tuyến tùy chỉnh",
       "customRoutingTitle": "Định tuyến tùy chỉnh",
@@ -3028,7 +3098,7 @@
           "poolUnavailable": "Không có tài khoản khả dụng trong nhóm",
           "poolUnavailableDetail": "Không chọn được tài khoản khả dụng cho mô hình {{model}}",
           "poolUnattributedDetail": "Chưa nhận được dữ liệu chẩn đoán theo tài khoản nên không thể gán lỗi này cho một tài khoản cụ thể. Hãy kiểm tra phạm vi tài khoản và cấu hình mô hình của khóa API này.",
-          "poolDiagnosticDetail": "Mô hình {{model}}: {{candidate}} ứng viên, {{scoped}} trong phạm vi, {{available}} khả dụng, {{unavailable}} không khả dụng, {{modelExcluded}} bị loại theo mô hình, {{imageBlocked}} bị chặn bởi chính sách ảnh",
+          "poolDiagnosticDetail": "Mô hình {{model}}: {{candidate}} ứng viên, {{scoped}} trong phạm vi, {{available}} khả dụng, {{unavailable}} không khả dụng, {{modelExcluded}} bị loại theo mô hình, {{quotaReserved}} được giữ hạn mức, {{imageBlocked}} bị chặn bởi chính sách ảnh",
           "poolNoCandidatesDetail": "Không có tài khoản ứng viên cho yêu cầu này. Hãy kiểm tra mô hình được yêu cầu và trạng thái tải tài khoản.",
           "poolScopeMismatchDetail": "Không có ứng viên phù hợp với phạm vi tài khoản của khóa API này hoặc không nhận diện được ánh xạ tài khoản. Hãy kiểm tra tài khoản đã chọn và cấu hình mô hình.",
           "inspectBinding": "Kiểm tra liên kết",
@@ -3040,7 +3110,7 @@
           "boundAccountNotLoadedDetail": "Tài khoản liên kết này chưa được tải vào dịch vụ hiện tại. Hãy kiểm tra việc tải tài khoản và đồng bộ nhóm.",
           "boundAccountNotCandidateDetail": "Tài khoản liên kết này đã được tải nhưng không nằm trong nhóm ứng viên của yêu cầu này. Hãy kiểm tra mô hình, nhà cung cấp và loại yêu cầu.",
           "scopeUnknownDetail": "Chẩn đoán phạm vi chưa xác định được nguyên nhân cụ thể. Hãy kiểm tra liên kết và nhật ký dịch vụ.",
-          "poolBlockedDetail": "Lọc trong phạm vi: {{unavailable}} không khả dụng (ví dụ bị tắt, đang chờ hoặc lỗi xác thực), {{modelExcluded}} bị loại theo mô hình, {{imageBlocked}} bị chặn bởi chính sách ảnh. Hãy kiểm tra nguyên nhân theo tài khoản và cài đặt.",
+          "poolBlockedDetail": "Lọc trong phạm vi: {{unavailable}} không khả dụng (ví dụ bị tắt, đang chờ hoặc lỗi xác thực), {{modelExcluded}} bị loại theo mô hình, {{quotaReserved}} bị chặn do dự trữ hạn mức, {{imageBlocked}} bị chặn bởi chính sách ảnh. Hãy kiểm tra nguyên nhân theo tài khoản và cài đặt.",
           "poolUnknownDetail": "Chẩn đoán hiện tại chưa xác định được nguyên nhân cụ thể. Hãy kiểm tra phạm vi khóa API, cấu hình mô hình và nhật ký dịch vụ.",
           "clearHint": "Chỉ bản ghi chẩn đoán này bị xóa. Cài đặt, token và hạn mức không được sửa; yêu cầu thất bại lần nữa có thể tạo bản ghi mới.",
           "clearSuccess": "Đã xóa bản ghi chẩn đoán. Điều này không có nghĩa nhóm tài khoản đã phục hồi.",
@@ -3155,7 +3225,7 @@
       "resetCreditStatusRedeemed": "Đã dùng",
       "resetCreditStatusExpired": "Hết hạn",
       "resetCreditStatusUnknown": "Không rõ",
-      "resetCreditNextExpiry": "Hết hạn gần nhất: {{time}}",
+      "resetCreditNextExpiry": "Lần đặt lại hết hạn gần nhất {{time}}",
       "resetCreditDetailsTitle": "Chi tiết lượt đặt lại",
       "resetCreditNoRecords": "Chưa có bản ghi đặt lại",
       "resetCreditRecordsLoadFailed": "Không tải được bản ghi đặt lại: {{error}}",
@@ -3171,7 +3241,12 @@
       "codeReview": "Rà soát mã",
       "codeReviewShort": "Rà soát",
       "monthlyCreditsHint": "Tín dụng tháng còn lại",
-      "monthlyCreditsInline": "Tín dụng: {{value}}"
+      "monthlyCreditsInline": "Tín dụng: {{value}}",
+      "resetCreditExpiryHours": "{{hours}} giờ {{minutes}} phút",
+      "resetCreditExpiryMinutes": "{{minutes}} phút",
+      "resetCreditExpiryExpired": "Đã hết hạn · chi tiết",
+      "resetCreditExpiryUrgent": "Sắp hết hạn: {{time}} · {{duration}}",
+      "resetCreditExpiryNormal": "Hết hạn {{time}} · {{duration}}"
     },
     "quotaError": {
       "badge": "Lỗi quota",
@@ -3448,6 +3523,7 @@
         "expand": "Mở rộng",
         "collapse": "Thu gọn",
         "repairVisibility": "Sửa hiển thị",
+        "repairIndex": "Sửa chỉ mục trò chuyện",
         "restoreSessions": "Khôi phục phiên",
         "exportSessions": "Xuất phiên",
         "importSessions": "Nhập phiên",
@@ -3480,6 +3556,10 @@
         "clear": "Xóa"
       },
       "messages": {
+        "deleteNotConfirmed": "Ứng dụng chưa xác nhận xóa xong. Đã dừng dọn dẹp cục bộ và giữ lại bản sao lưu: {{error}}",
+        "historyReadFailed": "Không thể đọc lịch sử trò chuyện một cách an toàn: {{error}}",
+        "restoreIndexRetry": "Tệp trò chuyện được giữ lại nhưng không cập nhật được danh sách. Bản gốc vẫn ở trong Thùng rác. Hãy khắc phục sự cố rồi thử lại: {{error}}",
+        "importIndexRetry": "Đã nhập các tệp trò chuyện nhưng không cập nhật được danh sách. Các tệp và gói nhập được giữ lại. Hãy khắc phục sự cố rồi thử lại: {{error}}",
         "pickOne": "Vui lòng chọn ít nhất một phiên",
         "syncNeedTwo": "Cần ít nhất hai phiên bản để đồng bộ phiên",
         "pickRestoreOne": "Hãy chọn ít nhất một phiên để khôi phục",
@@ -3590,7 +3670,18 @@
         "title": "Sửa lịch sử",
         "description": "Chuẩn hóa nhà cung cấp trong chỉ mục SQLite, danh mục phiên và không gian làm việc. Giữ nguyên từng byte của tệp rollout; chỉ sửa thời gian tệp. Tạo bản sao lưu cục bộ trước khi sửa.",
         "stopInstanceHint": "Hãy thoát hoàn toàn phiên bản Codex App/ChatGPT đã chọn trước khi sửa đầy đủ. Bạn vẫn có thể xem trước thay đổi.",
-        "encryptedContentWarning": "Đã phát hiện lịch sử được mã hóa bởi nhà cung cấp hoặc tài khoản khác. Có thể di chuyển siêu dữ liệu, nhưng việc tiếp tục hoặc nén các phiên đó vẫn có thể thất bại; hãy quay lại nhà cung cấp/tài khoản gốc hoặc mở phiên mới."
+        "encryptedContentWarning": "Đã phát hiện lịch sử được mã hóa bởi nhà cung cấp hoặc tài khoản khác. Có thể di chuyển siêu dữ liệu, nhưng việc tiếp tục hoặc nén các phiên đó vẫn có thể thất bại; hãy quay lại nhà cung cấp/tài khoản gốc hoặc mở phiên mới.",
+        "modeHistory": "Sửa chỉnh sửa/nhánh",
+        "modeHistoryDesc": "Khắc phục lỗi sửa tin nhắn và tạo nhánh trò chuyện do chỉ mục không hợp lệ.",
+        "historyLiveHint": "Có thể sửa khi ứng dụng khách đang chạy. Sau đó, hãy khởi động lại ứng dụng khách và mở lại các cuộc trò chuyện.",
+        "historyDescription": "Kiểm tra các cuộc trò chuyện đã chọn và lịch sử gốc, chỉ đặt lại các chỉ mục phân trang không hợp lệ. Tin nhắn, tài khoản và cài đặt Provider được giữ nguyên. Có thể sửa khi ứng dụng khách đang chạy; sau đó khởi động lại để tải lại chỉ mục.",
+        "historyPreview": "Tìm thấy {{count}} chỉ mục lịch sử bị lỗi có thể tạo lại. Bản ghi trò chuyện được giữ nguyên.",
+        "historySuccess": "Đã đặt lại {{count}} chỉ mục lịch sử không hợp lệ. Hãy khởi động lại ứng dụng khách và mở lại các cuộc trò chuyện để tạo lại chỉ mục. Các bản sao lưu đã được giữ lại.",
+        "historyNoChanges": "Không tìm thấy chỉ mục lịch sử bị lỗi nào có thể tạo lại an toàn.",
+        "historyFailed": "Chưa hoàn tất sửa chỉ mục lịch sử: {{error}}",
+        "historyChanged": "Dữ liệu trò chuyện đã thay đổi trong lúc sửa. Lần sửa này chưa được áp dụng. Hãy thử lại sau ít phút.",
+        "historyScan": "Đang kiểm tra chỉ mục lịch sử ({{current}}/{{total}})…",
+        "historyReset": "Đang sao lưu và đặt lại chỉ mục bị lỗi…"
       },
       "importModal": {
         "title": "Nhập phiên",
@@ -4576,6 +4667,11 @@
       },
       "routing": {
         "optionsTitle": "Tùy chọn định tuyến",
+        "sessionIdentityMapping": "Ánh xạ ID phiên",
+        "sessionIdentityMappingEnableHint": "Khi bật ánh xạ, mỗi tài khoản dịch vụ đầu nguồn sử dụng Session-Id và Thread-Id riêng khi chuyển tài khoản. Điều này tăng tính tách biệt của mã định danh nhưng có thể giảm khả năng tái sử dụng bộ nhớ đệm giữa các tài khoản. Trong cùng một tài khoản, các ánh xạ hiện có vẫn được tái sử dụng.",
+        "sessionIdentityMappingDisableHint": "Khi tắt ánh xạ, Session-Id và Thread-Id gốc của máy khách được giữ nguyên. Các tài khoản dịch vụ đầu nguồn khác nhau có thể dùng chung mã định danh, làm giảm tính tách biệt nhưng có thể tăng khả năng tái sử dụng bộ nhớ đệm giữa các tài khoản.",
+        "sessionIdentityMappingCacheNote": "Tỷ lệ trúng bộ nhớ đệm còn phụ thuộc vào quy tắc dịch vụ đầu nguồn, phạm vi tài khoản và nội dung yêu cầu. Thay đổi cài đặt này không bảo đảm tỷ lệ sẽ tăng hoặc giảm.",
+        "sessionIdentityMappingSaveNote": "Sau khi xác nhận, hãy lưu cài đặt để áp dụng thay đổi.",
         "sessionAffinity": "Gắn phiên",
         "sessionAffinityTtl": "Thời gian hết hạn (giây)",
         "responsesWebsockets": "Responses qua WebSocket",
@@ -5844,6 +5940,22 @@
       "label": "Đồng bộ hạn mức",
       "description": "Không cần chạy dịch vụ API. Tài khoản cục bộ đang hoạt động được cập nhật mỗi 5–30 giây; thay đổi tệp phiên sẽ kích hoạt kiểm tra bổ sung. Chỉ kiểm tra siêu dữ liệu tệp gần đây, không đọc nội dung hội thoại. Giữ nguyên loại trừ tài khoản, bộ lọc gói và quy tắc nhóm. Mặc định tắt.",
       "error": "Không thể tải hoặc lưu cài đặt. Vui lòng thử lại."
+    },
+    "pathRecovery": {
+      "title": "Đặt đường dẫn mở Codex",
+      "description": "Không tìm thấy đường dẫn ứng dụng Codex hợp lệ. Hãy chọn ứng dụng hoặc mở Codex thủ công rồi dò tìm.",
+      "reload": "Tải lại",
+      "timeout": "Thao tác đã hết thời gian chờ. Hãy thử lại; quá trình khởi động sẽ không tự tiếp tục.",
+      "noCandidates": "Không phát hiện Codex. Hãy mở ứng dụng thủ công rồi dò lại, hoặc chọn đường dẫn.",
+      "pathRequired": "Hãy chọn hoặc nhập đường dẫn ứng dụng Codex.",
+      "invalidPath": "Đường dẫn này không trỏ đến ứng dụng Codex trên máy tính hợp lệ. Hãy chọn lại ứng dụng.",
+      "candidates": "Ứng dụng được phát hiện",
+      "autoLaunchHint": "Tắt tùy chọn này nếu chỉ cần đổi tài khoản mà không mở ứng dụng trên máy tính. Bạn vẫn có thể mở thủ công.",
+      "manualLaunchHint": "Tắt tự khởi động không hoàn tất lần mở thủ công này. Chỉ lưu cài đặt sẽ hủy lần khởi động này.",
+      "saveAndRetry": "Lưu và thử lại",
+      "saveWithoutLaunch": "Lưu và tiếp tục",
+      "saveOnly": "Chỉ lưu cài đặt",
+      "validationBusy": "Đường dẫn trước vẫn đang được kiểm tra. Vui lòng thử lại sau giây lát."
     }
   },
   "githubCopilot": {

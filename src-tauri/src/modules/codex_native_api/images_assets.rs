@@ -10,6 +10,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use futures_util::StreamExt;
 use serde_json::Value;
 use tokio::time::Instant;
+use crate::modules::codex_native_api::deadline::Deadline;
 use url::{Host, Url};
 
 use super::super::{contract::ServiceError, lifecycle::stopping_error, server::AppState};
@@ -34,14 +35,14 @@ impl AssetBudget {
         }
     }
     pub(super) fn output(
-        total_deadline: Instant,
-        operation_deadline: Instant,
+        total_deadline: impl Into<Deadline>,
+        operation_deadline: impl Into<Deadline>,
         idle_timeout: Duration,
     ) -> Self {
         Self {
-            deadline: total_deadline
+            deadline: total_deadline.into()
                 .min(operation_deadline)
-                .min(Instant::now() + ASSET_OPERATION_LIMIT),
+                .cap(Instant::now() + ASSET_OPERATION_LIMIT),
             idle_timeout,
         }
     }
@@ -291,17 +292,23 @@ impl ImageRequest {
     pub(super) async fn prepare_urls(&mut self, state: &AppState) -> Result<(), ServiceError> {
         let execution = super::super::execution::current_or_new(state).await?;
         let budget = AssetBudget::input(&execution);
-        let mut remaining = state.options.max_upload_bytes;
         let mut replacements = Vec::new();
         for reference in self.input_images.iter().chain(self.mask.iter()) {
             let Some(raw) = reference.get("image_url").and_then(Value::as_str) else {
                 continue;
             };
-            if raw.starts_with("data:") || replacements.iter().any(|(url, _, _)| url == raw) {
+            if raw.starts_with("data:") {
+                let encoded = raw.split_once(',').map_or("", |(_, data)| data);
+                let limit = state.options.max_upload_bytes.saturating_mul(4) / 3 + 4;
+                if encoded.len() > limit {
+                    return Err(ServiceError::new(413, "request_too_large", "Image upload exceeds its size limit"));
+                }
                 continue;
             }
-            let (bytes, mime) = download(state, raw, remaining, budget).await?;
-            remaining = remaining.saturating_sub(bytes.len());
+            if replacements.iter().any(|(url, _, _)| url == raw) {
+                continue;
+            }
+            let (bytes, mime) = download(state, raw, state.options.max_upload_bytes, budget).await?;
             replacements.push((raw.to_owned(), bytes, mime));
         }
         for (raw, bytes, mime) in replacements {
@@ -503,7 +510,7 @@ async fn normalize_result_item(
     };
     checked_url(&raw).map_err(output_error)?;
     if format == ImageResponseFormat::Base64 {
-        let (bytes, _) = download(state, &raw, state.options.max_response_bytes, budget)
+        let (bytes, _) = download(state, &raw, state.options.max_upload_bytes, budget)
             .await
             .map_err(output_error)?;
         item["result"] = Value::String(STANDARD.encode(bytes));

@@ -158,6 +158,15 @@
     "providerClear": "Auswahl leeren"
   },
   "common": {
+    "networkErrors": {
+      "upstream": "dem vorgeschalteten Dienst",
+      "proxyConnection": "Verbindung zu {{target}} über Proxy „{{proxy}}“ fehlgeschlagen. Mögliche Proxy- oder Netzwerkstörung. Proxy prüfen oder einen anderen Knoten versuchen.",
+      "proxyTimeout": "Zeitüberschreitung bei der Verbindung zu {{target}} über Proxy „{{proxy}}“. Mögliche Proxy- oder Netzwerkstörung. Proxy prüfen oder einen anderen Knoten versuchen.",
+      "proxyAuth": "Authentifizierung am Proxy „{{proxy}}“ fehlgeschlagen. Proxy-Benutzername oder Passwort prüfen.",
+      "localProxyUnavailable": "Keine Verbindung zum lokalen Proxy „{{proxy}}“. Prüfen, ob der Proxy-Dienst läuft.",
+      "directConnection": "Verbindung zu {{target}} fehlgeschlagen. Netzwerk prüfen und erneut versuchen.",
+      "directTimeout": "Zeitüberschreitung bei der Verbindung zu {{target}}. Netzwerk prüfen und erneut versuchen."
+    },
     "codexUsage": {
       "title": "Kontingent & Nutzung",
       "session": "Aktueller Chat",
@@ -167,8 +176,8 @@
       "speed": "Ausgabetempo",
       "cache": "Cache-Trefferrate",
       "cacheShort": "Cachequote",
-      "speedHint": "Gewichtetes Ausgabetempo der letzten gültigen API-Anfragen dieser Unterhaltung, ohne Wartezeit auf die erste Antwort. Bei fehlender Zuordnung oder Zeitmessung wird — angezeigt.",
-      "cacheHint": "Anteil der zuletzt aus dem Cache bedienten Eingabe-Token, gewichtet nach Eingabemenge.",
+      "speedHint": "Durchschnittliche Ausgabegeschwindigkeit gültiger Anfragen in diesem Chat, ohne Wartezeit auf die erste Antwort. Fehlende Messwerte: —.",
+      "cacheHint": "Nach Eingabe-Token gewichtete durchschnittliche Cache-Trefferrate gültiger Anfragen in diesem Chat. Bleibt nach Generierungsende erhalten; fehlende Zähler: —.",
       "aggregateHint": "Summe der verbleibenden Kontingentprozente, ohne Gewichtung nach Tarifkapazität. Farben wie in der Kontoübersicht: ≥80 % grün, ≥40 % gelb, ≥10 % orange, unter 10 % rot. Unbekannte Werte erhalten keine Kontingentfarbe.",
       "waiting": "Warte auf Chat-Nutzungsdaten",
       "refreshFailed": "Kontingent konnte nicht aktualisiert werden. Vorherige Ergebnisse bleiben erhalten. Erneut versuchen.",
@@ -225,7 +234,11 @@
       "avgLatency": "Mittl. Latenz",
       "successRate": "Erfolgsquote",
       "verifiedStatistics": "Geprüfte Statistik",
-      "excludedHistory": "{{count}} frühere Einträge ohne Versandnachweis werden nicht mitgezählt."
+      "excludedHistory": "{{count}} frühere Einträge ohne Versandnachweis werden nicht mitgezählt.",
+      "averageSpeed": "Mittlere Ausgaberate",
+      "serviceUnavailable": "API-Dienst nicht verfügbar. Bitte erneut versuchen.",
+      "tierAdjusted": "Auf Standard angepasst",
+      "averageCache": "Mittlere Cache-Treffer"
     },
     "apiKeyAccount": "API-Key-Konto",
     "status": "Zustand",
@@ -1625,6 +1638,35 @@
       "refreshed": "Nutzung aktualisiert",
       "usage": "Nutzung",
       "tierOther": "Andere"
+    },
+    "background": {
+      "title": "Hintergrund",
+      "description": "Ändert nur den App-Hintergrund. Kontokarten und Bedienelemente behalten ihr Aussehen.",
+      "presets": "Hintergrundvorlagen",
+      "default": "Standard",
+      "mist": "Nebel",
+      "forest": "Wald",
+      "dusk": "Dämmerung",
+      "sand": "Sand",
+      "custom": "Eigenes",
+      "chooseImage": "Bild wählen",
+      "replaceImage": "Bild ersetzen",
+      "imageHint": "JPG, PNG oder WebP, bis 10 MB. Große Bilder werden lokal verkleinert.",
+      "preview": "Vorschau",
+      "strength": "Stärke",
+      "blur": "Unschärfe",
+      "pixels": "{{count}} Pixel",
+      "position": "Bildposition",
+      "center": "Mitte",
+      "top": "Oben",
+      "bottom": "Unten",
+      "localHint": "Änderungen werden sofort angewendet und automatisch auf diesem Gerät gespeichert. Bilder werden nicht hochgeladen. Zurücksetzen entfernt das gespeicherte Bild.",
+      "restore": "Zurücksetzen",
+      "imageType": "Bitte ein JPG-, PNG- oder WebP-Bild wählen.",
+      "imageSize": "Bitte ein Bild unter 10 MB wählen.",
+      "imageRead": "Bild nicht lesbar. Bitte eine andere Datei versuchen.",
+      "storage": "Hintergrund konnte nicht geladen oder gespeichert werden. Erneut versuchen; der bisherige Hintergrund bleibt erhalten.",
+      "saveFailed": "Der Hintergrund wird angezeigt, konnte aber nicht gespeichert werden. Erneut versuchen; der zuvor gespeicherte Hintergrund bleibt erhalten."
     }
   },
   "appPath": {
@@ -2350,7 +2392,18 @@
       "windowHint": "Die Schwellen richten sich nach der tatsächlichen Dauer: Ab einer Woche gilt die Wochenschwelle. Konten mit nur einem Wochenkontingent prüfen nur dieses. Ohne Dauer bleibt die Zuordnung zum primären und sekundären Fenster bestehen.",
       "rule": "Kurzzeitrest <= {{shortCycle}}% oder Wochenrest <= {{weekly}}%"
     },
+    "launchConfirmation": {
+      "title": "Start unbestätigt",
+      "description": "Der Start wurde angefordert, der Clientstatus ist aber noch unbestätigt. Das Fenster ist möglicherweise bereits offen. Bitte nicht erneut starten.",
+      "check": "Status prüfen",
+      "notRunning": "Die Zielinstanz wurde noch nicht erkannt. Prüfen Sie später erneut oder schließen Sie diesen Dialog vor einem neuen Startversuch.",
+      "checkFailed": "Der Betriebsstatus konnte nicht gelesen werden. Bitte später erneut prüfen.",
+      "maintenanceDeferred": "Die Sitzungsprüfung ist vorübergehend nicht verfügbar. Der Verlauf bleibt erhalten; dieser Wartungsschritt wurde übersprungen."
+    },
     "launchErrors": {
+      "sessionRestoreFailed": "Die Sitzungsreparatur ist fehlgeschlagen, die Sicherung wurde nicht vollständig wiederhergestellt. Start angehalten; vor einem erneuten Versuch Protokolle und Sicherungen prüfen.",
+      "sessionCheckTimeout": "Die Sitzungsprüfung hat zu lange gedauert. Start angehalten; erneut versuchen oder Protokolle prüfen.",
+      "sessionFileTooLarge": "Der Kopf einer Sitzungsdatei ist zu groß. Start angehalten; Protokolle prüfen.",
       "bindingFailed": "Die Kontozuordnung konnte nicht bestätigt werden. Start abgebrochen; bitte den Kontowechsel erneut versuchen.",
       "processScanFailed": "Die bisherigen Hintergrundprozesse konnten nicht geprüft werden. Start abgebrochen; bitte erneut versuchen.",
       "proxyEntryFailed": "Der konfigurierte Proxy konnte nicht gestartet werden. Es wurde keine andere Route verwendet. Bitte erneut versuchen."
@@ -2753,7 +2806,8 @@
         "audioNotSupported": "Dieses OAuth-Konto unterstützt nur Transkription. Für andere Audiofunktionen ist ein Anbieter mit API Key erforderlich.",
         "audioUnavailable": "Audioweiterleitung ist nicht verfügbar.",
         "audioUpstreamFailed": "Die Audioanfrage an den Anbieter ist fehlgeschlagen.",
-        "modelNotAvailable": "Das Modell {{model}} ist für diesen API Key nicht verfügbar."
+        "modelNotAvailable": "Das Modell {{model}} ist für diesen API Key nicht verfügbar.",
+        "quotaReserved": "Das Kontingent ist reserviert oder wird überprüft. Bitte in Kürze erneut versuchen."
       },
       "testRateLimited": "Dienst erreichbar, aber Upstream ist limitiert oder das Kontingent ist erschöpft: {{detail}}.",
       "testHttpFailed": "Dienst erreichbar, aber die Anfrage gab HTTP {{status}} zurück: {{detail}}.",
@@ -2906,7 +2960,23 @@
         "imageGenerationConfirm": {
           "title": "image_generation deaktivieren",
           "message": "Bei Aktivierung entfernt der API-Dienst im lokalen Gateway vor dem Weiterleiten normaler Textchats die Tool-Deklaration image_generation, um Fehler wie „Image generation is not enabled“ zu vermeiden. gpt-image und andere Bildmodelle werden nicht entfernt. Fortfahren?"
-        }
+        },
+        "quotaReserveToggle": "OAuth-Kontingent reservieren",
+        "quotaReserveDesc": "Der API-Dienst nutzt dieses OAuth-Konto nur, solange sowohl das verbleibende 5-Stunden- als auch das Wochenkontingent über dem jeweiligen Reservewert liegt.",
+        "quotaReserveHourlyLabel": "5-Std.-Reserve",
+        "quotaReserveWeeklyLabel": "Wochenreserve",
+        "quotaReserveInvalid": "Geben Sie eine ganze Zahl von 1 bis 100 ein.",
+        "strictReserve": "Strenger Schutz",
+        "strictReserveDesc": "Reserviertes Kontingent wird automatisch mit einem Sicherheitspuffer geschützt. Nahe der Grenze ist pro Konto eine Anfrage erlaubt; danach wird das aktuelle Kontingent bestätigt. Die Nutzung anderer Clients bleibt unberührt.",
+        "strictNativeOnly": "Strenger Schutz erfordert die Rust-Engine. Vor dem Wechsel zu Go bitte ausschalten.",
+        "safetyMargin": "Sicherheitspuffer",
+        "safetyMarginUnit": "Prozentpunkte",
+        "safetyMarginInvalid": "Ganze Zahl von 1 bis 20 eingeben.",
+        "quotaInFlight": "Aktiv: {{count}}",
+        "quotaWaiting": "Kontingentprüfung ausstehend",
+        "quotaStale": "Kontingent nicht verfügbar",
+        "quotaProtected": "Reserviert",
+        "quotaUpdated": "Aktualisiert: {{time}}"
       },
       "customRoutingEdit": "Benutzerdefiniertes Routing bearbeiten",
       "customRoutingTitle": "Benutzerdefiniertes Routing",
@@ -3028,7 +3098,7 @@
           "poolUnavailable": "Kein verfügbares Pool-Konto",
           "poolUnavailableDetail": "Für Modell {{model}} wurde kein verfügbares Konto ausgewählt",
           "poolUnattributedDetail": "Es liegen keine Diagnosedaten je Konto vor. Der Fehler lässt sich daher keinem Konto zuordnen. Prüfen Sie die Kontozuordnung und Modellkonfiguration dieses API-Schlüssels.",
-          "poolDiagnosticDetail": "Modell {{model}}: {{candidate}} Kandidaten, {{scoped}} im Bereich, {{available}} verfügbar, {{unavailable}} nicht verfügbar, {{modelExcluded}} vom Modell ausgeschlossen, {{imageBlocked}} durch Bildrichtlinie blockiert",
+          "poolDiagnosticDetail": "Modell {{model}}: {{candidate}} Kandidaten, {{scoped}} im Bereich, {{available}} verfügbar, {{unavailable}} nicht verfügbar, {{modelExcluded}} vom Modell ausgeschlossen, {{quotaReserved}} durch Reserve blockiert, {{imageBlocked}} durch Bildrichtlinie blockiert",
           "poolNoCandidatesDetail": "Für diese Anfrage gibt es keine Kandidaten. Prüfen Sie das angefragte Modell und den Ladestatus der Konten.",
           "poolScopeMismatchDetail": "Kein Kandidat passt zum Kontobereich dieses API-Schlüssels, oder die Kontozuordnung wurde nicht erkannt. Prüfen Sie die ausgewählten Konten und die Modellkonfiguration.",
           "inspectBinding": "Bindung prüfen",
@@ -3040,7 +3110,7 @@
           "boundAccountNotLoadedDetail": "Dieses gebundene Konto ist im aktuellen Dienst nicht geladen. Prüfen Sie das Laden der Konten und die Pool-Synchronisierung.",
           "boundAccountNotCandidateDetail": "Dieses gebundene Konto ist geladen, gehört aber nicht zu den Kandidaten dieser Anfrage. Prüfen Sie Modell, Anbieter und Anfragetyp.",
           "scopeUnknownDetail": "Die Bereichsdiagnose nennt keine konkrete Ursache. Prüfen Sie die Bindung und die Dienstprotokolle.",
-          "poolBlockedDetail": "Filter im Kontobereich: {{unavailable}} nicht verfügbar (z. B. deaktiviert, Abkühlphase oder Authentifizierungsfehler), {{modelExcluded}} durch Modellfilter ausgeschlossen, {{imageBlocked}} durch Bildrichtlinie blockiert. Prüfen Sie die Kontogründe und Einstellungen.",
+          "poolBlockedDetail": "Filter im Kontobereich: {{unavailable}} nicht verfügbar (z. B. deaktiviert, Abkühlphase oder Authentifizierungsfehler), {{modelExcluded}} durch Modellfilter ausgeschlossen, {{quotaReserved}} durch Kontingentreserve blockiert, {{imageBlocked}} durch Bildrichtlinie blockiert. Prüfen Sie die Kontogründe und Einstellungen.",
           "poolUnknownDetail": "Die Diagnose zeigt keine eindeutige Ursache. Prüfen Sie Kontobereich, Modellkonfiguration und Dienstprotokolle.",
           "clearHint": "Löschen entfernt nur diesen Diagnoseeintrag. Einstellungen, Tokens und Kontingente werden nicht repariert; eine erneute fehlgeschlagene Anfrage kann einen neuen Eintrag erzeugen.",
           "clearSuccess": "Diagnoseeintrag gelöscht. Der Kontopool ist dadurch nicht automatisch wieder verfügbar.",
@@ -3155,7 +3225,7 @@
       "resetCreditStatusRedeemed": "Genutzt",
       "resetCreditStatusExpired": "Abgelaufen",
       "resetCreditStatusUnknown": "Unbekannt",
-      "resetCreditNextExpiry": "Nächster Ablauf: {{time}}",
+      "resetCreditNextExpiry": "Nächster Reset-Ablauf {{time}}",
       "resetCreditDetailsTitle": "Rücksetzdetails",
       "resetCreditNoRecords": "Keine Reset-Einträge",
       "resetCreditRecordsLoadFailed": "Reset-Einträge konnten nicht geladen werden: {{error}}",
@@ -3171,7 +3241,12 @@
       "codeReview": "Codeprüfung",
       "codeReviewShort": "Prüfung",
       "monthlyCreditsHint": "Verbleibende monatliche Credits",
-      "monthlyCreditsInline": "Credits: {{value}}"
+      "monthlyCreditsInline": "Credits: {{value}}",
+      "resetCreditExpiryHours": "{{hours}} Std. {{minutes}} Min.",
+      "resetCreditExpiryMinutes": "{{minutes}} Min.",
+      "resetCreditExpiryExpired": "Abgelaufen · Details",
+      "resetCreditExpiryUrgent": "Läuft bald ab: {{time}} · {{duration}}",
+      "resetCreditExpiryNormal": "Läuft ab: {{time}} · {{duration}}"
     },
     "quotaError": {
       "badge": "Kontingentfehler",
@@ -3448,6 +3523,7 @@
         "expand": "Erweitern",
         "collapse": "Einklappen",
         "repairVisibility": "Sichtbarkeit reparieren",
+        "repairIndex": "Chatindex reparieren",
         "restoreSessions": "Sitzungen wiederherstellen",
         "exportSessions": "Sitzungen exportieren",
         "importSessions": "Sitzungen importieren",
@@ -3480,6 +3556,10 @@
         "clear": "Leeren"
       },
       "messages": {
+        "deleteNotConfirmed": "Der Client hat die Löschung nicht bestätigt. Die lokale Bereinigung wurde gestoppt und Sicherungen wurden beibehalten: {{error}}",
+        "historyReadFailed": "Der Chatverlauf kann nicht sicher gelesen werden: {{error}}",
+        "restoreIndexRetry": "Die Chatdatei wurde beibehalten, aber die Chatliste konnte nicht aktualisiert werden. Das Original bleibt im Papierkorb. Beheben Sie das Problem und versuchen Sie es erneut: {{error}}",
+        "importIndexRetry": "Die Chatdateien wurden importiert, aber die Chatliste konnte nicht aktualisiert werden. Dateien und Importpaket bleiben erhalten. Beheben Sie das Problem und versuchen Sie es erneut: {{error}}",
         "pickOne": "Bitte wähle mindestens eine Sitzung aus",
         "syncNeedTwo": "Mindestens zwei Instanzen sind erforderlich, um Sitzungen zu synchronisieren",
         "pickRestoreOne": "Bitte wählen Sie mindestens eine Sitzung zur Wiederherstellung aus",
@@ -3590,7 +3670,18 @@
         "title": "Verlauf reparieren",
         "description": "Normalisiert Anbieter in SQLite-Indizes, Sitzungskatalog und Arbeitsbereichsstatus. Die ursprünglichen Rollout-Dateien bleiben bytegenau erhalten; nur Zeitstempel werden korrigiert. Zuvor wird eine lokale Sicherung erstellt.",
         "stopInstanceHint": "Beenden Sie die ausgewählte Codex App-/ChatGPT-Instanz vor der vollständigen Reparatur vollständig. Eine Vorschau ist weiterhin möglich.",
-        "encryptedContentWarning": "Es wurde Verlauf erkannt, der von einem anderen Anbieter oder Konto verschlüsselt wurde. Metadaten können migriert werden, doch Fortsetzen oder Komprimieren kann fehlschlagen; wechseln Sie zum ursprünglichen Anbieter/Konto zurück oder starten Sie eine neue Sitzung."
+        "encryptedContentWarning": "Es wurde Verlauf erkannt, der von einem anderen Anbieter oder Konto verschlüsselt wurde. Metadaten können migriert werden, doch Fortsetzen oder Komprimieren kann fehlschlagen; wechseln Sie zum ursprünglichen Anbieter/Konto zurück oder starten Sie eine neue Sitzung.",
+        "modeHistory": "Bearbeiten/Abzweigen",
+        "modeHistoryDesc": "Behebt Fehler beim Bearbeiten und Verzweigen von Chats durch ungültige Indizes.",
+        "historyLiveHint": "Die Reparatur ist bei laufendem Client möglich. Starten Sie danach den Client neu und öffnen Sie die Chats erneut.",
+        "historyDescription": "Prüft ausgewählte Chats und deren Ursprungshistorie und setzt nur ungültige Seitenindizes zurück. Chatdaten, Konten und Provider-Einstellungen bleiben unverändert. Die Reparatur ist im laufenden Betrieb möglich; ein Neustart lädt die Indizes neu.",
+        "historyPreview": "{{count}} fehlerhafte Verlaufsindizes können neu aufgebaut werden. Der Chatverlauf bleibt unverändert.",
+        "historySuccess": "{{count}} ungültige Verlaufsindizes zurückgesetzt. Starten Sie den Client neu und öffnen Sie die Chats erneut, um sie neu aufzubauen. Sicherungen wurden aufbewahrt.",
+        "historyNoChanges": "Keine fehlerhaften Verlaufsindizes gefunden, die sicher neu aufgebaut werden können.",
+        "historyFailed": "Die Reparatur der Verlaufsindizes wurde nicht abgeschlossen: {{error}}",
+        "historyChanged": "Chatdaten wurden während der Reparatur geändert. Diese Reparatur wurde nicht angewendet. Versuchen Sie es in Kürze erneut.",
+        "historyScan": "Verlaufsindizes werden geprüft ({{current}}/{{total}})…",
+        "historyReset": "Fehlerhafte Indizes werden gesichert und zurückgesetzt…"
       },
       "importModal": {
         "title": "Sitzungen importieren",
@@ -4576,6 +4667,11 @@
       },
       "routing": {
         "optionsTitle": "Routingoptionen",
+        "sessionIdentityMapping": "Sitzungs-ID-Zuordnung",
+        "sessionIdentityMappingEnableHint": "Bei aktivierter Zuordnung erhält jedes vorgelagerte Konto beim Kontowechsel eigene Werte für Session-Id und Thread-Id. Das stärkt die Trennung der Kennungen, kann aber die Cache-Wiederverwendung zwischen Konten verringern. Im selben Konto werden vorhandene Zuordnungen weiterverwendet.",
+        "sessionIdentityMappingDisableHint": "Bei deaktivierter Zuordnung bleiben die ursprünglichen Client-Werte für Session-Id und Thread-Id erhalten. Verschiedene vorgelagerte Konten können diese Kennungen teilen. Das schwächt die Trennung, kann aber die Cache-Wiederverwendung zwischen Konten erhöhen.",
+        "sessionIdentityMappingCacheNote": "Die Cache-Trefferquote hängt auch von den Regeln des Anbieters, dem Kontobereich und dem Anfrageinhalt ab. Diese Einstellung garantiert weder eine höhere noch eine niedrigere Trefferquote.",
+        "sessionIdentityMappingSaveNote": "Nach der Bestätigung müssen Sie die Einstellungen speichern, um die Änderung anzuwenden.",
         "sessionAffinity": "Sitzungsbindung",
         "sessionAffinityTtl": "Ablauf (Sekunden)",
         "responsesWebsockets": "Responses über WebSocket",
@@ -5844,6 +5940,22 @@
       "label": "Aktives Kontingent",
       "description": "Ohne API-Dienst: Aktive lokale Konten werden alle 5–30 Sekunden aktualisiert. Änderungen an Sitzungsdateien lösen Nachprüfungen aus. Es werden nur aktuelle Dateimetadaten gelesen, keine Gesprächsinhalte. Kontoausschlüsse, Tarif- und Gruppenregeln gelten weiterhin. Standardmäßig aus.",
       "error": "Die Einstellung konnte nicht geladen oder gespeichert werden. Bitte erneut versuchen."
+    },
+    "pathRecovery": {
+      "title": "Codex-Startpfad festlegen",
+      "description": "Es wurde kein nutzbarer Pfad zum Codex-Client gefunden. Wähle die App oder öffne Codex manuell und lasse es erkennen.",
+      "reload": "Neu laden",
+      "timeout": "Die Zeit für den Vorgang ist abgelaufen. Versuche es erneut; der Start wird nicht automatisch fortgesetzt.",
+      "noCandidates": "Codex wurde nicht erkannt. Öffne den Client manuell und suche erneut oder wähle seinen Pfad.",
+      "pathRequired": "Wähle den Pfad zum Codex-Client oder gib ihn ein.",
+      "invalidPath": "Dies ist kein gültiger Pfad zum Codex-Desktop-Client. Wähle die App erneut.",
+      "candidates": "Erkannte Apps",
+      "autoLaunchHint": "Deaktiviere diese Option, um Konten ohne Start der Desktop-App zu wechseln. Du kannst die App weiterhin manuell starten.",
+      "manualLaunchHint": "Das Deaktivieren des automatischen Starts schließt diesen manuellen Start nicht ab. Nur Speichern bricht diesen Startversuch ab.",
+      "saveAndRetry": "Speichern & starten",
+      "saveWithoutLaunch": "Speichern & weiter",
+      "saveOnly": "Nur speichern",
+      "validationBusy": "Der vorherige Pfad wird noch geprüft. Versuche es gleich erneut."
     }
   },
   "githubCopilot": {

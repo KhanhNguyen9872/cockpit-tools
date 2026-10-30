@@ -288,3 +288,32 @@ async fn native_lifecycle_first_connect_failure_then_termination_is_unrecorded()
     drop(tracker);
     assert_no_dispatch_records(&host, &activity).await;
 }
+
+#[tokio::test]
+async fn quota_protection_fences_the_pending_candidate_without_committing_a_send() {
+    let (mut tracker, host, _activity, _stop) = unsent_fixture();
+    select_candidate(&mut tracker, "discarded");
+    select_candidate(&mut tracker, "selected");
+    host.quota_denied.lock().unwrap().push("selected".into());
+    let error = tracker.check_quota_before_send().unwrap_err();
+    assert_eq!(error.code, "quota_reserved");
+    assert!(error.upstream_not_sent);
+    assert_eq!(*host.quota_checks.lock().unwrap(), ["selected"]);
+    assert_eq!(tracker.dispatch_count, 0);
+    assert!(host.reports.lock().unwrap().is_empty());
+
+    host.quota_denied.lock().unwrap().clear();
+    tracker.check_quota_before_send().unwrap();
+    tracker.begin_attempt("http");
+    let mut official = dispatch_route("official-selected");
+    official.chatgpt_plan = true;
+    tracker.routed(&Caller { id: "caller".into(), label: "test".into() }, &official, "requested");
+    tracker.check_quota_before_send().unwrap();
+    assert_eq!(*host.quota_checks.lock().unwrap(), ["selected", "selected"],
+        "an independent official route must not inherit the prior local quota fence");
+
+    select_candidate(&mut tracker, "retry-selected");
+    host.quota_denied.lock().unwrap().push("retry-selected".into());
+    assert_eq!(tracker.check_quota_before_send().unwrap_err().code, "quota_reserved");
+    assert_eq!(host.quota_checks.lock().unwrap().last().unwrap(), "retry-selected");
+}

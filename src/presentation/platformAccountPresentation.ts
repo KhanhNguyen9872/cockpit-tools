@@ -531,11 +531,16 @@ export function getAntigravityQuotaDisplayItems(
   const isFree = tier === 'FREE';
   const stale = !isFree && (account.quota?.quota_summary_stale || undefined);
   const result: AgQuotaDisplayItem[] = [];
+  const isNonArgonGemini = (rawName: string) => {
+    const name = rawName.toLowerCase();
+    return name.includes('gemini') && !name.includes('argon');
+  };
 
   let claude5h: (typeof models)[0] | undefined;
   let claudeWeekly: (typeof models)[0] | undefined;
   let gemini5h: (typeof models)[0] | undefined;
   let geminiWeekly: (typeof models)[0] | undefined;
+  let argonWeekly: (typeof models)[0] | undefined;
 
   if (isFree) {
     // 免费账号仅有 Weekly 额度，不显示 5h 额度
@@ -545,7 +550,15 @@ export function getAntigravityQuotaDisplayItems(
 
     geminiWeekly =
       models.find((m) => m.name === 'gemini-weekly' || m.name === 'gemini:weekly') ||
-      models.find((m) => m.name.toLowerCase().includes('gemini'));
+      models.find((m) => isNonArgonGemini(m.name));
+
+    argonWeekly =
+      models.find(
+        (m) =>
+          m.name === 'gemini-argon-wtu-weekly' ||
+          m.name === 'argon:weekly' ||
+          (m.name.startsWith('gemini-argon-') && m.name.endsWith('-weekly')),
+      ) || models.find((m) => m.name.toLowerCase().includes('argon'));
   } else {
     // Claude 5h
     claude5h = models.find((m) => m.name === '3p-5h' || m.name === 'claude:5h');
@@ -573,29 +586,29 @@ export function getAntigravityQuotaDisplayItems(
     if (!gemini5h) {
       gemini5h = models.find((m) => {
         const name = m.name.toLowerCase();
-        return name.includes('gemini') && name.includes('pro') && name.includes('high');
+        return isNonArgonGemini(name) && name.includes('pro') && name.includes('high');
       });
     }
     if (!gemini5h) {
       gemini5h = models.find((m) => {
         const name = m.name.toLowerCase();
-        return name.includes('gemini') && name.includes('high');
+        return isNonArgonGemini(name) && name.includes('high');
       });
     }
     if (!gemini5h) {
       gemini5h = models.find((m) => {
         const name = m.name.toLowerCase();
-        return name.includes('gemini') && name.includes('flash');
+        return isNonArgonGemini(name) && name.includes('flash');
       });
     }
     if (!gemini5h) {
       gemini5h = models.find((m) => {
         const name = m.name.toLowerCase();
-        return name.includes('gemini') && !name.includes('low');
+        return isNonArgonGemini(name) && !name.includes('low');
       });
     }
     if (!gemini5h) {
-      gemini5h = models.find((m) => m.name.toLowerCase().includes('gemini'));
+      gemini5h = models.find((m) => isNonArgonGemini(m.name));
     }
 
     // Gemini Weekly
@@ -603,15 +616,24 @@ export function getAntigravityQuotaDisplayItems(
     if (!geminiWeekly) {
       geminiWeekly = models.find((m) => {
         const name = m.name.toLowerCase();
-        return name.includes('gemini') && name.includes('pro') && name.includes('low');
+        return isNonArgonGemini(name) && name.includes('pro') && name.includes('low');
       });
     }
     if (!geminiWeekly) {
       geminiWeekly = models.find((m) => {
         const name = m.name.toLowerCase();
-        return name.includes('gemini') && name.includes('low');
+        return isNonArgonGemini(name) && name.includes('low');
       });
     }
+
+    // Gemini 4 Argon Weekly
+    argonWeekly =
+      models.find(
+        (m) =>
+          m.name === 'gemini-argon-wtu-weekly' ||
+          m.name === 'argon:weekly' ||
+          (m.name.startsWith('gemini-argon-') && m.name.endsWith('-weekly')),
+      ) || models.find((m) => m.name.toLowerCase().includes('argon'));
   }
 
   if (claude5h) {
@@ -647,6 +669,15 @@ export function getAntigravityQuotaDisplayItems(
       label: 'Gemini (Weekly)',
       percentage: geminiWeekly.percentage,
       resetTime: geminiWeekly.reset_time,
+      stale,
+    });
+  }
+  if (argonWeekly) {
+    result.push({
+      key: 'argon:weekly',
+      label: 'Gemini 4 Argon (Weekly)',
+      percentage: argonWeekly.percentage,
+      resetTime: argonWeekly.reset_time,
       stale,
     });
   }

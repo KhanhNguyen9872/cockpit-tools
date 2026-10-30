@@ -287,7 +287,7 @@ func TestContinuityAutomaticGatewaySubprocess(t *testing.T) {
 	cfg.Codex.StreamBootstrapBuffering = true
 	cfg.Codex.IdentityConfuse = true
 	tracker := newRequestUsageTracker()
-	selector := buildCoreAuthSelectorWithConcurrency(cfg, &orderedAuthSelector{order: []string{"sdk-a", "sdk-b"}}, m, tracker)
+	selector := buildCoreAuthSelectorWithConcurrency(cfg, &orderedAuthSelector{order: []string{"sdk-a", "sdk-b"}}, m, nil, tracker)
 	manager := coreauth.NewManager(nil, selector, &authHook{manifest: m})
 	manager.SetConfig(cfg)
 	manager.SetRetryConfig(0, 0, 2)

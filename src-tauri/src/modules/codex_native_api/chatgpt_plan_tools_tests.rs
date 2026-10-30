@@ -338,7 +338,7 @@ fn chatgpt_plan_search_done_can_fill_an_omitted_or_empty_terminal_snapshot() {
         .pop()
         .unwrap();
         let restored = done["item"].clone();
-        let mut collector = super::super::output_items::OutputCollector::new(4096);
+        let mut collector = super::super::output_items::OutputCollector::new();
         collector.observe(&mut done).unwrap();
         let mut terminal = json!({"type":"response.completed","response":{"id":"resp_search","status":"completed"}});
         if let Some(output) = output {

@@ -1,3 +1,4 @@
+import * as pathRecovery from '../../stores/useCodexPathRecoveryStore';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
@@ -261,6 +262,7 @@ test('starting or restarting the API service cannot request authorization', asyn
     }).outputText;
     vm.runInNewContext(compiled, { exports: service, performance, console: { info() {} }, require(name: string) {
       if (name === '@tauri-apps/api/core') return { invoke: async () => ({ running: true, collection: { enabled: true, accountIds: ['one'] } }) };
+      if (name === '../stores/useCodexPathRecoveryStore') return pathRecovery;
       throw new Error(name);
     } });
     await service.activateCodexLocalAccess('default');

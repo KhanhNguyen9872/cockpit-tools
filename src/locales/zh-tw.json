@@ -158,6 +158,15 @@
     "providerClear": "清除選取"
   },
   "common": {
+    "networkErrors": {
+      "upstream": "上游服務",
+      "proxyConnection": "透過代理「{{proxy}}」連線至 {{target}} 失敗，可能與代理或網路有關，請檢查代理或更換節點後重試。",
+      "proxyTimeout": "透過代理「{{proxy}}」連線至 {{target}} 逾時，可能與代理或網路有關，請檢查代理或更換節點後重試。",
+      "proxyAuth": "代理「{{proxy}}」驗證失敗，請檢查代理使用者名稱或密碼。",
+      "localProxyUnavailable": "無法連線至本機代理「{{proxy}}」，請檢查代理服務是否執行中。",
+      "directConnection": "連線至 {{target}} 失敗，請檢查網路後重試。",
+      "directTimeout": "連線至 {{target}} 逾時，請檢查網路後重試。"
+    },
     "codexUsage": {
       "title": "額度與用量",
       "session": "目前對話",
@@ -167,8 +176,8 @@
       "speed": "輸出速度",
       "cache": "快取命中率",
       "cacheShort": "快取",
-      "speedHint": "目前對話近期有效 API 請求的加權輸出速度，不含首回應等待；無法關聯或缺少計時時顯示 —。",
-      "cacheHint": "近期輸入 Token 中命中快取的比例，依輸入量加權。",
+      "speedHint": "目前對話有效請求的平均輸出速度，不含首次回應等待；缺少有效測量時顯示 —。",
+      "cacheHint": "目前對話有效請求依輸入 Token 加權的平均快取命中率。停止生成後保留；缺少計數時顯示 —。",
       "aggregateHint": "各帳號視窗剩餘百分比之和，不按方案容量加權。顏色依帳號總覽：≥80% 綠，≥40% 黃，≥10% 橙，低於10% 紅；未知值不著色。",
       "waiting": "等待對話用量紀錄",
       "refreshFailed": "額度更新失敗，已保留上次結果。請重試。",
@@ -225,7 +234,11 @@
       "avgLatency": "平均延遲",
       "successRate": "成功率",
       "verifiedStatistics": "已核實統計",
-      "excludedHistory": "有 {{count}} 筆歷史記錄缺少派送依據，未計入"
+      "excludedHistory": "有 {{count}} 筆歷史記錄缺少派送依據，未計入",
+      "averageSpeed": "平均輸出速度",
+      "serviceUnavailable": "API 服務暫時無法使用，請重試。",
+      "tierAdjusted": "已調整為標準",
+      "averageCache": "平均快取命中率"
     },
     "apiKeyAccount": "API Key 帳號",
     "status": "狀態",
@@ -1625,6 +1638,35 @@
       "refreshed": "已刷新用量",
       "usage": "用量",
       "tierOther": "其他"
+    },
+    "background": {
+      "title": "背景",
+      "description": "只更換軟體背景，帳號卡片和控制項維持目前樣式。",
+      "presets": "預設背景",
+      "default": "預設",
+      "mist": "霧藍",
+      "forest": "森林",
+      "dusk": "暮紫",
+      "sand": "暖沙",
+      "custom": "自訂",
+      "chooseImage": "選擇圖片",
+      "replaceImage": "更換圖片",
+      "imageHint": "支援 JPG、PNG、WebP，最大 10 MB；大圖會在本機縮小。",
+      "preview": "預覽",
+      "strength": "背景強度",
+      "blur": "模糊",
+      "pixels": "{{count}} 像素",
+      "position": "圖片位置",
+      "center": "置中",
+      "top": "頂部",
+      "bottom": "底部",
+      "localHint": "修改立即生效並在目前裝置自動儲存，圖片不會上傳。還原預設會移除已儲存的圖片。",
+      "restore": "還原預設",
+      "imageType": "請選擇 JPG、PNG 或 WebP 圖片。",
+      "imageSize": "請選擇小於 10 MB 的圖片。",
+      "imageRead": "無法讀取這張圖片，請換一張重試。",
+      "storage": "背景讀取或儲存失敗，請重試；原有背景仍會保留。",
+      "saveFailed": "目前背景已顯示，但儲存失敗。請重試；上次儲存的背景仍會保留。"
     }
   },
   "appPath": {
@@ -2350,7 +2392,18 @@
       "windowHint": "依實際時長匹配閾值，一週及以上使用週額度閾值；只有週額度時僅檢查週額度。缺少時長時沿用主／次視窗對應。",
       "rule": "短週期剩餘 <= {{shortCycle}}% 或週剩餘 <= {{weekly}}%"
     },
+    "launchConfirmation": {
+      "title": "啟動待確認",
+      "description": "啟動請求已送出，尚未確認用戶端狀態。用戶端可能已開啟，請勿重複啟動。",
+      "check": "檢查狀態",
+      "notRunning": "尚未偵測到目標執行個體。請稍後檢查，或關閉此視窗後重試啟動。",
+      "checkFailed": "暫時無法讀取執行狀態，請稍後重試檢查。",
+      "maintenanceDeferred": "暫時無法檢查工作階段，已保留歷史並略過本次維護。"
+    },
     "launchErrors": {
+      "sessionRestoreFailed": "工作階段修復失敗，備份還原尚未完成，已停止啟動。請先檢查日誌與備份，再重試。",
+      "sessionCheckTimeout": "工作階段檢查逾時，已停止啟動。請重試，或查看日誌。",
+      "sessionFileTooLarge": "工作階段檔案首行過大，已停止啟動。請查看日誌。",
       "bindingFailed": "無法確認帳號綁定，已停止啟動，請重試切換帳號。",
       "processScanFailed": "無法檢查舊背景程序，已停止啟動，請重試。",
       "proxyEntryFailed": "設定的代理入口無法啟動，未改用其他出口，請重試。"
@@ -2753,7 +2806,8 @@
         "audioNotSupported": "此 OAuth 帳號僅支援語音轉寫，其他音訊操作需使用 API Key 供應商。",
         "audioUnavailable": "音訊轉送暫時無法使用。",
         "audioUpstreamFailed": "音訊上游請求失敗。",
-        "modelNotAvailable": "模型 {{model}} 不在目前 API Key 的可用模型範圍內。"
+        "modelNotAvailable": "模型 {{model}} 不在目前 API Key 的可用模型範圍內。",
+        "quotaReserved": "帳號額度已保留或正在確認，請稍後重試。"
       },
       "testRateLimited": "服務可達，但上游限流或額度不足：{{detail}}。",
       "testHttpFailed": "服務可達，但請求返回 HTTP {{status}}：{{detail}}。",
@@ -2906,7 +2960,23 @@
         "imageGenerationConfirm": {
           "title": "停用 image_generation 能力",
           "message": "開啟後，API 服務會在本機閘道轉發普通文字對話前移除 image_generation 工具宣告，避免部分供應商回報「Image generation is not enabled」；不會刪除 gpt-image 等生圖模型。是否繼續？"
-        }
+        },
+        "quotaReserveToggle": "保留 OAuth 額度",
+        "quotaReserveDesc": "API 服務只會在 5 小時與每週剩餘額度皆高於保留值時使用此 OAuth 帳號。",
+        "quotaReserveHourlyLabel": "5 小時保留",
+        "quotaReserveWeeklyLabel": "每週保留",
+        "quotaReserveInvalid": "請輸入 1 到 100 的整數",
+        "strictReserve": "嚴格保護",
+        "strictReserveDesc": "設定保留額度後自動啟用安全緩衝保護；接近保留值時，每個帳號僅送出一個請求，結束後確認最新額度。其他用戶端用量不受此設定約束。",
+        "strictNativeOnly": "嚴格保護需要 Rust 原生引擎；切換 Go 前請先關閉嚴格保護。",
+        "safetyMargin": "安全緩衝",
+        "safetyMarginUnit": "百分點",
+        "safetyMarginInvalid": "請輸入 1 到 20 的整數",
+        "quotaInFlight": "處理中 {{count}}",
+        "quotaWaiting": "等待額度確認",
+        "quotaStale": "額度待更新",
+        "quotaProtected": "已保留",
+        "quotaUpdated": "更新於 {{time}}"
       },
       "customRoutingEdit": "編輯自訂調度",
       "customRoutingTitle": "自訂調度",
@@ -3028,7 +3098,7 @@
           "poolUnavailable": "帳號池無可用帳號",
           "poolUnavailableDetail": "模型 {{model}} 的請求未能選出可用帳號",
           "poolUnattributedDetail": "未收到逐帳號診斷，無法歸屬到特定帳號。請檢查此 API Key 的帳號範圍與模型設定。",
-          "poolDiagnosticDetail": "模型 {{model}}：候選 {{candidate}}，範圍符合 {{scoped}}，可用 {{available}}，不可用 {{unavailable}}，模型排除 {{modelExcluded}}，生圖策略攔截 {{imageBlocked}}",
+          "poolDiagnosticDetail": "模型 {{model}}：候選 {{candidate}}，範圍符合 {{scoped}}，可用 {{available}}，不可用 {{unavailable}}，模型排除 {{modelExcluded}}，額度保留 {{quotaReserved}}，生圖策略攔截 {{imageBlocked}}",
           "poolNoCandidatesDetail": "本次請求沒有候選帳號。請檢查請求模型與帳號載入狀態。",
           "poolScopeMismatchDetail": "候選帳號未符合此 API Key 的帳號範圍，或無法識別帳號對應關係。請檢查綁定帳號與模型設定。",
           "inspectBinding": "檢查綁定",
@@ -3040,7 +3110,7 @@
           "boundAccountNotLoadedDetail": "此綁定帳號尚未載入目前服務，請檢查帳號載入及帳號池同步狀態。",
           "boundAccountNotCandidateDetail": "此綁定帳號已載入，但未進入本次請求的候選集，請檢查請求模型、供應商及請求類型。",
           "scopeUnknownDetail": "目前範圍診斷不足以確定具體原因，請檢查綁定和服務日誌。",
-          "poolBlockedDetail": "範圍內篩選結果：無法調度 {{unavailable}}（如停用、冷卻或驗證失敗），模型排除 {{modelExcluded}}，生圖策略攔截 {{imageBlocked}}。請檢查各帳號原因與對應設定。",
+          "poolBlockedDetail": "範圍內篩選結果：無法調度 {{unavailable}}（如停用、冷卻或驗證失敗），模型排除 {{modelExcluded}}，額度保留 {{quotaReserved}}，生圖策略攔截 {{imageBlocked}}。請檢查各帳號原因與對應設定。",
           "poolUnknownDetail": "目前診斷不足以確定具體原因。請檢查此 API Key 的帳號範圍、模型設定與服務記錄。",
           "clearHint": "清除僅移除此筆診斷紀錄，不會修復設定、Token 或額度；請求再次失敗時會重新出現。",
           "clearSuccess": "已清除診斷紀錄，不代表帳號池已恢復可用。",
@@ -3286,7 +3356,7 @@
       "resetCreditStatusRedeemed": "已使用",
       "resetCreditStatusExpired": "已過期",
       "resetCreditStatusUnknown": "未知",
-      "resetCreditNextExpiry": "最近到期：{{time}}",
+      "resetCreditNextExpiry": "最近重設到期 {{time}}",
       "resetCreditDetailsTitle": "重置次數明細",
       "resetCreditNoRecords": "暫無重置記錄",
       "resetCreditRecordsLoadFailed": "載入重置記錄失敗：{{error}}",
@@ -3302,7 +3372,12 @@
       "codeReview": "程式碼審查",
       "codeReviewShort": "審閱",
       "monthlyCreditsHint": "本月 credits 剩餘",
-      "monthlyCreditsInline": "Credits：{{value}}"
+      "monthlyCreditsInline": "Credits：{{value}}",
+      "resetCreditExpiryHours": "{{hours}}時{{minutes}}分",
+      "resetCreditExpiryMinutes": "{{minutes}}分",
+      "resetCreditExpiryExpired": "已到期 · 查看詳情",
+      "resetCreditExpiryUrgent": "將到期 {{time}} · {{duration}}",
+      "resetCreditExpiryNormal": "到期 {{time}} · {{duration}}"
     },
     "quotaError": {
       "badge": "配額異常",
@@ -3579,6 +3654,7 @@
         "expand": "展開",
         "collapse": "收起",
         "repairVisibility": "修復可見性",
+        "repairIndex": "修復會話索引",
         "restoreSessions": "還原工作階段",
         "exportSessions": "匯出會話",
         "importSessions": "匯入會話",
@@ -3611,6 +3687,10 @@
         "clear": "清空"
       },
       "messages": {
+        "deleteNotConfirmed": "用戶端未確認刪除完成，已停止本機清理並保留備份：{{error}}",
+        "historyReadFailed": "無法安全讀取會話歷史：{{error}}",
+        "restoreIndexRetry": "會話檔案已保留，但更新會話清單失敗；垃圾桶原件仍在，可修復問題後重試：{{error}}",
+        "importIndexRetry": "會話檔案已匯入，但更新會話清單失敗；檔案與匯入包已保留，可修復問題後重試：{{error}}",
         "pickOne": "請至少選擇一條會話",
         "syncNeedTwo": "至少需要兩個實例才能同步會話",
         "pickRestoreOne": "請至少選擇一個要還原的工作階段",
@@ -3721,7 +3801,18 @@
         "title": "修復歷史工作階段",
         "description": "在 SQLite 索引、本機會話目錄及工作區狀態中統一供應商資訊。原始 rollout 日誌逐位元組保留，僅校正檔案時間。修復前先建立本機備份。",
         "stopInstanceHint": "完整修復前請先完全結束所選 Codex App/ChatGPT 執行個體；仍可先預覽變更。",
-        "encryptedContentWarning": "偵測到由其他 Provider 或帳號加密的歷史內容。中繼資料可以移轉，但繼續或壓縮這些工作階段仍可能失敗；需要可靠續聊時請切回原 Provider/帳號或開啟新工作階段。"
+        "encryptedContentWarning": "偵測到由其他 Provider 或帳號加密的歷史內容。中繼資料可以移轉，但繼續或壓縮這些工作階段仍可能失敗；需要可靠續聊時請切回原 Provider/帳號或開啟新工作階段。",
+        "modeHistory": "編輯／分支修復",
+        "modeHistoryDesc": "修復索引異常導致的訊息編輯和建立聊天分支失敗。",
+        "historyLiveHint": "可在用戶端執行時直接修復。完成後請重新啟動用戶端並重新開啟會話。",
+        "historyDescription": "檢查所選會話及祖先歷史，僅重設異常的分頁索引。聊天記錄、帳號與 Provider 保持原樣；支援執行中修復，完成後重新啟動用戶端以重新載入索引。",
+        "historyPreview": "發現 {{count}} 段可重建的異常歷史索引；聊天記錄保持原樣。",
+        "historySuccess": "已重設 {{count}} 段異常歷史索引。請重新啟動用戶端並重新開啟會話以重建；備份已保留。",
+        "historyNoChanges": "未發現可安全重建的異常歷史索引。",
+        "historyFailed": "歷史索引修復未完成：{{error}}",
+        "historyChanged": "會話資料在修復期間發生變化，本次修復未寫入。請稍後重試。",
+        "historyScan": "正在檢查歷史索引（{{current}}/{{total}}）…",
+        "historyReset": "正在備份並重設異常索引…"
       },
       "importModal": {
         "title": "匯入會話",
@@ -4576,6 +4667,11 @@
       },
       "routing": {
         "optionsTitle": "調度選項",
+        "sessionIdentityMapping": "工作階段 ID 對應",
+        "sessionIdentityMappingEnableHint": "開啟後，切換上游帳號會使用獨立的 Session-Id 和 Thread-Id，會話識別碼隔離更強，但跨帳號快取重用可能減少。同一帳號內仍重用既有對應。",
+        "sessionIdentityMappingDisableHint": "關閉後，保留用戶端原始 Session-Id 和 Thread-Id。不同上游帳號可能共用相同識別碼，隔離性減弱，但跨帳號快取重用可能增加。",
+        "sessionIdentityMappingCacheNote": "快取命中率還取決於上游規則、帳號範圍和請求內容，不保證因切換而升降。",
+        "sessionIdentityMappingSaveNote": "確認後仍需儲存設定才會生效。",
         "sessionAffinity": "會話親和",
         "sessionAffinityTtl": "過期時間（秒）",
         "responsesWebsockets": "WebSocket 回應傳輸",
@@ -5844,6 +5940,22 @@
       "label": "活躍額度同步",
       "description": "無需啟動 API 服務。活躍本機帳號每 5–30 秒動態更新，工作階段檔案變更時補查；僅檢查近期檔案資訊，不讀取對話內容。沿用帳號停用、方案與群組規則，預設關閉。",
       "error": "無法讀取或儲存設定，請重試。"
+    },
+    "pathRecovery": {
+      "title": "設定 Codex 啟動路徑",
+      "description": "找不到可用的 Codex 用戶端路徑。請選擇程式，或先手動開啟 Codex 再偵測。",
+      "reload": "重新載入",
+      "timeout": "操作逾時，請重試。不會自動繼續啟動。",
+      "noCandidates": "未偵測到 Codex，請先手動開啟用戶端再偵測，或選擇程式路徑。",
+      "pathRequired": "請選擇或輸入 Codex 用戶端路徑。",
+      "invalidPath": "此路徑不是有效的 Codex 桌面用戶端，請重新選擇程式。",
+      "candidates": "偵測結果",
+      "autoLaunchHint": "若只需切換帳號、不需啟動桌面端，可關閉此開關。關閉後仍可手動啟動。",
+      "manualLaunchHint": "關閉自動啟動不代表本次手動啟動成功。僅儲存設定會取消本次啟動嘗試。",
+      "saveAndRetry": "儲存並重試",
+      "saveWithoutLaunch": "儲存並繼續切換",
+      "saveOnly": "僅儲存設定",
+      "validationBusy": "上一個路徑仍在檢查，請稍後重試。"
     }
   },
   "githubCopilot": {

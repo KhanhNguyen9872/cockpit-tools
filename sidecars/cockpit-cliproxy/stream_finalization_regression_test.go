@@ -140,7 +140,7 @@ func TestCancellationAfterFailedAttemptPreservesTokensAndFinalCause(t *testing.T
 	tracker := newRequestUsageTracker()
 	tracker.record(usagePayload{RequestID: "retry-cancel", ErrorCategory: "server_is_overloaded", ErrorMessage: "earlier attempt", Usage: usageDetails{InputTokens: 4, OutputTokens: 6, TotalTokens: 10}})
 	payload, ok := tracker.finalize("retry-cancel", usageFinalizeInput{status: 499, errorMessage: context.Canceled.Error()})
-	if !ok || payload.Success || payload.Status != 499 || payload.ErrorCategory != "client_canceled" || payload.ErrorMessage != context.Canceled.Error() || payload.Usage.TotalTokens != 10 {
+	if !ok || payload.Success || payload.Status != 499 || payload.ErrorCategory != "client_canceled" || payload.ErrorMessage != "client canceled: "+context.Canceled.Error() || payload.Usage.TotalTokens != 10 {
 		t.Fatalf("wrong final cause/usage: %+v", payload)
 	}
 }

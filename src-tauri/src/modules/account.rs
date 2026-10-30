@@ -139,29 +139,75 @@ fn deserialize_account_from_storage(
     account_path: &PathBuf,
     content: &str,
 ) -> Result<Account, String> {
-    if let Ok((account, needs_rotation)) =
-        crate::modules::secure_account_storage::deserialize_account_file::<Account>(
-            account_path,
-            content,
-        )
-    {
-        if needs_rotation {
-            let account_for_rewrite = account.clone();
-            modules::deferred_account_rewrite::schedule_account_rewrite_if_unchanged(
-                "antigravity",
-                account_for_rewrite.id.clone(),
-                account_path.clone(),
-                content.as_bytes(),
-                move || serialize_account_for_storage(&account_for_rewrite),
-            );
-        }
-        return Ok(account);
-    }
+    use sha2::{Digest, Sha256};
 
-    // 兼容历史明文详情与仅 token 加密的详情；读取成功后后台迁移为整文件密文。
+    let mut source_content = content.to_string();
+    let (account, needs_rewrite) = match decode_account_storage_snapshot(content) {
+        Ok(decoded) => decoded,
+        Err(original_error) => {
+            let backup_path = account_path.with_extension("json.bak");
+            let backup = match fs::read_to_string(&backup_path) {
+                Ok(backup) => backup,
+                Err(_) => return Err(original_error),
+            };
+            // A JSON envelope alone is not a valid backup: decrypt and decode
+            // it before touching either file, and reject another account's data.
+            let decoded = match decode_account_storage_snapshot(&backup) {
+                Ok(decoded)
+                    if account_path.file_stem().and_then(|name| name.to_str())
+                        == Some(decoded.0.id.as_str()) =>
+                {
+                    decoded
+                }
+                _ => return Err(original_error),
+            };
+            let restored = modules::atomic_write::restore_string_atomic_if_hash_matches(
+                account_path,
+                Sha256::digest(content.as_bytes()).into(),
+                &backup,
+            )?;
+            if restored {
+                modules::logger::log_warn(&format!(
+                    "[Antigravity Account] 已从验证过的备份恢复账号: path={}",
+                    account_path.display()
+                ));
+                source_content = backup;
+                decoded
+            } else {
+                // A concurrent save won. Never replace that newer account with
+                // our backup, and bound recovery to one attempt.
+                source_content = fs::read_to_string(account_path)
+                    .map_err(|error| format!("重新读取账号数据失败: {error}"))?;
+                decode_account_storage_snapshot(&source_content)?
+            }
+        }
+    };
+    if needs_rewrite {
+        let account_for_rewrite = account.clone();
+        modules::deferred_account_rewrite::schedule_account_rewrite_if_unchanged(
+            "antigravity",
+            account_for_rewrite.id.clone(),
+            account_path.clone(),
+            source_content.as_bytes(),
+            move || serialize_account_for_storage(&account_for_rewrite),
+        );
+    }
+    Ok(account)
+}
+
+fn decode_account_storage_snapshot(content: &str) -> Result<(Account, bool), String> {
+    // Windows editors / legacy exports may prepend a UTF-8 BOM. Normalize it
+    // before classifying the format so a valid current account is never rolled
+    // back to an older .bak just because serde_json rejected the prefix.
+    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
     let mut value = serde_json::from_str::<serde_json::Value>(content)
         .map_err(|e| format!("解析账号数据失败: {}", e))?;
-
+    if value.get("ciphertext").is_some() {
+        return modules::secure_account_storage::deserialize_encrypted_snapshot_with_rotation(
+            content,
+        );
+    }
+    // 兼容历史明文详情与仅 token 加密的详情；读取成功后后台迁移为整文件密文。
     if value.get("token").is_none() {
         let encrypted = value
             .get("token_encrypted")
@@ -184,17 +230,7 @@ fn deserialize_account_from_storage(
 
     let account =
         serde_json::from_value::<Account>(value).map_err(|e| format!("解析账号数据失败: {}", e))?;
-
-    let account_for_rewrite = account.clone();
-    modules::deferred_account_rewrite::schedule_account_rewrite_if_unchanged(
-        "antigravity",
-        account_for_rewrite.id.clone(),
-        account_path.clone(),
-        content.as_bytes(),
-        move || serialize_account_for_storage(&account_for_rewrite),
-    );
-
-    Ok(account)
+    Ok((account, true))
 }
 
 /// 获取数据目录路径
@@ -389,7 +425,8 @@ pub fn load_account(account_id: &str) -> Result<Account, String> {
     let content =
         fs::read_to_string(&account_path).map_err(|e| format!("读取账号数据失败: {}", e))?;
 
-    let mut account = deserialize_account_from_storage(&account_path, &content)?;
+    let mut account = deserialize_account_from_storage(&account_path, &content)
+        .map_err(|error| format!("{error} (account file: {account_id}.json)"))?;
     if account.token.project_id.as_deref() == Some("aicode-consumers") {
         account.token.project_id = None;
     }
@@ -998,7 +1035,8 @@ pub fn update_account_quota(account_id: &str, mut quota: QuotaData) -> Result<()
     if quota.models.is_empty() {
         if let Some(ref existing_quota) = account.quota {
             if !existing_quota.models.is_empty()
-                && !quota.is_forbidden && !existing_quota.is_forbidden
+                && !quota.is_forbidden
+                && !existing_quota.is_forbidden
                 && existing_quota.project_id == quota.project_id
                 && existing_quota.subscription_tier == quota.subscription_tier
             {
@@ -1165,9 +1203,26 @@ fn available_ai_credits(account: &Account) -> Option<f64> {
 fn default_auto_switch_groups() -> Vec<AutoSwitchGroupDefinition> {
     vec![
         AutoSwitchGroupDefinition {
+            id: "g4_argon".into(),
+            name: "Gemini 4 Argon".into(),
+            models: vec![
+                "gemini-4-argon".into(),
+                "gemini-4-argon-medium".into(),
+                "gemini-4-argon-high".into(),
+                "argon:weekly".into(),
+                "gemini-argon-wtu-weekly".into(),
+            ],
+        },
+        AutoSwitchGroupDefinition {
             id: "claude_45".to_string(),
             name: "Claude".to_string(),
             models: vec![
+                "claude-opus-5-5".into(),
+                "claude-opus-5-5-medium".into(),
+                "claude-opus-5-5-high".into(),
+                "claude-sonnet-5-5".into(),
+                "claude-sonnet-5-5-medium".into(),
+                "claude-sonnet-5-5-high".into(),
                 "claude-opus-4-6-thinking".to_string(),
                 "claude-opus-4-6".to_string(),
                 "claude-opus-4-5-thinking".to_string(),
@@ -1204,6 +1259,11 @@ fn default_auto_switch_groups() -> Vec<AutoSwitchGroupDefinition> {
             id: "g3_flash".to_string(),
             name: "Gemini Flash".to_string(),
             models: vec![
+                "gemini-3.8-flash".into(),
+                "gemini-3.8-flash-low".into(),
+                "gemini-3.8-flash-medium".into(),
+                "gemini-3.8-flash-high".into(),
+                "MODEL_PLACEHOLDER_M318".into(),
                 "gemini-3-flash".to_string(),
                 "gemini-3.1-flash".to_string(),
                 "gemini-3-flash-image".to_string(),
@@ -1314,6 +1374,23 @@ fn resolve_monitored_auto_switch_groups(
 
 fn normalize_model_for_group_match(value: &str) -> String {
     let normalized = value.trim().to_lowercase();
+    if normalized.starts_with("gemini-4-argon")
+        || matches!(
+            normalized.as_str(),
+            "argon:weekly" | "gemini-argon-wtu-weekly"
+        )
+    {
+        return "gemini-4-argon".into();
+    }
+    if normalized.starts_with("gemini-3.8-flash") {
+        return "gemini-3.8-flash".into();
+    }
+    if normalized.starts_with("claude-sonnet-5-5") {
+        return "claude-sonnet-5-5".into();
+    }
+    if normalized.starts_with("claude-opus-5-5") {
+        return "claude-opus-5-5".into();
+    }
     if normalized.is_empty() {
         return normalized;
     }
@@ -1375,6 +1452,22 @@ fn collect_group_quotas(
                 percentage: average,
             })
         })
+        .collect()
+}
+
+// Newly added default groups must not exclude accounts whose current client
+// does not report that model family. Explicit selected-group rules stay strict.
+fn reported_auto_switch_groups(
+    scope: &str,
+    groups: Vec<AutoSwitchGroupDefinition>,
+    reported: &[AutoSwitchGroupQuota],
+) -> Vec<AutoSwitchGroupDefinition> {
+    if scope != AUTO_SWITCH_SCOPE_ANY_GROUP || reported.is_empty() {
+        return groups;
+    }
+    groups
+        .into_iter()
+        .filter(|group| reported.iter().any(|quota| quota.id == group.id))
         .collect()
 }
 
@@ -1884,6 +1977,9 @@ where
         None => return Ok(None),
     };
 
+    let reported = collect_group_quotas(current, &monitored_groups);
+    let monitored_groups = reported_auto_switch_groups(&scope_mode, monitored_groups, &reported);
+
     let Some(trigger_context) = evaluate_auto_switch_trigger(
         current,
         threshold,
@@ -2295,8 +2391,14 @@ pub async fn switch_account_internal(account_id: &str) -> Result<Account, String
         if target_dir == default_dir {
             continue;
         }
-        if let Err(e) = modules::instance::inject_account_to_profile_with_account(&target_dir, &account) {
-            modules::logger::log_warn(&format!("[Switch] 注入目录 {} 失败: {}", target_dir.display(), e));
+        if let Err(e) =
+            modules::instance::inject_account_to_profile_with_account(&target_dir, &account)
+        {
+            modules::logger::log_warn(&format!(
+                "[Switch] 注入目录 {} 失败: {}",
+                target_dir.display(),
+                e
+            ));
         } else {
             modules::logger::log_info(&format!("[Switch] 成功注入目录: {}", target_dir.display()));
         }
@@ -2613,7 +2715,9 @@ pub async fn switch_account_local_no_restart(account_id: &str) -> Result<Account
         if target_dir == default_dir {
             continue;
         }
-        if let Err(e) = modules::instance::inject_account_to_profile_with_account(&target_dir, &account) {
+        if let Err(e) =
+            modules::instance::inject_account_to_profile_with_account(&target_dir, &account)
+        {
             modules::logger::log_warn(&format!(
                 "[Switch][NoRestart] 注入目录 {} 失败: {}",
                 target_dir.display(),
@@ -2856,8 +2960,8 @@ mod note_tests {
             None,
             None,
         );
-        let second = upsert_account("User@Example.com".to_string(), None, token2)
-            .expect("second upsert");
+        let second =
+            upsert_account("User@Example.com".to_string(), None, token2).expect("second upsert");
 
         // 验证：ID 必须保持一致，卡片数量不能增加
         assert_eq!(second.id, first.id);
@@ -2881,3 +2985,53 @@ mod note_tests {
 #[cfg(test)]
 #[path = "account_id_regression_tests.rs"]
 mod account_id_regression_tests;
+
+#[cfg(test)]
+#[path = "account_storage_regression_tests.rs"]
+mod account_storage_regression_tests;
+
+#[cfg(test)]
+mod new_antigravity_model_tests {
+    use super::*;
+    #[test]
+    fn new_default_families_do_not_block_legacy_auto_switch_candidates() {
+        let reported = vec![AutoSwitchGroupQuota {
+            id: "claude_45".into(),
+            name: "Claude".into(),
+            percentage: 10,
+        }];
+        let groups = reported_auto_switch_groups(
+            AUTO_SWITCH_SCOPE_ANY_GROUP,
+            default_auto_switch_groups(),
+            &reported,
+        );
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].id, "claude_45");
+        let explicit = reported_auto_switch_groups(
+            AUTO_SWITCH_SCOPE_SELECTED_GROUPS,
+            default_auto_switch_groups(),
+            &reported,
+        );
+        assert!(explicit.iter().any(|group| group.id == "g4_argon"));
+    }
+
+    #[test]
+    fn new_groups_keep_legacy_models_and_separate_new_versions() {
+        let groups = default_auto_switch_groups();
+        assert!(groups.iter().any(|group| group.id == "g3_pro"));
+        let argon = groups.iter().find(|group| group.id == "g4_argon").unwrap();
+        assert!(argon.models.contains(&"gemini-4-argon-high".into()));
+        assert_eq!(
+            normalize_model_for_group_match("gemini-4-argon-high"),
+            "gemini-4-argon"
+        );
+        assert_ne!(
+            normalize_model_for_group_match("claude-sonnet-4-6"),
+            normalize_model_for_group_match("claude-sonnet-5-5-high")
+        );
+        assert_ne!(
+            normalize_model_for_group_match("gemini-3-flash"),
+            normalize_model_for_group_match("gemini-3.8-flash-high")
+        );
+    }
+}

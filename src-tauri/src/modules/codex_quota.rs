@@ -1918,6 +1918,9 @@ async fn refresh_account_quota_once(
     })
     .await
     .map_err(|e| e.to_string())??;
+    crate::modules::codex_local_access::confirm_gateway_quota_refresh(
+        account_id, &final_quota, quota_query_started,
+    );
     if quota_only {
         return Ok(final_quota);
     }
@@ -1959,7 +1962,7 @@ async fn refresh_account_quota_with_runtime_snapshot(
             "error": result.as_ref().err(),
         }),
     );
-    crate::modules::codex_local_access::on_account_quota_refreshed(
+    crate::modules::codex_local_access::reevaluate_bound_oauth_quota_reserve_after_refresh(
         account_id,
         result.is_ok(),
     )
@@ -2003,7 +2006,7 @@ pub(crate) async fn refresh_active_account_quota(
         // The activity worker must back off instead of treating it as a new GET.
         result = Err("CODEX_QUOTA_SYNC_DEFERRED".into());
     }
-    crate::modules::codex_local_access::on_account_quota_refreshed(
+    crate::modules::codex_local_access::reevaluate_bound_oauth_quota_reserve_after_refresh(
         account_id, result.is_ok(),
     ).await;
     result
@@ -2073,7 +2076,7 @@ pub async fn refresh_freshly_authorized_account_quota(
     normalize_subscription_retry_state(&mut normalized);
     codex_account::save_quota_subscription_maintenance(&latest, &normalized)?;
 
-    crate::modules::codex_local_access::on_account_quota_refreshed(
+    crate::modules::codex_local_access::reevaluate_bound_oauth_quota_reserve_after_refresh(
         account_id, true,
     )
     .await;
@@ -2095,7 +2098,7 @@ pub async fn refresh_account_quota_with_options(
         codex_account::CodexQuotaRuntimeSnapshot::capture().await?
     };
     let result = refresh_account_quota_once(account_id, options, &runtime_snapshot, false).await;
-    crate::modules::codex_local_access::on_account_quota_refreshed(
+    crate::modules::codex_local_access::reevaluate_bound_oauth_quota_reserve_after_refresh(
         account_id,
         result.is_ok(),
     )

@@ -16,11 +16,24 @@ interface ModelIdentity {
 interface CanonicalModel {
   id: string;
   displayName: string;
-  modelConstant: string;
+  modelConstant: string | null;
   aliases: string[];
 }
 
 const CANONICAL_MODELS: CanonicalModel[] = [
+  { id: 'gemini-4-argon', displayName: 'Gemini 4 Argon', modelConstant: null, aliases: [] },
+  { id: 'gemini-4-argon-medium', displayName: 'Gemini 4 Argon (Medium)', modelConstant: null, aliases: [] },
+  { id: 'gemini-4-argon-high', displayName: 'Gemini 4 Argon (High)', modelConstant: null, aliases: [] },
+  { id: 'gemini-3.8-flash', displayName: 'Gemini 3.8 Flash', modelConstant: null, aliases: [] },
+  { id: 'gemini-3.8-flash-low', displayName: 'Gemini 3.8 Flash (Low)', modelConstant: null, aliases: [] },
+  { id: 'gemini-3.8-flash-medium', displayName: 'Gemini 3.8 Flash (Medium)', modelConstant: null, aliases: [] },
+  { id: 'gemini-3.8-flash-high', displayName: 'Gemini 3.8 Flash (High)', modelConstant: 'MODEL_PLACEHOLDER_M318', aliases: [] },
+  { id: 'claude-opus-5-5', displayName: 'Claude Opus 5.5', modelConstant: null, aliases: [] },
+  { id: 'claude-opus-5-5-medium', displayName: 'Claude Opus 5.5 (Medium)', modelConstant: null, aliases: [] },
+  { id: 'claude-opus-5-5-high', displayName: 'Claude Opus 5.5 (High)', modelConstant: null, aliases: [] },
+  { id: 'claude-sonnet-5-5', displayName: 'Claude Sonnet 5.5', modelConstant: null, aliases: [] },
+  { id: 'claude-sonnet-5-5-medium', displayName: 'Claude Sonnet 5.5 (Medium)', modelConstant: null, aliases: [] },
+  { id: 'claude-sonnet-5-5-high', displayName: 'Claude Sonnet 5.5 (High)', modelConstant: null, aliases: [] },
   {
     id: 'gemini-3.1-pro-high',
     displayName: 'Gemini 3.1 Pro (High)',

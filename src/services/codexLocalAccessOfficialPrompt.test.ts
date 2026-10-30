@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 import ts from 'typescript';
+import * as pathRecovery from '../stores/useCodexPathRecoveryStore';
 const compiled = ts.transpileModule(readFileSync(new URL('./codexLocalAccessService.ts', import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
@@ -11,6 +12,7 @@ function harness(invoke: (command: string) => Promise<unknown>) {
   const checks: any[] = [];
   vm.runInNewContext(compiled, { exports, performance, console: { info() {} }, require(name: string) {
     if (name === '@tauri-apps/api/core') return { invoke };
+    if (name === '../stores/useCodexPathRecoveryStore') return pathRecovery;
     if (name === '../utils/codexAccountServiceNavigation') return { requestCodexOfficialAuthorizationCheck: (value: unknown) => checks.push(value) };
     throw new Error(name);
   } });

@@ -965,6 +965,23 @@ fn build_antigravity_display_info(lang: &str) -> AccountDisplayInfo {
 #[cfg(not(target_os = "macos"))]
 fn normalize_antigravity_model_for_match(value: &str) -> String {
     let normalized = value.trim().to_lowercase();
+    if normalized.starts_with("gemini-4-argon")
+        || matches!(
+            normalized.as_str(),
+            "argon:weekly" | "gemini-argon-wtu-weekly"
+        )
+    {
+        return "gemini-4-argon".into();
+    }
+    if normalized.starts_with("gemini-3.8-flash") {
+        return "gemini-3.8-flash".into();
+    }
+    if normalized.starts_with("claude-sonnet-5-5") {
+        return "claude-sonnet-5-5".into();
+    }
+    if normalized.starts_with("claude-opus-5-5") {
+        return "claude-opus-5-5".into();
+    }
     if normalized.is_empty() {
         return normalized;
     }
@@ -1152,7 +1169,11 @@ fn build_codex_display_info(lang: &str) -> AccountDisplayInfo {
         AccountDisplayInfo {
             account: format!(
                 "📧 {}",
-                account.display_name(&crate::modules::i18n::translate(lang, "common.apiKeyAccount", &[])),
+                account.display_name(&crate::modules::i18n::translate(
+                    lang,
+                    "common.apiKeyAccount",
+                    &[]
+                )),
             ),
             quota_lines,
         }

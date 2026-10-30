@@ -36,16 +36,6 @@ A **universal AI IDE account management tool**, currently supporting **Antigravi
   </tr>
   <tr>
     <td width="120" align="center">
-      <a href="https://go.apimart.ai/gh-cockpit-tools">
-        <img src="src/assets/icons/apimart.png" alt="APIMart" width="96" />
-      </a>
-    </td>
-    <td>
-      Thanks to <a href="https://go.apimart.ai/gh-cockpit-tools"><strong>APIMart</strong></a> for sponsoring this project! <a href="https://go.apimart.ai/gh-cockpit-tools"><strong>APIMart</strong></a> is a low-cost API platform for AI image &amp; video generation — GPT-Image-2 from <strong>$0.006/image</strong>, <strong>160+ images per dollar</strong>. One async API covers both image and video: submit a task, get an ID, fetch results via polling or callback. Batch <strong>tens of thousands of images</strong> without timeouts, switch models without changing code. Pay-as-you-go with no monthly fee — <a href="https://go.apimart.ai/gh-cockpit-tools"><strong>sign up here</strong></a> to get started.
-    </td>
-  </tr>
-  <tr>
-    <td width="120" align="center">
       <a href="https://roxybrowser.cn?code=0326VTDA">
         <img src="src/assets/icons/roxybrowser.jpg" alt="RoxyBrowser" width="96" />
       </a>
@@ -320,7 +310,7 @@ To switch the Antigravity desktop app and the `agy` CLI that shares its system c
 {"type":"request.switch_account","payload":{"account_id":"<account-id>","request_id":"x","runtime_target":"antigravity","launch_on_switch":false}}
 ```
 
-- `runtime_target: "antigravity"`: reuses desktop authentication rules; version 2.0 and later write the system credential, while older versions write local SQLite login state. The current account, default-instance binding and switch notification are updated only after the actual credential write succeeds.
+- `runtime_target: "antigravity"`: reuses desktop authentication rules; version 2.0 and later write the system credential and synchronize the desktop fallback file `~/.gemini/jetski-standalone-oauth-token`, preserving `id_token` and using `0600` permissions on Unix. Older versions write local SQLite login state. The current account, default-instance binding and switch notification are updated only after the credential and fallback writes succeed. A fallback synchronization failure explicitly reports that the system credential was written and asks you to retry.
 - `launch_on_switch`: only supported with `"antigravity"`, defaults to `false`; the client is neither closed nor started, and a running desktop app may use the new account on its next start. Explicit `true` uses the same close/write/relaunch flow as the desktop UI. Omit this field for IDE requests to keep using existing settings.
 - `request_id`: optional; when supplied, receives the corresponding `response.success` or `response.error`. Unsupported targets, credential-write failures and concurrent desktop switches return errors instead of success. A launch failure after a successful credential switch is explicitly reported as a launch error. Invalid targets return `WS_SWITCH_TARGET_INVALID`; supplying a launch policy for an IDE request returns `WS_SWITCH_LAUNCH_POLICY_INVALID`. Concurrent desktop switches return `ANTIGRAVITY_SWITCH_BUSY`, and account-preparation timeouts return `ANTIGRAVITY_SWITCH_PREPARATION_TIMEOUT`.
 - `ANTIGRAVITY_SWITCH_STATE_SAVE_FAILED` means the client credential changed but saving Tools' current-account state failed; retry the switch. Default-instance binding updates retain their existing best-effort behavior and log failures.

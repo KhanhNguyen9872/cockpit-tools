@@ -6,20 +6,16 @@ use serde_json::Value;
 use super::contract::ServiceError;
 
 pub(super) struct OutputCollector {
-    limit: usize,
-    indexed: BTreeMap<u64, (Value, usize)>,
+    indexed: BTreeMap<u64, Value>,
     unindexed: Vec<Value>,
-    bytes: usize,
     identity_invalid: bool,
 }
 
 impl OutputCollector {
-    pub(super) fn new(limit: usize) -> Self {
+    pub(super) fn new() -> Self {
         Self {
-            limit,
             indexed: BTreeMap::new(),
             unindexed: Vec::new(),
-            bytes: 0,
             identity_invalid: false,
         }
     }
@@ -81,23 +77,14 @@ impl OutputCollector {
                     self.identity_invalid = true;
                     return Ok(false);
                 };
-                let size = item.to_string().len();
                 let index = event.get("output_index").and_then(Value::as_u64);
-                self.identity_invalid |= index.is_none_or(|index| index >= 4096)
+                self.identity_invalid |= index.is_none()
                     || !complete_identity_item(item)
                     || index
                         .and_then(|index| self.indexed.get(&index))
-                        .is_some_and(|(previous, _)| previous != item);
-                let replaced = index
-                    .and_then(|index| self.indexed.get(&index))
-                    .map_or(0, |(_, size)| *size);
-                let bytes = self.bytes.saturating_sub(replaced).saturating_add(size);
-                if bytes > self.limit {
-                    return Err(too_large());
-                }
-                self.bytes = bytes;
+                        .is_some_and(|previous| previous != item);
                 if let Some(index) = index {
-                    self.indexed.insert(index, (item.clone(), size));
+                    self.indexed.insert(index, item.clone());
                 } else {
                     self.unindexed.push(item.clone());
                 }
@@ -112,7 +99,6 @@ impl OutputCollector {
                 let collected = || {
                     self.indexed
                         .values()
-                        .map(|(item, _)| item)
                         .chain(self.unindexed.iter())
                 };
                 let changed = match response.get_mut("output") {
@@ -130,7 +116,7 @@ impl OutputCollector {
                                 if let Some(id) = self
                                     .indexed
                                     .get(&(index as u64))
-                                    .and_then(|(item, _)| item.get("id"))
+                                    .and_then(|item| item.get("id"))
                                     .and_then(Value::as_str)
                                     .filter(|id| !id.trim().is_empty())
                                 {
@@ -167,9 +153,6 @@ impl OutputCollector {
                     }
                     _ => false,
                 };
-                if changed && event.to_string().len() > self.limit {
-                    return Err(too_large());
-                }
                 Ok(changed)
             }
             _ => Ok(false),
@@ -272,13 +255,6 @@ pub(super) fn complete_tool_call(item: &Value) -> bool {
     item.get(field).is_some_and(Value::is_string)
 }
 
-fn too_large() -> ServiceError {
-    ServiceError::new(
-        502,
-        "upstream_event_too_large",
-        "Upstream event exceeds the configured size limit",
-    )
-}
 
 #[cfg(test)]
 mod tests {
@@ -288,7 +264,7 @@ mod tests {
     #[test]
     fn completion_restores_sorted_output_without_incomplete_tools_or_losing_ciphertext() {
         for kind in ["response.completed", "response.done"] {
-            let mut collector = OutputCollector::new(4096);
+            let mut collector = OutputCollector::new();
             let reasoning = json!({"type":"reasoning","encrypted_content":"cipher","summary":[]});
             let custom = json!({"type":"custom_tool_call","call_id":"c","name":"exec","input":"pwd","extension":true});
             for mut event in [
@@ -312,7 +288,7 @@ mod tests {
 
     #[test]
     fn completion_reconciles_tool_by_call_id_without_replacing_unrelated_output() {
-        let mut collector = OutputCollector::new(4096);
+        let mut collector = OutputCollector::new();
         let custom = json!({"type":"custom_tool_call","call_id":"c","name":"exec","input":"pwd","encrypted_function_args":["input"]});
         collector
             .observe(&mut json!({"type":"response.output_item.done","item":custom}))
@@ -330,7 +306,7 @@ mod tests {
 
     #[test]
     fn failed_output_and_unknown_fields_are_preserved_without_inventing_success() {
-        let mut collector = OutputCollector::new(4096);
+        let mut collector = OutputCollector::new();
         collector.observe(&mut json!({"type":"response.output_item.done","item":{"type":"function_call","call_id":"c","name":"tool"}})).unwrap();
         for mut event in [
             json!({"type":"response.failed","response":{"status":"failed","output":[]},"extension":true}),
@@ -344,21 +320,22 @@ mod tests {
     }
 
     #[test]
-    fn collector_bounds_aggregate_output_and_accounts_for_replaced_indexes() {
-        let mut collector = OutputCollector::new(160);
-        let mut event = json!({"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","encrypted_content":"x".repeat(64)}});
+    fn collector_keeps_large_aggregate_output_and_replaces_indexes_like_go() {
+        let mut collector = OutputCollector::new();
+        let mut event = json!({"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","encrypted_content":"x".repeat(5 * 1024 * 1024)}});
         collector.observe(&mut event).unwrap();
         collector.observe(&mut event).unwrap();
         event["output_index"] = json!(1);
-        assert_eq!(
-            collector.observe(&mut event).unwrap_err().code,
-            "upstream_event_too_large"
-        );
+        collector.observe(&mut event).unwrap();
+        let mut terminal = json!({"type":"response.completed","response":{"status":"completed","output":[]}});
+        assert!(collector.observe(&mut terminal).unwrap());
+        assert_eq!(terminal["response"]["output"].as_array().unwrap().len(), 2);
+        assert_eq!(terminal["response"]["output"][0]["encrypted_content"].as_str().unwrap().len(), 5 * 1024 * 1024);
     }
     #[test]
     fn output_ids_and_incomplete_output_are_restored_without_changing_status() {
         for kind in ["response.completed", "response.incomplete"] {
-            let mut collector = OutputCollector::new(4096);
+            let mut collector = OutputCollector::new();
             let message = json!({"type":"message","id":"observed-message","content":[]});
             collector.observe(&mut json!({"type":"response.output_item.done","output_index":0,"item":message})).unwrap();
             let status = if kind == "response.incomplete" {
@@ -384,7 +361,7 @@ mod tests {
     }
     #[test]
     fn incomplete_preserves_its_nonempty_terminal_tool_fields() {
-        let mut collector = OutputCollector::new(4096);
+        let mut collector = OutputCollector::new();
         collector.observe(&mut json!({"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"c","name":"tool","arguments":"old"}})).unwrap();
         let mut terminal = json!({"type":"response.incomplete","response":{"id":"r","status":"incomplete","output":[{"type":"function_call","call_id":"c","name":"tool","arguments":"new","extension":"terminal"}],"incomplete_details":{"reason":"max_output_tokens"}}});
         let original = terminal.clone();
@@ -396,7 +373,7 @@ mod tests {
     fn null_and_nonarray_terminal_output_are_restored_from_observed_items() {
         for kind in ["response.completed", "response.done", "response.incomplete"] {
             for output in [Value::Null, json!(false), json!("invalid"), json!({})] {
-                let mut collector = OutputCollector::new(4096);
+                let mut collector = OutputCollector::new();
                 let reasoning =
                     json!({"type":"reasoning","id":"reasoning","encrypted_content":"retained"});
                 collector.observe(&mut json!({"type":"response.output_item.done","output_index":0,"item":reasoning})).unwrap();
@@ -415,7 +392,7 @@ mod tests {
     }
     #[test]
     fn tool_reconciliation_runs_after_id_hydration_without_borrowing_another_items_id() {
-        let mut collector = OutputCollector::new(4096);
+        let mut collector = OutputCollector::new();
         collector.observe(&mut json!({"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"message-id","content":[]}})).unwrap();
         let call = json!({"type":"function_call","call_id":"c","name":"tool","arguments":"{}"});
         collector
@@ -429,7 +406,7 @@ mod tests {
 
     #[test]
     fn incomplete_fallback_keeps_observed_partial_tool_fields_for_the_client() {
-        let mut collector = OutputCollector::new(4096);
+        let mut collector = OutputCollector::new();
         let partial = json!({"type":"function_call","call_id":"partial","name":"tool","extension":"partial-output"});
         collector
             .observe(
@@ -450,7 +427,7 @@ mod tests {
     fn identity_restoration_uses_only_complete_contiguous_original_done_items() {
         for kind in ["response.completed", "response.done"] {
             for missing_output in [false, true] {
-                let mut collector = OutputCollector::new(8192);
+                let mut collector = OutputCollector::new();
                 let output = vec![
                     identity_message(),
                     json!({"id":"reasoning","type":"reasoning","summary":[],"encrypted_content":"synthetic-cipher","signature":"synthetic-signature"}),
@@ -523,7 +500,7 @@ mod tests {
             ],
         ];
         for (index, events) in cases.into_iter().enumerate() {
-            let mut collector = OutputCollector::new(8192);
+            let mut collector = OutputCollector::new();
             for mut event in events {
                 collector.observe(&mut event).unwrap();
             }
@@ -534,7 +511,7 @@ mod tests {
 
     #[test]
     fn identity_restoration_never_authenticates_failed_or_nonempty_terminals() {
-        let mut collector = OutputCollector::new(8192);
+        let mut collector = OutputCollector::new();
         collector.observe(&mut json!({"type":"response.output_item.done","output_index":0,"item":identity_message()})).unwrap();
         for event in [
             json!({"type":"response.failed","response":{"id":"response","status":"failed","output":[]}}),

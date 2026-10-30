@@ -17,7 +17,7 @@ type apiKeyScopeSelector struct {
 func (s *apiKeyScopeSelector) Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, auths []*coreauth.Auth) (*coreauth.Auth, error) {
 	scoped := (&cockpitSelector{manifest: s.manifest}).filterAuthsForAPIKeyScope(ctx, auths)
 	if len(scoped) == 0 && len(auths) > 0 {
-		err := noAuthAvailableError()
+		err := noAuthAvailableError(nil)
 		return nil, s.ReportAuthSelectionFailure(ctx, provider, model, auths, err)
 	}
 	active := unpausedServiceAuths(ctx, s.manifest, scoped)

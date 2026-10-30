@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { UnlockFireworksOverlay } from '../components/UnlockFireworksOverlay';
 import { SettingsAccountTransferSection } from '../components/SettingsAccountTransferSection';
 import { SettingsWebdavSyncSection } from '../components/SettingsWebdavSyncSection';
@@ -70,6 +71,10 @@ export function SettingsPageView(props: SettingsPageViewProps) {
     wsEnabled,
     wsPort,
   } = props;
+  const [dataVisited, setDataVisited] = useState(activeTab === 'data');
+  useEffect(() => {
+    if (activeTab === 'data') setDataVisited(true);
+  }, [activeTab]);
   return (
     <main className="main-content">
       <div className="page-tabs-row settings-page-tabs-row">
@@ -108,12 +113,12 @@ export function SettingsPageView(props: SettingsPageViewProps) {
         {/* === General Tab === */}
         {activeTab === 'general' && <SettingsGeneralPanel {...props} />}
 
-        {activeTab === 'data' && (
-          <>
+        {(dataVisited || activeTab === 'data') && (
+          <div hidden={activeTab !== 'data'}>
             <SettingsInstanceCleanupSection />
             <SettingsAccountTransferSection />
             <SettingsWebdavSyncSection />
-          </>
+          </div>
         )}
 
         {/* === Network Tab === */}

@@ -24,6 +24,7 @@ import { CODEX_PLAN_BADGE_STYLE_CHANGED_EVENT, getCodexPlanBadgeStyle, type Code
 import { invoke } from "@tauri-apps/api/core";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { DEFAULT_CODEX_INSTANCE_ID } from "../components/codex/CodexLaunchPreviewModal";
+import { isCodexLaunchCancelled } from '../utils/codexLaunchCancellation';
 import {
   CODEX_LAUNCH_PREVIEW_API_SERVICE_CARD_KEY,
   persistCodexLaunchPreviewLastInstanceId,
@@ -1160,6 +1161,7 @@ export function useCodexAccountsLocalAccessController(context: Pick<ReturnType<t
           restrictFreeAccounts?: boolean;
           backupAccountIds?: string[];
           preferredAccountIds?: string[];
+          sessionIdentityMappingEnabled?: boolean;
           sessionAffinity?: boolean;
           sessionAffinityTtlMs?: number;
           imageGenerationAccountPolicies?: Record<string, CodexLocalAccessImageGenerationPolicy>;
@@ -1203,6 +1205,7 @@ export function useCodexAccountsLocalAccessController(context: Pick<ReturnType<t
               options?.sessionAffinityTtlMs,
               options?.imageGenerationAccountPolicies,
               options?.officialAccountBindings,
+              options?.sessionIdentityMappingEnabled,
             );
           setLocalAccessState(nextState);
           setMessage({
@@ -1865,6 +1868,7 @@ export function useCodexAccountsLocalAccessController(context: Pick<ReturnType<t
       try {
         await handleToggleLocalAccessEnabled();
       } catch (error) {
+        if (isCodexLaunchCancelled(error)) return;
         if (
           presentWindowsOperationError({
             error,

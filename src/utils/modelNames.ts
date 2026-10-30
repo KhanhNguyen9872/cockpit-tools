@@ -7,6 +7,20 @@
 
 /** 模型 ID 到显示名称的映射（支持两种格式） */
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
+  'gemini-4-argon': 'Gemini 4 Argon',
+  'gemini-4-argon-medium': 'Gemini 4 Argon (Medium)',
+  'gemini-4-argon-high': 'Gemini 4 Argon (High)',
+  'gemini-3.8-flash': 'Gemini 3.8 Flash',
+  'gemini-3.8-flash-low': 'Gemini 3.8 Flash (Low)',
+  'gemini-3.8-flash-medium': 'Gemini 3.8 Flash (Medium)',
+  'gemini-3.8-flash-high': 'Gemini 3.8 Flash (High)',
+  'claude-opus-5-5': 'Claude Opus 5.5',
+  'claude-opus-5-5-medium': 'Claude Opus 5.5 (Medium)',
+  'claude-opus-5-5-high': 'Claude Opus 5.5 (High)',
+  'claude-sonnet-5-5': 'Claude Sonnet 5.5',
+  'claude-sonnet-5-5-medium': 'Claude Sonnet 5.5 (Medium)',
+  'claude-sonnet-5-5-high': 'Claude Sonnet 5.5 (High)',
+  'MODEL_PLACEHOLDER_M318': 'Gemini 3.8 Flash (High)',
   // 桌面端格式（小写）
   'claude-opus-4-5-thinking': 'Claude Opus 4.5 (Thinking)',
   'claude-opus-4-6-thinking': 'Claude Opus 4.6 (Thinking)',
@@ -86,6 +100,8 @@ const GEMINI_ANY_FLASH_NAME_PATTERN = /^gemini \d+(?:\.\d+)? flash\b/;
 type GroupPrefixMatcher = (normalizedModelId: string, normalizedModelName: string) => boolean;
 
 const DEFAULT_GROUP_PREFIX_MATCHERS: Record<string, GroupPrefixMatcher> = {
+  g4_argon: (id, name) => id.startsWith('gemini-4-argon') || id === 'argon:weekly'
+    || id === 'gemini-argon-wtu-weekly' || name.startsWith('gemini 4 argon'),
   claude_45: (normalizedModelId, normalizedModelName) =>
     normalizedModelId.startsWith('claude-') ||
     normalizedModelId.startsWith('model_claude') ||
@@ -174,10 +190,18 @@ function matchesDefaultGroupPrefixRule(
 /** 获取默认分组配置（支持两种格式） */
 export function getDefaultGroups(): DefaultGroup[] {
   return [
+    { id: 'g4_argon', name: 'Gemini 4 Argon', desktopModels: ['gemini-4-argon', 'gemini-4-argon-medium', 'gemini-4-argon-high'], pluginModels: [] },
     {
       id: 'claude_45',
       name: 'Claude 4.5',
       desktopModels: [
+        'claude-opus-5-5',
+        'claude-opus-5-5-medium',
+        'claude-opus-5-5-high',
+        'claude-sonnet-5-5',
+        'claude-sonnet-5-5-medium',
+        'claude-sonnet-5-5-high',
+
         'claude-opus-4-5-thinking',
         'claude-opus-4-6-thinking',
         'claude-sonnet-4-5',
@@ -208,9 +232,16 @@ export function getDefaultGroups(): DefaultGroup[] {
       id: 'g3_flash',
       name: 'Gemini Flash',
       desktopModels: [
+        'gemini-3.8-flash',
+        'gemini-3.8-flash-low',
+        'gemini-3.8-flash-medium',
+        'gemini-3.8-flash-high',
+
         'gemini-3-flash',
       ],
       pluginModels: [
+        'MODEL_PLACEHOLDER_M318',
+
         'MODEL_PLACEHOLDER_M18',
       ],
     },

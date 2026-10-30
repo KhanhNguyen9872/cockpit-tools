@@ -223,8 +223,11 @@ pub fn load_account(account_id: &str) -> Result<Account, String> {
     let content =
         fs::read_to_string(&account_path).map_err(|e| format!("读取账号数据失败: {}", e))?;
 
-    let mut account = crate::modules::atomic_write::parse_json_with_auto_restore::<Account>(&account_path, &content)
-        .map_err(|e| format!("解析账号数据失败: {}", e))?;
+    let mut account = crate::modules::atomic_write::parse_json_with_auto_restore::<Account>(
+        &account_path,
+        &content,
+    )
+    .map_err(|e| format!("解析账号数据失败: {}", e))?;
     // 若账号已有可用模型配额，但残留了由 retrieveUserQuotaSummary 产生的假性 SUBSCRIPTION_REQUIRED 错误，自动修复
     if let Some(ref q) = account.quota {
         if !q.models.is_empty() {
@@ -444,12 +447,7 @@ fn find_matching_account_id(
             }
         }
         let mut sorted = email_matches;
-        sorted.sort_by_key(|acc| {
-            (
-                acc.disabled,
-                std::cmp::Reverse(acc.last_used),
-            )
-        });
+        sorted.sort_by_key(|acc| (acc.disabled, std::cmp::Reverse(acc.last_used)));
         if let Some(best) = sorted.first() {
             return Ok(Some(best.id.clone()));
         }
@@ -478,14 +476,13 @@ pub fn upsert_account(
         .lock()
         .map_err(|e| format!("获取锁失败: {}", e))?;
     let mut index = load_account_index()?;
-    let existing_account_id = find_matching_account_id(&index, &email, &token)?
-        .or_else(|| {
-            index
-                .accounts
-                .iter()
-                .find(|s| s.email.trim().eq_ignore_ascii_case(&email))
-                .map(|s| s.id.clone())
-        });
+    let existing_account_id = find_matching_account_id(&index, &email, &token)?.or_else(|| {
+        index
+            .accounts
+            .iter()
+            .find(|s| s.email.trim().eq_ignore_ascii_case(&email))
+            .map(|s| s.id.clone())
+    });
 
     // Existing IDs are referenced by instances, wakeup tasks and groups. Reimport
     // updates credentials in place; deterministic IDs apply only to new accounts.
@@ -790,9 +787,26 @@ struct AutoSwitchTriggerContext {
 fn default_auto_switch_groups() -> Vec<AutoSwitchGroupDefinition> {
     vec![
         AutoSwitchGroupDefinition {
+            id: "g4_argon".into(),
+            name: "Gemini 4 Argon".into(),
+            models: vec![
+                "gemini-4-argon".into(),
+                "gemini-4-argon-medium".into(),
+                "gemini-4-argon-high".into(),
+                "argon:weekly".into(),
+                "gemini-argon-wtu-weekly".into(),
+            ],
+        },
+        AutoSwitchGroupDefinition {
             id: "claude_45".to_string(),
             name: "Claude".to_string(),
             models: vec![
+                "claude-opus-5-5".into(),
+                "claude-opus-5-5-medium".into(),
+                "claude-opus-5-5-high".into(),
+                "claude-sonnet-5-5".into(),
+                "claude-sonnet-5-5-medium".into(),
+                "claude-sonnet-5-5-high".into(),
                 "claude-opus-4-6-thinking".to_string(),
                 "claude-opus-4-6".to_string(),
                 "claude-opus-4-5-thinking".to_string(),
@@ -829,6 +843,11 @@ fn default_auto_switch_groups() -> Vec<AutoSwitchGroupDefinition> {
             id: "g3_flash".to_string(),
             name: "Gemini Flash".to_string(),
             models: vec![
+                "gemini-3.8-flash".into(),
+                "gemini-3.8-flash-low".into(),
+                "gemini-3.8-flash-medium".into(),
+                "gemini-3.8-flash-high".into(),
+                "MODEL_PLACEHOLDER_M318".into(),
                 "gemini-3-flash".to_string(),
                 "gemini-3.1-flash".to_string(),
                 "gemini-3-flash-image".to_string(),
@@ -939,6 +958,23 @@ fn resolve_monitored_auto_switch_groups(
 
 fn normalize_model_for_group_match(value: &str) -> String {
     let normalized = value.trim().to_lowercase();
+    if normalized.starts_with("gemini-4-argon")
+        || matches!(
+            normalized.as_str(),
+            "argon:weekly" | "gemini-argon-wtu-weekly"
+        )
+    {
+        return "gemini-4-argon".into();
+    }
+    if normalized.starts_with("gemini-3.8-flash") {
+        return "gemini-3.8-flash".into();
+    }
+    if normalized.starts_with("claude-sonnet-5-5") {
+        return "claude-sonnet-5-5".into();
+    }
+    if normalized.starts_with("claude-opus-5-5") {
+        return "claude-opus-5-5".into();
+    }
     if normalized.is_empty() {
         return normalized;
     }
@@ -1000,6 +1036,22 @@ fn collect_group_quotas(
                 percentage: average,
             })
         })
+        .collect()
+}
+
+// Newly added default groups must not exclude accounts whose current client
+// does not report that model family. Explicit selected-group rules stay strict.
+fn reported_auto_switch_groups(
+    scope: &str,
+    groups: Vec<AutoSwitchGroupDefinition>,
+    reported: &[AutoSwitchGroupQuota],
+) -> Vec<AutoSwitchGroupDefinition> {
+    if scope != AUTO_SWITCH_SCOPE_ANY_GROUP || reported.is_empty() {
+        return groups;
+    }
+    groups
+        .into_iter()
+        .filter(|group| reported.iter().any(|quota| quota.id == group.id))
         .collect()
 }
 
@@ -1425,6 +1477,9 @@ async fn run_auto_switch_if_needed_inner() -> Result<Option<Account>, String> {
         None => return Ok(None),
     };
 
+    let reported = collect_group_quotas(current, &monitored_groups);
+    let monitored_groups = reported_auto_switch_groups(&scope_mode, monitored_groups, &reported);
+
     let Some(trigger_context) =
         evaluate_auto_switch_trigger(current, threshold, &scope_mode, &monitored_groups)
     else {
@@ -1744,7 +1799,11 @@ pub async fn switch_account_internal(account_id: &str) -> Result<Account, String
             continue;
         }
         if let Err(e) = modules::instance::inject_account_to_profile(&target_dir, account_id) {
-            modules::logger::log_warn(&format!("[Switch] 注入目录 {} 失败: {}", target_dir.display(), e));
+            modules::logger::log_warn(&format!(
+                "[Switch] 注入目录 {} 失败: {}",
+                target_dir.display(),
+                e
+            ));
         }
     }
 
@@ -2147,8 +2206,12 @@ mod tests {
             Some("proj-1".to_string()),
             Some("session-1".to_string()),
         );
-        let first = upsert_account("user@example.com".to_string(), Some("Original Name".to_string()), token1)
-            .expect("first add");
+        let first = upsert_account(
+            "user@example.com".to_string(),
+            Some("Original Name".to_string()),
+            token1,
+        )
+        .expect("first add");
         assert_eq!(load_account_index().unwrap().accounts.len(), 1);
 
         // 重新导入同一邮箱：新 refresh_token，无 project_id，无 session_id，邮箱大小写不同
@@ -2160,8 +2223,8 @@ mod tests {
             None,
             None,
         );
-        let second = upsert_account("User@Example.com".to_string(), None, token2)
-            .expect("second upsert");
+        let second =
+            upsert_account("User@Example.com".to_string(), None, token2).expect("second upsert");
 
         // 验证：ID 必须保持一致，卡片数量不能增加
         assert_eq!(first.id, build_account_storage_id("user@example.com"));
@@ -2247,7 +2310,9 @@ mod tests {
         // 旧文件和 ID 保留，不创建替代 ID，已有引用继续可解析。
         let accounts_dir = get_accounts_dir().unwrap();
         assert!(accounts_dir.join(format!("{}.json", legacy_id)).exists());
-        assert!(!accounts_dir.join(format!("{}.json", expected_canonical_id)).exists());
+        assert!(!accounts_dir
+            .join(format!("{}.json", expected_canonical_id))
+            .exists());
 
         // 索引保持旧 ID，且不会增加重复账号
         let loaded_index = load_account_index().unwrap();
@@ -2263,10 +2328,52 @@ mod tests {
         let parsed_groups: serde_json::Value = serde_json::from_str(&groups_str).unwrap();
         let group_account_ids = parsed_groups[0]["accountIds"].as_array().unwrap();
         assert_eq!(group_account_ids.len(), 1);
-        assert_eq!(
-            group_account_ids[0].as_str(),
-            Some(legacy_id.as_str())
-        );
+        assert_eq!(group_account_ids[0].as_str(), Some(legacy_id.as_str()));
     }
 }
 
+#[cfg(test)]
+mod new_antigravity_model_tests {
+    use super::*;
+    #[test]
+    fn new_default_families_do_not_block_legacy_auto_switch_candidates() {
+        let reported = vec![AutoSwitchGroupQuota {
+            id: "claude_45".into(),
+            name: "Claude".into(),
+            percentage: 10,
+        }];
+        let groups = reported_auto_switch_groups(
+            AUTO_SWITCH_SCOPE_ANY_GROUP,
+            default_auto_switch_groups(),
+            &reported,
+        );
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].id, "claude_45");
+        let explicit = reported_auto_switch_groups(
+            AUTO_SWITCH_SCOPE_SELECTED_GROUPS,
+            default_auto_switch_groups(),
+            &reported,
+        );
+        assert!(explicit.iter().any(|group| group.id == "g4_argon"));
+    }
+
+    #[test]
+    fn new_groups_keep_legacy_models_and_separate_new_versions() {
+        let groups = default_auto_switch_groups();
+        assert!(groups.iter().any(|group| group.id == "g3_pro"));
+        let argon = groups.iter().find(|group| group.id == "g4_argon").unwrap();
+        assert!(argon.models.contains(&"gemini-4-argon-high".into()));
+        assert_eq!(
+            normalize_model_for_group_match("gemini-4-argon-high"),
+            "gemini-4-argon"
+        );
+        assert_ne!(
+            normalize_model_for_group_match("claude-sonnet-4-6"),
+            normalize_model_for_group_match("claude-sonnet-5-5-high")
+        );
+        assert_ne!(
+            normalize_model_for_group_match("gemini-3-flash"),
+            normalize_model_for_group_match("gemini-3.8-flash-high")
+        );
+    }
+}

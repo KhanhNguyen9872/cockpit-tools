@@ -1165,6 +1165,13 @@ const CODEX_LOCAL_ACCESS_PRICE_BOOK: &[CodexLocalAccessPriceBookEntry] = &[
         standard: codex_price(2.0, 0.1, 10.0),
         priority: Some(codex_price(4.0, 0.2, 20.0)),
     },
+    // https://developers.openai.com/api/docs/models/gpt-6.1-terra
+    CodexLocalAccessPriceBookEntry {
+        model_id: "gpt-6.1-terra",
+        session_long_context: true,
+        standard: codex_price(1.0, 0.05, 5.0),
+        priority: Some(codex_price(2.0, 0.1, 10.0)),
+    },
     CodexLocalAccessPriceBookEntry {
         model_id: "gpt-6-astra",
         session_long_context: true,
@@ -1325,6 +1332,9 @@ fn normalize_known_openai_codex_model(model: &str) -> Option<String> {
         }
     }
 
+    if normalized.contains("gpt-6.1-terra") {
+        return Some("gpt-6.1-terra".to_string());
+    }
     if normalized.contains("gpt-6.1-sol") {
         return Some("gpt-6.1-sol".to_string());
     }
@@ -1442,6 +1452,7 @@ fn is_openai_session_long_context_model(model_id: &str) -> bool {
     matches!(
         normalized.as_str(),
         "gpt-6.1-sol"
+            | "gpt-6.1-terra"
             | "gpt-5.4"
             | "gpt-5.5"
             | "gpt-6-astra"
@@ -1979,7 +1990,7 @@ fn calculate_usage_cost_usd(
                 match normalize_known_openai_codex_model(&pricing.model_id).as_deref() {
                     Some(
                         "gpt-5.6" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna"
-                        | "gpt-6.1-sol" | "gpt-6-astra" | "gpt-6-sol" | "gpt-6-luna",
+                        | "gpt-6.1-sol" | "gpt-6.1-terra" | "gpt-6-astra" | "gpt-6-sol" | "gpt-6-luna",
                     ) => 1.25,
                     _ => 1.0,
                 };

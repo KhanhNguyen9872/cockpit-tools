@@ -12,6 +12,7 @@ import type { SettingsPageViewProps } from "./SettingsPageView";
 import { FloatingCardSettings, FloatingCardShowSetting } from "./settings/FloatingCardSettings";
 import { StartupPageSetting } from "./settings/StartupPageSetting";
 import { ThemeColorSetting } from './settings/ThemeColorSetting';
+import { AppBackgroundSettings } from './settings/AppBackgroundSettings';
 import { SettingsCodexPlatformPanel } from "./SettingsCodexPlatformPanel";
 
 
@@ -397,6 +398,7 @@ export function SettingsGeneralPanel(props: SettingsPageViewProps) {
             </div>
           )}
           <SettingsAccountTransferSection directoryEntryOnly />
+          <AppBackgroundSettings />
           <fieldset
             className="settings-general-fieldset"
             disabled={!generalLoaded}

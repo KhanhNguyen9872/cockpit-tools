@@ -1,4 +1,5 @@
 //! Bounded retries before response bytes are exposed to a caller.
+use crate::modules::codex_native_api::deadline::{self, Deadline};
 use super::{
     contract::{ExecutionPolicy, OfficialFallbackFailure, ServiceError, WireApi},
     events::retry_after_headers,
@@ -253,20 +254,21 @@ async fn send_inner(
         let request = request.map_err(|error| super::diagnostics::transport_failure(
             502, "upstream_request_invalid", "Unable to prepare the upstream request", &error,
         ))?;
+        tracker.check_quota_before_send()?;
         let mut stop = state.stop.clone();
         let mut connect_failed = false;
-        let open_deadline = prepared.execution.prepare_deadline().min(deadline);
+        let open_deadline = deadline.cap(prepared.execution.prepare_deadline());
         if tokio::time::Instant::now() >= open_deadline {
             return Err(if tokio::time::Instant::now() >= deadline {
                 total_timeout()
             } else {
-                ServiceError::new(504, "upstream_connect_timeout", "Upstream response headers timed out")
+                super::connection_error::timeout(&prepared.route)
             });
         }
         let result = tokio::select! {
             biased;
             _ = stop.wait() => Err(stopping_error()),
-            result = tokio::time::timeout_at(open_deadline, async {
+            result = deadline::timeout_at(open_deadline, async {
                 tracker.begin_attempt("http");
                 tracker.capability_fallback(prepared.capability_fallback.clone());
                 tracker.payload("upstream_request", "http", request.headers(), &body.to_string());
@@ -276,10 +278,10 @@ async fn send_inner(
                 Ok(Ok(value)) => Ok(value),
                 Ok(Err(error)) => {
                     connect_failed = error.is_connect() || error.is_builder();
-                    Err(super::diagnostics::transport_failure(502, "upstream_unavailable", "Unable to connect to the selected upstream", &error))
+                    Err(super::connection_error::request(&prepared.route, &error))
                 },
                 Err(_) if tokio::time::Instant::now() >= deadline => Err(total_timeout()),
-                Err(_) => Err(ServiceError::new(504, "upstream_connect_timeout", "Upstream response headers timed out")),
+                Err(_) => Err(super::connection_error::timeout(&prepared.route)),
             }
         };
         let mut response = match result {
@@ -370,9 +372,14 @@ async fn send_inner(
                 return Err(if connect_failed {
                     // A candidate that could not connect cannot replace a real
                     // rejection already received earlier in this request.
-                    last_upstream_failure.clone().unwrap_or_else(|| ServiceError::new(
-                        503, "no_available_account", "No authorized upstream could be reached",
-                    ))
+                    last_upstream_failure.clone().unwrap_or_else(|| {
+                        // Keep the attempted proxy and local failure explanation;
+                        // exhaustion is not evidence of invalid authorization.
+                        let mut error = error;
+                        error.status = 503;
+                        error.code = "no_available_account";
+                        error
+                    })
                 } else {
                     error
                 });
@@ -531,7 +538,7 @@ async fn send_inner(
             let mut stop = state.stop.clone();
             let refresh = tokio::select! {
                 _ = stop.wait() => return Err(stopping_error()),
-                result = tokio::time::timeout_at(deadline, mapping::refresh(state, prepared)) => result.map_err(|_| total_timeout())?,
+                result = deadline::timeout_at(deadline, mapping::refresh(state, prepared)) => result.map_err(|_| total_timeout())?,
             };
             refreshed = true;
             match refresh {
@@ -689,7 +696,7 @@ pub(super) async fn cooldown_round(
     prepared: &mut Prepared,
     tracker: &mut RequestTracker,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     status: u16,
 ) -> Result<bool, ServiceError> {
     prepared.execution = prepared.execution.renew_open();
@@ -707,7 +714,7 @@ async fn cooldown_round_inner(
     prepared: &mut Prepared,
     tracker: &mut RequestTracker,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     status: u16,
 ) -> Result<bool, ServiceError> {
     let mut request = prepared.request.clone();
@@ -729,7 +736,7 @@ async fn cooldown_round_inner(
     let mut stop = state.stop.clone();
     let wait = tokio::select! {
         _ = stop.wait() => return Err(stopping_error()),
-        result = tokio::time::timeout_at(deadline, state.host.retry_cooldown_wait(&prepared.caller, request, policy.retry_max_delay)) => result.map_err(|_| total_timeout())??,
+        result = deadline::timeout_at(deadline, state.host.retry_cooldown_wait(&prepared.caller, request, policy.retry_max_delay)) => result.map_err(|_| total_timeout())??,
     };
     let Some(mut wait) = wait else {
         return Ok(false);
@@ -746,7 +753,7 @@ async fn cooldown_round_inner(
     let mut stop = state.stop.clone();
     tokio::select! {
         _ = stop.wait() => return Err(stopping_error()),
-        result = tokio::time::timeout_at(deadline, mapping::retry_cooldown_round(state, prepared)) => result.map_err(|_| total_timeout())??,
+        result = deadline::timeout_at(deadline, mapping::retry_cooldown_round(state, prepared)) => result.map_err(|_| total_timeout())??,
     }
     tracker.routed(&prepared.caller, &prepared.route, &prepared.request.model);
     tracker.routing_identity(&prepared.request);
@@ -815,7 +822,7 @@ async fn note_failed(
     wait: Option<Duration>,
     credential_scope: bool,
     message: Option<&str>,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
 ) -> Result<(), ServiceError> {
     if compact_availability_neutral(prepared, status, credential_scope, message) {
         return Ok(());
@@ -823,7 +830,7 @@ async fn note_failed(
     let mut stop = state.stop.clone();
     tokio::select! {
         _ = stop.wait() => Err(stopping_error()),
-        result = tokio::time::timeout_at(deadline, state.host.route_failed_attempt(&prepared.route, &prepared.route.model, status, wait, credential_scope, message)) => result.map_err(|_| total_timeout()),
+        result = deadline::timeout_at(deadline, state.host.route_failed_attempt(&prepared.route, &prepared.route.model, status, wait, credential_scope, message)) => result.map_err(|_| total_timeout()),
     }
 }
 
@@ -848,7 +855,7 @@ pub(super) async fn inspect_status_error(
     state: &AppState,
     response: reqwest::Response,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     model: &str,
     grok: bool,
 ) -> Result<
@@ -874,7 +881,7 @@ pub(super) async fn inspect_status_error(
         let mut stop = state.stop.clone();
         let chunk = tokio::select! {
             _=stop.wait()=>return Err(stopping_error()),
-            result=tokio::time::timeout_at((tokio::time::Instant::now()+policy.idle_timeout).min(deadline),source.next())=>result.map_err(|_| ServiceError::new(status.as_u16(),"upstream_http_error","Upstream error response timed out"))?,
+            result=deadline::timeout_at(deadline.cap(tokio::time::Instant::now()+policy.idle_timeout),source.next())=>result.map_err(|_| ServiceError::new(status.as_u16(),"upstream_http_error","Upstream error response timed out"))?,
         };
         match chunk {
             Some(Ok(chunk)) => {
@@ -985,7 +992,7 @@ async fn official_local(
 pub(super) async fn recover_before_output(
     state: &Arc<AppState>, prepared: &mut Prepared, tracker: &mut RequestTracker,
     event: &Value, status: u16, previous_wait: Option<Duration>,
-    policy: &ExecutionPolicy, deadline: tokio::time::Instant,
+    policy: &ExecutionPolicy, deadline: Deadline,
 ) -> Result<bool,ServiceError> {
     if prepared.route.chatgpt_plan || prepared.raw_chat.is_some()
         || prepared.route.wire_api!=WireApi::Responses || !super::bootstrap::pre_execution(event)
@@ -1027,12 +1034,12 @@ pub(super) fn remaining_credential_policy(
 async fn alternate(
     state: &AppState,
     prepared: &mut Prepared,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
 ) -> Result<(), ServiceError> {
     let mut stop = state.stop.clone();
     tokio::select! {
         _ = stop.wait() => Err(stopping_error()),
-        result = tokio::time::timeout_at(deadline, mapping::retry_other_account(state, prepared)) => result.map_err(|_| total_timeout())?,
+        result = deadline::timeout_at(deadline, mapping::retry_other_account(state, prepared)) => result.map_err(|_| total_timeout())?,
     }
 }
 
@@ -1040,12 +1047,12 @@ pub(super) async fn delay(
     state: &AppState,
     value: Duration,
     maximum: Duration,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
 ) -> Result<(), ServiceError> {
     let mut stop = state.stop.clone();
     tokio::select! {
         _ = stop.wait() => Err(stopping_error()),
-        _ = tokio::time::sleep_until((tokio::time::Instant::now() + value.min(maximum)).min(deadline)) => {
+        _ = deadline::sleep_until(deadline.cap(tokio::time::Instant::now() + value.min(maximum))) => {
             if tokio::time::Instant::now() >= deadline { Err(total_timeout()) } else { Ok(()) }
         },
     }

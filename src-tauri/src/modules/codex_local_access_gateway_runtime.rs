@@ -168,6 +168,8 @@ async fn ensure_gateway_matches_runtime_once_locked() -> Result<(), String> {
         .arg(&launch_config.config_path)
         .arg("--manifest")
         .arg(&launch_config.manifest_path)
+        .arg("--quota-reserve-state")
+        .arg(&launch_config.quota_reserve_path)
         .arg("--quota-pool-state")
         .arg(&launch_config.quota_pool_path)
         .arg("--parent-pid")
@@ -1005,6 +1007,7 @@ fn build_account_pool_health_snapshot(
             available_auths: health.available_auths,
             unavailable_auths: health.unavailable_auths,
             model_excluded_auths: health.model_excluded_auths,
+            quota_reserved_auths: health.quota_reserved_auths,
             image_policy_blocked_auths: health.image_policy_blocked_auths,
             scope_diagnostics: health.scope_diagnostics.clone(),
             account_statuses: health
@@ -1059,6 +1062,14 @@ async fn record_request_stats_with_meta(
     usage: Option<UsageCapture>,
     meta: RequestStatsMeta<'_>,
 ) -> Result<(), String> {
+    // The runtime counters, recent event and persisted row use one bounded
+    // classification before any aggregation takes place.
+    let normalized_category = normalized_request_log_error_category(
+        success,
+        error_category.unwrap_or_default().trim(),
+        meta.error_message.unwrap_or_default().trim(),
+    );
+    let error_category = (!normalized_category.is_empty()).then_some(normalized_category.as_ref());
     let persisted_event = {
         let mut runtime = gateway_runtime().lock().await;
         let now = now_ms();
@@ -1189,6 +1200,16 @@ async fn record_request_stats_with_meta(
     queue_local_access_usage_event(persisted_event);
 
     schedule_stats_flush_if_needed().await;
+    if success {
+        if let Some(account_id) = account_id {
+            if bound_oauth_quota_refresh_target().await.as_deref() == Some(account_id) {
+                trigger_bound_oauth_quota_refresh_in_background(
+                    "绑定账号请求完成",
+                    BOUND_OAUTH_QUOTA_RESERVE_REQUEST_REFRESH_MIN_INTERVAL,
+                );
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1261,6 +1282,7 @@ fn build_state_snapshot_inner(
             .map(|(account_id, _)| account_id.clone())
             .collect::<Vec<_>>()
     };
+    let quota_reserve_status = collection.as_ref().and_then(build_quota_reserve_status);
     let service_enabled = collection
         .as_ref()
         .is_some_and(|collection| collection.enabled);
@@ -1296,6 +1318,7 @@ fn build_state_snapshot_inner(
         account_health,
         account_pool_health,
         recovery_suppressed_account_ids,
+        quota_reserve_status,
     }
 }
 
@@ -1485,6 +1508,7 @@ fn new_empty_local_access_collection() -> Result<CodexLocalAccessCollection, Str
         model_pricings: Vec::new(),
         excluded_models: Vec::new(),
         session_affinity: true,
+        session_identity_mapping_enabled: true,
         session_affinity_ttl_ms: DEFAULT_SESSION_AFFINITY_TTL_MS,
         session_affinity_default_enabled_migrated: true,
         responses_websockets_enabled: false,
@@ -1503,7 +1527,7 @@ fn new_empty_local_access_collection() -> Result<CodexLocalAccessCollection, Str
         account_concurrency_default_migrated: true,
         account_concurrency_wait_ms: DEFAULT_ACCOUNT_CONCURRENCY_WAIT_MS,
         bound_oauth_account_id: None,
-
+        bound_oauth_quota_reserve: None,
         account_ids: Vec::new(),
         created_at: now_ms(),
         updated_at: now_ms(),

@@ -158,7 +158,7 @@ async fn collect(
     let sse = is_sse(upstream.headers());
     let bytes = execution.read_bounded(upstream).await?;
     let mut images = if sse {
-        let mut decoder = SseDecoder::new(execution.state.options.max_response_bytes);
+        let mut decoder = SseDecoder::new(execution.event_limit());
         let mut events = decoder.push(&bytes)?;
         events.extend(decoder.finish()?);
         if decoder.has_partial_event() {
@@ -184,7 +184,7 @@ async fn collect(
         &execution.state,
         &mut images,
         ImageResponseFormat::Base64,
-        execution.state.options.max_response_bytes,
+        execution.response_limit(),
         execution.asset_budget(),
     )
     .await?;

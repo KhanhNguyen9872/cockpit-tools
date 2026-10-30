@@ -42,6 +42,18 @@ fn native_reserve_dispatch_requires_confirmed_entitlement_and_keeps_other_quota_
     api.openai_api_key = Some("fixture-key".into());
     assert!(native_operation_model(&collection, &plan, &api, None, false).is_none());
 
+    let mut reserved = collection;
+    reserved.bound_oauth_account_id = Some(account.id.clone());
+    reserved.bound_oauth_quota_reserve = Some(CodexLocalAccessQuotaReserve {
+        hourly_percent: 20,
+        weekly_percent: 10,
+        strict: false, safety_margin_percent: 3,
+});
+    assert!(!native_model_quota_allows(
+        &reserved,
+        &account,
+        "gpt-reserve"
+    ));
     let mut states = HashMap::new();
     native_upsert_cooldown(
         &mut states,

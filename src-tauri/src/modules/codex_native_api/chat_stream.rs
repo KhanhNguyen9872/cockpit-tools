@@ -7,8 +7,6 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
-const MAX_ACCUMULATED: usize = 32 * 1024 * 1024;
-const MAX_ITEMS: usize = 4096;
 #[derive(Default)]
 struct Tool {
     index: usize,
@@ -27,7 +25,6 @@ pub struct ChatStreamAdapter {
     finished: bool,
     text: BTreeMap<(usize, usize, String), String>,
     tools: BTreeMap<usize, Tool>,
-    bytes: usize,
     service_tier: Option<Value>,
     item_indices: BTreeMap<String, usize>,
     last_tool: Option<usize>,
@@ -47,7 +44,6 @@ impl ChatStreamAdapter {
             finished: false,
             text: BTreeMap::new(),
             tools: BTreeMap::new(),
-            bytes: 0,
             service_tier: None,
             item_indices: BTreeMap::new(),
             last_tool: None,
@@ -74,22 +70,6 @@ impl ChatStreamAdapter {
             result["service_tier"] = tier.clone();
         }
         result
-    }
-    fn account(&mut self, bytes: usize) -> Result<(), ServiceError> {
-        self.bytes = self.bytes.saturating_add(bytes);
-        if self.bytes > MAX_ACCUMULATED
-            || self.text.len()
-                + self.tools.len()
-                + self.item_indices.len()
-                + self.citations.len()
-                + self.images.len()
-                > MAX_ITEMS
-        {
-            return Err(upstream_error(
-                "Chat stream exceeds the bounded adapter state limit",
-            ));
-        }
-        Ok(())
     }
     fn text(
         &mut self,
@@ -118,7 +98,6 @@ impl ChatStreamAdapter {
                 .or_insert(self.text_chars);
             self.text_chars += suffix.chars().count() as i64;
         }
-        self.account(suffix.len())?;
         if suffix.is_empty() {
             Ok(None)
         } else {
@@ -201,7 +180,6 @@ impl ChatStreamAdapter {
             };
             updates.push(delta);
         }
-        self.account(suffix.len())?;
         Ok(updates
             .into_iter()
             .map(|delta| self.chunk(delta, None))
@@ -296,7 +274,6 @@ impl ChatStreamAdapter {
             return Ok(None);
         }
         self.images.insert(key, hash);
-        self.account(data.len())?;
         Ok(Some(self.chunk(
             json!({"images":[chat_image(data, format, 0)]}),
             None,
@@ -340,12 +317,6 @@ impl ChatStreamAdapter {
         if annotations.is_empty() {
             return Ok(None);
         }
-        self.account(
-            annotations
-                .iter()
-                .map(|value| value.to_string().len())
-                .sum(),
-        )?;
         Ok(Some(self.chunk(json!({"annotations":annotations}), None)))
     }
     pub fn push(&mut self, event: &Value) -> Result<Vec<StreamOutput>, ServiceError> {
@@ -403,7 +374,6 @@ impl ChatStreamAdapter {
         if let Some(id) = item_id {
             if !self.item_indices.contains_key(id) {
                 self.item_indices.insert(id.to_owned(), index);
-                self.account(id.len())?;
             }
         }
         let part = event

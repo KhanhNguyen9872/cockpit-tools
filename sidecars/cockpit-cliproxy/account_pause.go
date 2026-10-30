@@ -89,10 +89,13 @@ func terminalScopedPauseError(ctx context.Context, err error) error {
 }
 
 // Also enforce the policy immediately before a generation send, including
-// pinned WebSocket continuations.
+// pinned WebSocket continuations. Preserve the existing quota admission guard.
 func (p *requestPolicy) beforeUpstreamSend(ctx context.Context, authID string) error {
 	if serviceAuthPaused(ctx, p.manifest, &coreauth.Auth{ID: authID}) {
 		return serviceAccountPausedError()
+	}
+	if p.tracker != nil {
+		return p.tracker.quotaProtectionBeforeSend(ctx, authID)
 	}
 	return nil
 }

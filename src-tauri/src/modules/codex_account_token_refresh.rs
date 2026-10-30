@@ -156,6 +156,8 @@ fn switch_auth_reason_code(reason: &str) -> &'static str {
 pub(crate) fn format_account_switch_error(account_id: &str, error: String) -> String {
     // An engine prerequisite is independent of a previously recorded reauth state.
     if super::codex_proxy_engine_preflight::is_prerequisite_error(&error)
+        || error == "APP_PATH_NOT_FOUND:codex"
+        || error.starts_with("CODEX_START_CONFIRMATION_UNCERTAIN:")
         || matches!(error.as_str(), "CODEX_SWITCH_BINDING_FAILED" | "CODEX_PROCESS_SCAN_FAILED"
             | "PROXY_ENTRY_PORT_UNAVAILABLE" | "PROXY_RUNTIME_NOT_READY")
     {

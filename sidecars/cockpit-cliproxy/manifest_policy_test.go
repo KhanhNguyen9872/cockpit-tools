@@ -1671,6 +1671,7 @@ func TestAuthPoolUnavailableErrorUsesCockpitLocale(t *testing.T) {
 		candidateAuths:     3,
 		unavailableAuths:   1,
 		modelExcludedAuths: 1,
+		quotaReservedAuths: 1,
 	}
 
 	zhError := authPoolUnavailableError("zh-CN", stats, "no auth available")
@@ -1965,6 +1966,102 @@ func TestLoadManifestIndexesTokenAccounts(t *testing.T) {
 	}
 }
 
+func TestLoadManifestParsesBoundOAuthQuotaReserve(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	if err := os.WriteFile(path, []byte(`{
+		"accounts": [{
+			"id": "oauth-account",
+			"email": "oauth@example.com",
+			"authId": "oauth-account.json",
+			"quotaReserve": {
+				"hourlyThresholdPercent": 10,
+				"weeklyThresholdPercent": 20,
+				"snapshotUpdatedAtUnixSeconds": 1234567890,
+				"hourlyRemainingPercent": 55,
+				"weeklyRemainingPercent": 66,
+				"hourlyWindowPresent": true,
+				"weeklyWindowPresent": false
+			}
+		}]
+	}`), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	m, err := loadManifest(path)
+	if err != nil {
+		t.Fatalf("load manifest: %v", err)
+	}
+	account := m.accountByID["oauth-account"]
+	if account == nil || account.QuotaReserve == nil {
+		t.Fatalf("quota reserve should be parsed: %#v", account)
+	}
+	reserve := account.QuotaReserve
+	if reserve.HourlyThresholdPercent == nil || *reserve.HourlyThresholdPercent != 10 ||
+		reserve.WeeklyThresholdPercent == nil || *reserve.WeeklyThresholdPercent != 20 ||
+		reserve.SnapshotUpdatedAtUnixSeconds == nil || *reserve.SnapshotUpdatedAtUnixSeconds != 1234567890 ||
+		reserve.HourlyRemainingPercent == nil || *reserve.HourlyRemainingPercent != 55 ||
+		reserve.WeeklyRemainingPercent == nil || *reserve.WeeklyRemainingPercent != 66 ||
+		reserve.HourlyWindowPresent == nil || !*reserve.HourlyWindowPresent ||
+		reserve.WeeklyWindowPresent == nil || *reserve.WeeklyWindowPresent {
+		t.Fatalf("unexpected parsed quota reserve: %#v", reserve)
+	}
+}
+
+func TestCockpitSelectorPickSkipsBoundOAuthAtEitherQuotaReserve(t *testing.T) {
+	tests := []struct {
+		name            string
+		hourlyRemaining int
+		weeklyRemaining int
+	}{
+		{name: "hourly", hourlyRemaining: 10, weeklyRemaining: 90},
+		{name: "weekly", hourlyRemaining: 90, weeklyRemaining: 20},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hourlyThreshold := 10
+			weeklyThreshold := 20
+			snapshotUpdatedAt := time.Now().Unix()
+			windowPresent := true
+			protectedAccount := &accountSpec{
+				ID:     "protected",
+				Email:  "protected@example.com",
+				AuthID: "protected.json",
+				QuotaReserve: &quotaReserveSpec{
+					HourlyThresholdPercent:       &hourlyThreshold,
+					WeeklyThresholdPercent:       &weeklyThreshold,
+					SnapshotUpdatedAtUnixSeconds: &snapshotUpdatedAt,
+					HourlyRemainingPercent:       &tt.hourlyRemaining,
+					WeeklyRemainingPercent:       &tt.weeklyRemaining,
+					HourlyWindowPresent:          &windowPresent,
+					WeeklyWindowPresent:          &windowPresent,
+				},
+			}
+			normalAccount := &accountSpec{ID: "normal", AuthID: "normal.json"}
+			selector := &cockpitSelector{manifest: &manifest{
+				accountByAuthID: map[string]*accountSpec{
+					"protected.json": protectedAccount,
+					"normal.json":    normalAccount,
+				},
+			}}
+
+			selected, err := selector.Pick(
+				context.Background(),
+				"codex",
+				"gpt-5.4",
+				cliproxyexecutor.Options{},
+				[]*coreauth.Auth{{ID: "protected.json"}, {ID: "normal.json"}},
+			)
+			if err != nil {
+				t.Fatalf("Pick: %v", err)
+			}
+			if selected == nil || selected.ID != "normal.json" {
+				t.Fatalf("expected normal auth after reserve filtering, got %#v", selected)
+			}
+		})
+	}
+}
+
 func TestCockpitSelectorPrefersAccountWithFewerImageJobs(t *testing.T) {
 	busyAccount := &accountSpec{ID: "busy", AuthID: "busy.json"}
 	idleAccount := &accountSpec{ID: "idle", AuthID: "idle.json"}
@@ -2050,6 +2147,321 @@ func TestImageRequestSelectorBypassesSessionAffinityFallback(t *testing.T) {
 	}
 }
 
+func TestCockpitSelectorPickIgnoresExplicitlyMissingQuotaWindow(t *testing.T) {
+	hourlyThreshold := 10
+	weeklyThreshold := 20
+	snapshotUpdatedAt := time.Now().Unix()
+	weeklyRemaining := 80
+	hourlyWindowPresent := false
+	weeklyWindowPresent := true
+	account := &accountSpec{
+		ID:     "protected",
+		AuthID: "protected.json",
+		QuotaReserve: &quotaReserveSpec{
+			HourlyThresholdPercent:       &hourlyThreshold,
+			WeeklyThresholdPercent:       &weeklyThreshold,
+			SnapshotUpdatedAtUnixSeconds: &snapshotUpdatedAt,
+			HourlyRemainingPercent:       nil,
+			WeeklyRemainingPercent:       &weeklyRemaining,
+			HourlyWindowPresent:          &hourlyWindowPresent,
+			WeeklyWindowPresent:          &weeklyWindowPresent,
+		},
+	}
+	selector := &cockpitSelector{manifest: &manifest{
+		accountByAuthID: map[string]*accountSpec{"protected.json": account},
+	}}
+
+	selected, err := selector.Pick(
+		context.Background(),
+		"codex",
+		"gpt-5.4",
+		cliproxyexecutor.Options{},
+		[]*coreauth.Auth{{ID: "protected.json"}},
+	)
+	if err != nil {
+		t.Fatalf("Pick: %v", err)
+	}
+	if selected == nil || selected.ID != "protected.json" {
+		t.Fatalf("expected auth with explicitly absent hourly window, got %#v", selected)
+	}
+}
+
+func TestCockpitSelectorPickFailsClosedForUnknownBoundOAuthQuota(t *testing.T) {
+	hourlyThreshold := 10
+	weeklyThreshold := 20
+	snapshotUpdatedAt := time.Now().Unix()
+	weeklyWindowPresent := false
+	account := &accountSpec{
+		ID:     "protected",
+		Email:  "protected@example.com",
+		AuthID: "protected.json",
+		QuotaReserve: &quotaReserveSpec{
+			HourlyThresholdPercent:       &hourlyThreshold,
+			WeeklyThresholdPercent:       &weeklyThreshold,
+			SnapshotUpdatedAtUnixSeconds: &snapshotUpdatedAt,
+			HourlyRemainingPercent:       nil,
+			WeeklyRemainingPercent:       nil,
+			HourlyWindowPresent:          nil,
+			WeeklyWindowPresent:          &weeklyWindowPresent,
+		},
+	}
+	selector := &cockpitSelector{manifest: &manifest{
+		accountByAuthID: map[string]*accountSpec{"protected.json": account},
+	}}
+
+	selected, err := selector.Pick(
+		context.Background(),
+		"codex",
+		"gpt-5.4",
+		cliproxyexecutor.Options{},
+		[]*coreauth.Auth{{ID: "protected.json"}},
+	)
+	if selected != nil {
+		t.Fatalf("expected no selected auth, got %#v", selected)
+	}
+	if err == nil {
+		t.Fatal("expected quota reserve error")
+	}
+	message := err.Error()
+	for _, fragment := range []string{
+		"no auth available",
+		"bound OAuth quota reserve blocked 1 auth(s)",
+		"protected@example.com",
+		"5h remaining quota unknown",
+	} {
+		if !strings.Contains(message, fragment) {
+			t.Fatalf("expected %q in error %q", fragment, message)
+		}
+	}
+}
+
+func TestCockpitSelectorPickFailsClosedForInvalidQuotaSnapshotTimestamp(t *testing.T) {
+	now := time.Now().Unix()
+	tests := []struct {
+		name      string
+		timestamp *int64
+		reason    string
+	}{
+		{name: "missing", timestamp: nil, reason: "quota snapshot timestamp unknown"},
+		{name: "non-positive", timestamp: int64PointerForTest(0), reason: "quota snapshot timestamp invalid"},
+		{name: "future", timestamp: int64PointerForTest(now + 60), reason: "quota snapshot timestamp invalid"},
+		{name: "stale", timestamp: int64PointerForTest(now - int64(quotaReserveMaxSnapshotAge/time.Second) - 1), reason: "quota snapshot stale"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hourlyThreshold := 10
+			weeklyThreshold := 20
+			hourlyRemaining := 80
+			weeklyRemaining := 80
+			windowPresent := true
+			account := &accountSpec{
+				ID:     "protected",
+				Email:  "protected@example.com",
+				AuthID: "protected.json",
+				QuotaReserve: &quotaReserveSpec{
+					HourlyThresholdPercent:       &hourlyThreshold,
+					WeeklyThresholdPercent:       &weeklyThreshold,
+					SnapshotUpdatedAtUnixSeconds: tt.timestamp,
+					HourlyRemainingPercent:       &hourlyRemaining,
+					WeeklyRemainingPercent:       &weeklyRemaining,
+					HourlyWindowPresent:          &windowPresent,
+					WeeklyWindowPresent:          &windowPresent,
+				},
+			}
+			selector := &cockpitSelector{manifest: &manifest{
+				accountByAuthID: map[string]*accountSpec{"protected.json": account},
+			}}
+
+			selected, err := selector.Pick(
+				context.Background(),
+				"codex",
+				"gpt-5.4",
+				cliproxyexecutor.Options{},
+				[]*coreauth.Auth{{ID: "protected.json"}},
+			)
+			if selected != nil {
+				t.Fatalf("expected no selected auth, got %#v", selected)
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.reason) {
+				t.Fatalf("expected %q in quota reserve error, got %v", tt.reason, err)
+			}
+		})
+	}
+}
+
+func TestQuotaReserveStateStoreHotReloadsSnapshot(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "quota-reserve.json")
+	hourlyThreshold := 20
+	weeklyThreshold := 10
+	account := &accountSpec{
+		ID:    "protected",
+		Email: "protected@example.com",
+		QuotaReserve: &quotaReserveSpec{
+			HourlyThresholdPercent: &hourlyThreshold,
+			WeeklyThresholdPercent: &weeklyThreshold,
+		},
+	}
+	writeState := func(hourly, weekly int) {
+		t.Helper()
+		content, err := json.Marshal(quotaReserveStateFile{Accounts: map[string]quotaReserveSnapshot{
+			"protected": {
+				SnapshotUpdatedAtUnixSeconds: int64PointerForTest(time.Now().Unix()),
+				HourlyRemainingPercent:       intPointerForTest(hourly),
+				WeeklyRemainingPercent:       intPointerForTest(weekly),
+				HourlyWindowPresent:          boolPointerForTest(true),
+				WeeklyWindowPresent:          boolPointerForTest(true),
+			},
+		}})
+		if err != nil {
+			t.Fatalf("marshal quota reserve state: %v", err)
+		}
+		if err := os.WriteFile(statePath, content, 0o600); err != nil {
+			t.Fatalf("write quota reserve state: %v", err)
+		}
+	}
+
+	writeState(80, 80)
+	store := newQuotaReserveStateStore(statePath, nil)
+	if err := store.load(); err != nil {
+		t.Fatalf("load available state: %v", err)
+	}
+	if reason := quotaReserveBlockReasonWithState(account, store, time.Now()); reason != "" {
+		t.Fatalf("expected available snapshot, got %q", reason)
+	}
+
+	writeState(20, 80)
+	if err := store.load(); err != nil {
+		t.Fatalf("load blocked state: %v", err)
+	}
+	if reason := quotaReserveBlockReasonWithState(account, store, time.Now()); !strings.Contains(reason, "5h remaining 20% <= reserve 20%") {
+		t.Fatalf("expected hot-reloaded reserve block, got %q", reason)
+	}
+}
+
+func TestQuotaReserveSelectorFiltersCachedSessionAffinityAuth(t *testing.T) {
+	tests := []struct {
+		name          string
+		includeNormal bool
+		mutateReserve func(*quotaReserveSpec)
+		wantAuthID    string
+		wantError     string
+	}{
+		{
+			name:          "blocked reselects normal",
+			includeNormal: true,
+			mutateReserve: func(reserve *quotaReserveSpec) {
+				*reserve.HourlyRemainingPercent = *reserve.HourlyThresholdPercent
+			},
+			wantAuthID: "normal.json",
+		},
+		{
+			name:          "stale reselects normal",
+			includeNormal: true,
+			mutateReserve: func(reserve *quotaReserveSpec) {
+				*reserve.SnapshotUpdatedAtUnixSeconds = time.Now().Add(-quotaReserveMaxSnapshotAge - time.Second).Unix()
+			},
+			wantAuthID: "normal.json",
+		},
+		{
+			name: "blocked without fallback returns quota error",
+			mutateReserve: func(reserve *quotaReserveSpec) {
+				*reserve.WeeklyRemainingPercent = *reserve.WeeklyThresholdPercent
+			},
+			wantError: "bound OAuth quota reserve blocked 1 auth(s)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hourlyThreshold := 10
+			weeklyThreshold := 20
+			snapshotUpdatedAt := time.Now().Unix()
+			verifiedStartedAt := time.Now().UnixMilli()
+			hourlyRemaining := 80
+			weeklyRemaining := 80
+			windowPresent := true
+			protectedPlanRank := 2
+			normalPlanRank := 1
+			reserve := &quotaReserveSpec{
+				SnapshotVerifiedQueryStartedAtUnixMillis: &verifiedStartedAt,
+				HourlyThresholdPercent:                   &hourlyThreshold,
+				WeeklyThresholdPercent:                   &weeklyThreshold,
+				SnapshotUpdatedAtUnixSeconds:             &snapshotUpdatedAt,
+				HourlyRemainingPercent:                   &hourlyRemaining,
+				WeeklyRemainingPercent:                   &weeklyRemaining,
+				HourlyWindowPresent:                      &windowPresent,
+				WeeklyWindowPresent:                      &windowPresent,
+			}
+			protectedAccount := &accountSpec{
+				ID:           "protected",
+				Email:        "protected@example.com",
+				AuthID:       "protected.json",
+				PlanRank:     &protectedPlanRank,
+				QuotaReserve: reserve,
+			}
+			normalAccount := &accountSpec{
+				ID:       "normal",
+				Email:    "normal@example.com",
+				AuthID:   "normal.json",
+				PlanRank: &normalPlanRank,
+			}
+			m := &manifest{
+				Accounts:          []accountSpec{*protectedAccount, *normalAccount},
+				RoutingStrategy:   "plan_high_first",
+				accountByID:       map[string]*accountSpec{"protected": protectedAccount, "normal": normalAccount},
+				accountByAuthID:   map[string]*accountSpec{"protected.json": protectedAccount, "normal.json": normalAccount},
+				originalIndexByID: map[string]int{"protected": 0, "normal": 1},
+			}
+			cfg := &config.Config{}
+			cfg.Routing.SessionAffinity = true
+			cfg.Routing.SessionAffinityTTL = time.Minute.String()
+			selector := buildCoreAuthSelector(cfg, &cockpitSelector{manifest: m}, m, nil)
+			if stoppable, ok := selector.(coreauth.StoppableSelector); ok {
+				defer stoppable.Stop()
+			}
+
+			auths := []*coreauth.Auth{{ID: "protected.json"}}
+			if tt.includeNormal {
+				auths = append(auths, &coreauth.Auth{ID: "normal.json"})
+			}
+			opts := cliproxyexecutor.Options{
+				OriginalRequest: []byte(`{"metadata":{"user_id":"user_xxx_account__session_ac980658-63bd-4fb3-97ba-8da64cb1e344"}}`),
+			}
+
+			first, err := selector.Pick(accountConcurrencyRequestContext("quota-affinity"), "codex", "gpt-5.4", opts, auths)
+			if err != nil {
+				t.Fatalf("initial Pick: %v", err)
+			}
+			if first == nil || first.ID != "protected.json" {
+				t.Fatalf("expected protected auth to establish affinity, got %#v", first)
+			}
+			cached, err := selector.Pick(accountConcurrencyRequestContext("quota-affinity"), "codex", "gpt-5.4", opts, auths)
+			if err != nil || cached == nil || cached.ID != "protected.json" {
+				t.Fatalf("expected protected affinity cache hit, got auth=%#v err=%v", cached, err)
+			}
+
+			tt.mutateReserve(reserve)
+			selected, err := selector.Pick(accountConcurrencyRequestContext("quota-affinity"), "codex", "gpt-5.4", opts, auths)
+			if tt.wantError != "" {
+				if selected != nil {
+					t.Fatalf("expected no auth after reserve block, got %#v", selected)
+				}
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Fatalf("expected quota error containing %q, got %v", tt.wantError, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Pick after reserve change: %v", err)
+			}
+			if selected == nil || selected.ID != tt.wantAuthID {
+				t.Fatalf("expected %s after cached auth was filtered, got %#v", tt.wantAuthID, selected)
+			}
+		})
+	}
+}
+
 func TestBackupAccountSelectorOverridesCachedAffinityWhenRegularRecovers(t *testing.T) {
 	regularAccount := &accountSpec{ID: "regular", AuthID: "regular.json"}
 	backupAccount := &accountSpec{ID: "backup", AuthID: "backup.json"}
@@ -2073,7 +2485,7 @@ func TestBackupAccountSelectorOverridesCachedAffinityWhenRegularRecovers(t *test
 	cfg := &config.Config{}
 	cfg.Routing.SessionAffinity = true
 	cfg.Routing.SessionAffinityTTL = time.Minute.String()
-	selector := buildCoreAuthSelector(cfg, &cockpitSelector{manifest: m}, m)
+	selector := buildCoreAuthSelector(cfg, &cockpitSelector{manifest: m}, m, nil)
 	if stoppable, ok := selector.(coreauth.StoppableSelector); ok {
 		defer stoppable.Stop()
 	}
@@ -2129,7 +2541,7 @@ func TestUsagePrioritySelectorPrefersHighestAcrossRoutingStrategies(t *testing.T
 	cfg := &config.Config{}
 	cfg.Routing.SessionAffinity = true
 	cfg.Routing.SessionAffinityTTL = time.Minute.String()
-	selector := buildCoreAuthSelector(cfg, &cockpitSelector{manifest: m}, m)
+	selector := buildCoreAuthSelector(cfg, &cockpitSelector{manifest: m}, m, nil)
 	if stoppable, ok := selector.(coreauth.StoppableSelector); ok {
 		defer stoppable.Stop()
 	}
@@ -2203,7 +2615,7 @@ func TestSidecarRuntimeRegistersConfigCodexAPIKeyAuths(t *testing.T) {
 		accountByAPIKey: map[string]*accountSpec{"sk-upstream": account},
 		ModelIDs:        []string{"gpt-5.4"},
 	}
-	manager := buildCoreAuthManager(cfg, &cockpitSelector{manifest: m}, &authHook{manifest: m}, m, newRequestUsageTracker())
+	manager := buildCoreAuthManager(cfg, &cockpitSelector{manifest: m}, &authHook{manifest: m}, m, nil, newRequestUsageTracker())
 
 	runtime, err := newSidecarRuntime(context.Background(), configPath, cfg, m, manager)
 	if err != nil {
@@ -2271,7 +2683,7 @@ func TestSidecarRuntimeRegistersManifestCodexAccessTokenAuths(t *testing.T) {
 		accountByEmail:   map[string]*accountSpec{"token@example.com": account},
 		ModelIDs:         []string{"gpt-5.4"},
 	}
-	manager := buildCoreAuthManager(cfg, &cockpitSelector{manifest: m}, &authHook{manifest: m}, m, newRequestUsageTracker())
+	manager := buildCoreAuthManager(cfg, &cockpitSelector{manifest: m}, &authHook{manifest: m}, m, nil, newRequestUsageTracker())
 
 	runtime, err := newSidecarRuntime(context.Background(), configPath, cfg, m, manager)
 	if err != nil {
@@ -2406,7 +2818,7 @@ func TestManifestRegisteredModelsPreserveReasoningEffortThroughThinkingPipeline(
 		Provider: "codex",
 		Status:   coreauth.StatusActive,
 	}
-	manager := buildCoreAuthManager(&config.Config{}, &cockpitSelector{}, nil, nil, nil)
+	manager := buildCoreAuthManager(&config.Config{}, &cockpitSelector{}, nil, nil, nil, nil)
 	registered, err := manager.Register(context.Background(), auth)
 	if err != nil {
 		t.Fatalf("register auth: %v", err)

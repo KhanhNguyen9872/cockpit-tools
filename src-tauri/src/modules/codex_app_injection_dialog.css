@@ -88,6 +88,8 @@
 [data-cockpit-quota-details] .cell-email,[data-cockpit-quota-details] .cell-model{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:10px;font-weight:500;color:var(--cockpit-text)}
 [data-cockpit-quota-details] .cell-email{margin-bottom:4px}
 [data-cockpit-quota-details] .cell-route,[data-cockpit-quota-details] .cell-muted,[data-cockpit-quota-details] .cell-upstream{display:block;color:var(--cockpit-muted);font-size:9px;margin-top:3px}
+[data-cockpit-quota-details] .cell-tier{display:block;margin-top:3px;font-size:9px;line-height:1.35;color:var(--cockpit-muted);overflow-wrap:anywhere}
+[data-cockpit-quota-details] .cell-tier.adjusted{color:var(--cockpit-blue)}
 [data-cockpit-quota-details] .request-table .badge{font-size:8px;padding:2px 5px}
 [data-cockpit-quota-details] .cell-metrics{margin:0;display:grid;gap:1px;font-size:9px;line-height:16px}
 [data-cockpit-quota-details] .cell-metrics>div{display:flex;align-items:baseline;justify-content:space-between;gap:5px}

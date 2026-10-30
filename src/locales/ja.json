@@ -158,6 +158,15 @@
     "providerClear": "選択を解除"
   },
   "common": {
+    "networkErrors": {
+      "upstream": "上流サービス",
+      "proxyConnection": "プロキシ「{{proxy}}」経由で {{target}} に接続できません。プロキシまたはネットワークの問題が考えられます。設定を確認するか、別のノードで再試行してください。",
+      "proxyTimeout": "プロキシ「{{proxy}}」経由の {{target}} への接続がタイムアウトしました。プロキシまたはネットワークを確認するか、別のノードで再試行してください。",
+      "proxyAuth": "プロキシ「{{proxy}}」の認証に失敗しました。プロキシのユーザー名またはパスワードを確認してください。",
+      "localProxyUnavailable": "ローカルプロキシ「{{proxy}}」に接続できません。プロキシサービスが起動しているか確認してください。",
+      "directConnection": "{{target}} に接続できません。ネットワークを確認して再試行してください。",
+      "directTimeout": "{{target}} への接続がタイムアウトしました。ネットワークを確認して再試行してください。"
+    },
     "codexUsage": {
       "title": "クォータと使用量",
       "session": "現在の会話",
@@ -167,8 +176,8 @@
       "speed": "出力速度",
       "cache": "キャッシュヒット率",
       "cacheShort": "キャッシュ",
-      "speedHint": "現在の会話に紐づく直近の有効な API リクエストの加重出力速度です。最初の応答までの待ち時間は含みません。紐づけできない場合や計測時間がない場合は — を表示します。",
-      "cacheHint": "直近の入力 Token に占めるキャッシュヒットの割合を、入力量で加重して計算します。",
+      "speedHint": "このチャットの有効なリクエストの平均出力速度です。初回応答の待ち時間は含みません。測定値がない場合は — を表示します。",
+      "cacheHint": "このチャットの有効なリクエストを入力トークン数で重み付けした平均キャッシュヒット率です。生成停止後も保持し、カウントがない場合は — を表示します。",
       "aggregateHint": "各アカウントの残り枠の割合を合計し、プラン容量では加重しません。アカウント一覧と同じ色分けです：80%以上は緑、40%以上は黄、10%以上は橙、10%未満は赤。不明な値は色分けしません。",
       "waiting": "会話の使用量記録を待機中",
       "refreshFailed": "クォータの更新に失敗しました。前回の結果を保持しています。再試行してください。",
@@ -225,7 +234,11 @@
       "avgLatency": "平均遅延",
       "successRate": "成功率",
       "verifiedStatistics": "確認済み統計",
-      "excludedHistory": "送信の根拠が確認できない過去の記録 {{count}} 件は集計対象外です。"
+      "excludedHistory": "送信の根拠が確認できない過去の記録 {{count}} 件は集計対象外です。",
+      "averageSpeed": "平均出力速度",
+      "serviceUnavailable": "API サービスを利用できません。再試行してください。",
+      "tierAdjusted": "標準に調整済み",
+      "averageCache": "平均キャッシュヒット率"
     },
     "apiKeyAccount": "API Key アカウント",
     "status": "状態",
@@ -1625,6 +1638,35 @@
       "refreshed": "使用量を更新しました",
       "usage": "使用量",
       "tierOther": "その他"
+    },
+    "background": {
+      "title": "背景",
+      "description": "アプリの背景だけを変更します。アカウントカードや操作部分の外観は変わりません。",
+      "presets": "背景プリセット",
+      "default": "標準",
+      "mist": "霧青",
+      "forest": "森林",
+      "dusk": "夕暮れ",
+      "sand": "砂色",
+      "custom": "カスタム",
+      "chooseImage": "画像を選択",
+      "replaceImage": "画像を変更",
+      "imageHint": "JPG・PNG・WebP、最大10 MB。大きな画像は端末内で縮小します。",
+      "preview": "プレビュー",
+      "strength": "濃さ",
+      "blur": "ぼかし",
+      "pixels": "{{count}} ピクセル",
+      "position": "画像の位置",
+      "center": "中央",
+      "top": "上",
+      "bottom": "下",
+      "localHint": "変更はすぐに反映され、この端末に自動保存されます。画像は送信されません。標準に戻すと保存画像を削除します。",
+      "restore": "標準に戻す",
+      "imageType": "JPG・PNG・WebP画像を選んでください。",
+      "imageSize": "10 MB未満の画像を選んでください。",
+      "imageRead": "画像を読み込めません。別の画像をお試しください。",
+      "storage": "背景の読み込みまたは保存に失敗しました。保存済みの背景は保持されます。再試行してください。",
+      "saveFailed": "背景は表示されていますが、保存できませんでした。再試行してください。前回保存した背景は保持されます。"
     }
   },
   "appPath": {
@@ -2350,7 +2392,18 @@
       "windowHint": "実際の期間でしきい値を判定し、1週間以上は週次しきい値を使います。週次枠のみのアカウントはその枠だけを確認します。期間がない場合は主枠・副枠の対応を維持します。",
       "rule": "短期残量 <= {{shortCycle}}% または週次残量 <= {{weekly}}%"
     },
+    "launchConfirmation": {
+      "title": "起動確認待ち",
+      "description": "起動を要求しましたが、クライアントの状態は未確認です。すでに開いている可能性があるため、再度の起動はお控えください。",
+      "check": "状態を確認",
+      "notRunning": "対象のインスタンスはまだ検出されていません。後でもう一度確認するか、この画面を閉じてから起動を再試行してください。",
+      "checkFailed": "実行状態を取得できません。後でもう一度確認してください。",
+      "maintenanceDeferred": "セッションを一時的に確認できません。履歴を保持し、今回のメンテナンスをスキップしました。"
+    },
     "launchErrors": {
+      "sessionRestoreFailed": "セッションの修復に失敗し、バックアップの復元が完了していません。起動を停止しました。再試行する前にログとバックアップを確認してください。",
+      "sessionCheckTimeout": "セッションの確認がタイムアウトしました。起動を停止しました。再試行するか、ログを確認してください。",
+      "sessionFileTooLarge": "セッションファイルの先頭行が大きすぎます。起動を停止しました。ログを確認してください。",
       "bindingFailed": "アカウントの関連付けを確認できません。起動を中止しました。切り替えを再試行してください。",
       "processScanFailed": "既存のバックグラウンドプロセスを確認できません。起動を中止しました。再試行してください。",
       "proxyEntryFailed": "設定されたプロキシを起動できません。別の経路は使用していません。再試行してください。"
@@ -2753,7 +2806,8 @@
         "audioNotSupported": "この OAuth アカウントは文字起こしのみ対応しています。他の音声操作には API Key プロバイダーを使用してください。",
         "audioUnavailable": "音声の転送を利用できません。",
         "audioUpstreamFailed": "音声の上流リクエストに失敗しました。",
-        "modelNotAvailable": "モデル {{model}} はこの API Key では利用できません。"
+        "modelNotAvailable": "モデル {{model}} はこの API Key では利用できません。",
+        "quotaReserved": "アカウントの利用枠は予約済みか確認中です。少し待って再試行してください。"
       },
       "testRateLimited": "サービスには到達しましたが、上流でレート制限またはクォータ不足です: {{detail}}。",
       "testHttpFailed": "サービスには到達しましたが、リクエストは HTTP {{status}} を返しました: {{detail}}。",
@@ -2906,7 +2960,23 @@
         "imageGenerationConfirm": {
           "title": "image_generation を無効化",
           "message": "有効にすると、API サービスは通常のテキスト対話を転送する前にローカルゲートウェイで image_generation ツール宣言を除外し、「Image generation is not enabled」などのエラーを避けます。gpt-image などの画像モデルは削除しません。続行しますか？"
-        }
+        },
+        "quotaReserveToggle": "OAuth クォータを確保",
+        "quotaReserveDesc": "API サービスは、5 時間と週間の残りクォータがどちらも確保値を上回る場合にのみ、この OAuth アカウントを使用します。",
+        "quotaReserveHourlyLabel": "5 時間確保",
+        "quotaReserveWeeklyLabel": "週間確保",
+        "quotaReserveInvalid": "1 から 100 の整数を入力してください。",
+        "strictReserve": "厳格な保護",
+        "strictReserveDesc": "予約枠を設定すると、安全マージンによる保護が自動で有効になります。しきい値付近ではアカウントごとに1件ずつ送信し、完了後に最新の残量を確認します。他のクライアントの使用量は制限しません。",
+        "strictNativeOnly": "厳格な保護には Rust エンジンが必要です。Go に切り替える前に無効にしてください。",
+        "safetyMargin": "安全余裕",
+        "safetyMarginUnit": "ポイント",
+        "safetyMarginInvalid": "1〜20の整数を入力してください。",
+        "quotaInFlight": "処理中: {{count}}",
+        "quotaWaiting": "残量の確認待ち",
+        "quotaStale": "残量の更新待ち",
+        "quotaProtected": "保留中",
+        "quotaUpdated": "更新: {{time}}"
       },
       "customRoutingEdit": "カスタムルーティングを編集",
       "customRoutingTitle": "カスタムルーティング",
@@ -3028,7 +3098,7 @@
           "poolUnavailable": "プールに利用可能なアカウントがありません",
           "poolUnavailableDetail": "モデル {{model}} に利用可能なアカウントを選択できませんでした",
           "poolUnattributedDetail": "アカウント別の診断情報がないため、このエラーを特定のアカウントに関連付けることはできません。この API キーの対象アカウントとモデル設定を確認してください。",
-          "poolDiagnosticDetail": "モデル {{model}}：候補 {{candidate}}、範囲内 {{scoped}}、利用可能 {{available}}、利用不可 {{unavailable}}、モデル除外 {{modelExcluded}}、画像ポリシー除外 {{imageBlocked}}",
+          "poolDiagnosticDetail": "モデル {{model}}：候補 {{candidate}}、範囲内 {{scoped}}、利用可能 {{available}}、利用不可 {{unavailable}}、モデル除外 {{modelExcluded}}、クォータ予約 {{quotaReserved}}、画像ポリシー除外 {{imageBlocked}}",
           "poolNoCandidatesDetail": "このリクエストに候補アカウントがありません。要求モデルとアカウントの読み込み状況を確認してください。",
           "poolScopeMismatchDetail": "候補がこの API キーのアカウント範囲に一致しないか、アカウントの対応関係を認識できません。選択したアカウントとモデル設定を確認してください。",
           "inspectBinding": "紐付け確認",
@@ -3040,7 +3110,7 @@
           "boundAccountNotLoadedDetail": "この紐付けアカウントは現在のサービスに読み込まれていません。読み込みとプールの同期を確認してください。",
           "boundAccountNotCandidateDetail": "この紐付けアカウントは読み込み済みですが、今回のリクエストの候補に含まれていません。モデル、プロバイダー、リクエスト種別を確認してください。",
           "scopeUnknownDetail": "範囲の診断だけでは原因を特定できません。紐付けとサービスログを確認してください。",
-          "poolBlockedDetail": "範囲内の選別結果：利用不可 {{unavailable}}（無効化、待機中、認証失敗など）、モデル除外 {{modelExcluded}}、画像ポリシーによる制限 {{imageBlocked}}。各アカウントの理由と設定を確認してください。",
+          "poolBlockedDetail": "範囲内の選別結果：利用不可 {{unavailable}}（無効化、待機中、認証失敗など）、モデル除外 {{modelExcluded}}、クォータ予約による制限 {{quotaReserved}}、画像ポリシーによる制限 {{imageBlocked}}。各アカウントの理由と設定を確認してください。",
           "poolUnknownDetail": "現在の診断では具体的な原因を特定できません。API キーのアカウント範囲、モデル設定、サービスログを確認してください。",
           "clearHint": "消去するのはこの診断記録だけです。設定、トークン、クォータは修復されず、リクエストが再び失敗すると新しい記録が作成されます。",
           "clearSuccess": "診断記録を消去しました。アカウントプールが復旧したことを意味するものではありません。",
@@ -3155,7 +3225,7 @@
       "resetCreditStatusRedeemed": "使用済み",
       "resetCreditStatusExpired": "期限切れ",
       "resetCreditStatusUnknown": "不明",
-      "resetCreditNextExpiry": "次の有効期限: {{time}}",
+      "resetCreditNextExpiry": "次のリセット有効期限 {{time}}",
       "resetCreditDetailsTitle": "リセット明細",
       "resetCreditNoRecords": "リセット記録はありません",
       "resetCreditRecordsLoadFailed": "リセット記録の読み込みに失敗しました: {{error}}",
@@ -3171,7 +3241,12 @@
       "codeReview": "コードレビュー",
       "codeReviewShort": "レビュー",
       "monthlyCreditsHint": "今月のクレジット残量",
-      "monthlyCreditsInline": "Credits：{{value}}"
+      "monthlyCreditsInline": "Credits：{{value}}",
+      "resetCreditExpiryHours": "{{hours}}時間{{minutes}}分",
+      "resetCreditExpiryMinutes": "{{minutes}}分",
+      "resetCreditExpiryExpired": "期限切れ · 詳細",
+      "resetCreditExpiryUrgent": "まもなく失効 {{time}} · {{duration}}",
+      "resetCreditExpiryNormal": "有効期限 {{time}} · {{duration}}"
     },
     "quotaError": {
       "badge": "クォータエラー",
@@ -3448,6 +3523,7 @@
         "expand": "展開",
         "collapse": "折りたたむ",
         "repairVisibility": "表示を修復",
+        "repairIndex": "会話インデックス修復",
         "restoreSessions": "セッションを復元",
         "exportSessions": "セッションを書き出し",
         "importSessions": "セッションを読み込み",
@@ -3480,6 +3556,10 @@
         "clear": "クリア"
       },
       "messages": {
+        "deleteNotConfirmed": "クライアントで削除の完了を確認できませんでした。ローカルの削除処理を停止し、バックアップを保持しました：{{error}}",
+        "historyReadFailed": "会話履歴を安全に読み取れません：{{error}}",
+        "restoreIndexRetry": "会話ファイルは保持されましたが、会話一覧の更新に失敗しました。元のファイルはゴミ箱に残っています。問題を解決して再試行してください：{{error}}",
+        "importIndexRetry": "会話ファイルはインポートされましたが、会話一覧の更新に失敗しました。ファイルとインポート用パッケージは保持されています。問題を解決して再試行してください：{{error}}",
         "pickOne": "少なくとも1件のセッションを選択してください",
         "syncNeedTwo": "セッションを同期するには少なくとも2つのインスタンスが必要です",
         "pickRestoreOne": "復元するセッションを 1 つ以上選択してください",
@@ -3590,7 +3670,18 @@
         "title": "履歴を修復",
         "description": "SQLite インデックス、セッション一覧、ワークスペースのプロバイダー情報を正規化します。元の rollout ファイルはバイト単位で保持し、日時のみ補正します。先にローカルバックアップを作成します。",
         "stopInstanceHint": "完全修復の前に、選択した Codex App/ChatGPT インスタンスを完全に終了してください。変更のプレビューは先に実行できます。",
-        "encryptedContentWarning": "別のプロバイダーまたはアカウントで暗号化された履歴が見つかりました。メタデータは移行できますが、そのセッションの継続や圧縮は失敗する可能性があります。元のプロバイダー/アカウントに戻すか、新しいセッションを開始してください。"
+        "encryptedContentWarning": "別のプロバイダーまたはアカウントで暗号化された履歴が見つかりました。メタデータは移行できますが、そのセッションの継続や圧縮は失敗する可能性があります。元のプロバイダー/アカウントに戻すか、新しいセッションを開始してください。",
+        "modeHistory": "編集・分岐の修復",
+        "modeHistoryDesc": "インデックスの異常によるメッセージ編集や会話の分岐の失敗を修復します。",
+        "historyLiveHint": "クライアントの実行中でも修復できます。完了後、クライアントを再起動してチャットを開き直してください。",
+        "historyDescription": "選択したチャットと継承元の履歴を確認し、異常なページ分割インデックスのみをリセットします。チャット記録、アカウント、Provider 設定は変更しません。実行中も修復でき、完了後の再起動でインデックスを再読み込みします。",
+        "historyPreview": "再構築可能な異常な履歴インデックスが {{count}} 件見つかりました。チャット記録は変更しません。",
+        "historySuccess": "異常な履歴インデックスを {{count}} 件リセットしました。クライアントを再起動してチャットを開き直すと再構築されます。バックアップは保存されています。",
+        "historyNoChanges": "安全に再構築できる異常な履歴インデックスは見つかりませんでした。",
+        "historyFailed": "履歴インデックスの修復が完了しませんでした：{{error}}",
+        "historyChanged": "修復中にチャットデータが変更されました。今回の修復は適用していません。少し待って再試行してください。",
+        "historyScan": "履歴インデックスを確認中（{{current}}/{{total}}）…",
+        "historyReset": "異常なインデックスをバックアップしてリセット中…"
       },
       "importModal": {
         "title": "セッションを読み込み",
@@ -4576,6 +4667,11 @@
       },
       "routing": {
         "optionsTitle": "ルーティング設定",
+        "sessionIdentityMapping": "セッション ID 変換",
+        "sessionIdentityMappingEnableHint": "有効にすると、接続先のアカウントを切り替える際に独立した Session-Id と Thread-Id を使用します。識別子の分離は強まりますが、アカウント間でのキャッシュ再利用が減る場合があります。同じアカウント内では既存の対応付けを再利用します。",
+        "sessionIdentityMappingDisableHint": "無効にすると、クライアントの元の Session-Id と Thread-Id を維持します。接続先の異なるアカウントで同じ識別子が使われる可能性があり、分離は弱まりますが、キャッシュ再利用が増える場合があります。",
+        "sessionIdentityMappingCacheNote": "キャッシュヒット率は接続先の規則、アカウントの範囲、リクエスト内容にも依存し、この設定の切り替えによる増減は保証されません。",
+        "sessionIdentityMappingSaveNote": "確認後、設定を保存すると変更が適用されます。",
         "sessionAffinity": "セッション固定",
         "sessionAffinityTtl": "有効期限（秒）",
         "responsesWebsockets": "WebSocket 経由の Responses",
@@ -5844,6 +5940,22 @@
       "label": "使用中の残量を同期",
       "description": "API サービスの起動は不要です。使用中のローカルアカウントを 5～30 秒間隔で更新し、セッションファイルの変更時に再確認します。最近のファイル情報のみを確認し、会話内容は読みません。アカウント除外、プラン、グループ設定を維持します。既定はオフです。",
       "error": "設定の読み込みまたは保存に失敗しました。再試行してください。"
+    },
+    "pathRecovery": {
+      "title": "Codex の起動パスを設定",
+      "description": "利用可能な Codex クライアントのパスが見つかりません。アプリを選択するか、Codex を手動で開いてから検出してください。",
+      "reload": "再読み込み",
+      "timeout": "操作がタイムアウトしました。もう一度お試しください。起動は自動的に再開されません。",
+      "noCandidates": "Codex が検出されませんでした。クライアントを手動で開いて再検出するか、パスを選択してください。",
+      "pathRequired": "Codex クライアントのパスを選択または入力してください。",
+      "invalidPath": "有効な Codex デスクトップクライアントのパスではありません。アプリを選び直してください。",
+      "candidates": "検出結果",
+      "autoLaunchHint": "デスクトップアプリを起動せずにアカウントだけを切り替える場合は、オフにしてください。手動での起動は引き続き可能です。",
+      "manualLaunchHint": "自動起動をオフにしても、今回の手動起動は完了しません。設定のみ保存すると、今回の起動を取り消します。",
+      "saveAndRetry": "保存して再試行",
+      "saveWithoutLaunch": "保存して続行",
+      "saveOnly": "設定のみ保存",
+      "validationBusy": "前のパスを確認中です。しばらくしてから再試行してください。"
     }
   },
   "githubCopilot": {

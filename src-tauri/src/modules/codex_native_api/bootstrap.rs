@@ -1,4 +1,5 @@
 //! Inspect only the bounded pre-output handshake. Never replay generated output.
+use crate::modules::codex_native_api::deadline::{self, Deadline};
 use super::{
     contract::ExecutionPolicy, contract::ServiceError, events::SseDecoder,
     lifecycle::stopping_error, server::AppState,
@@ -210,7 +211,7 @@ pub(super) async fn probe(
     state: &Arc<AppState>,
     response: reqwest::Response,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
 ) -> Result<reqwest::Response, ServiceError> {
     probe_inner(
         state, response, policy, deadline, false, false, false, false,
@@ -222,7 +223,7 @@ pub(super) async fn probe_chat(
     state: &Arc<AppState>,
     response: reqwest::Response,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
 ) -> Result<reqwest::Response, ServiceError> {
     probe_inner(state, response, policy, deadline, true, false, false, false).await
 }
@@ -234,7 +235,7 @@ pub(super) async fn probe_official(
     state: &Arc<AppState>,
     response: reqwest::Response,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     capability_fallback: bool,
 ) -> Result<reqwest::Response, ServiceError> {
     probe_inner(
@@ -506,7 +507,7 @@ pub(super) async fn probe_provider(
     state: &Arc<AppState>,
     response: reqwest::Response,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     grok: bool,
     capability_fallback: bool,
 ) -> Result<reqwest::Response, ServiceError> {
@@ -528,7 +529,7 @@ async fn probe_inner(
     state: &Arc<AppState>,
     response: reqwest::Response,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     chat: bool,
     grok: bool,
     capability_fallback: bool,
@@ -539,7 +540,7 @@ async fn probe_inner(
     let status = response.status();
     let version = response.version();
     let mut headers = response.headers().clone();
-    let mut source = tokio::time::timeout_at(
+    let mut source = deadline::timeout_at(
         deadline,
         super::upstream::raw_stream(state, response, policy.idle_timeout),
     )
@@ -548,7 +549,7 @@ async fn probe_inner(
     let mut buffered = Vec::new();
     let mut size = 0;
     let mut count = 0;
-    let mut decoder = SseDecoder::new(state.options.max_event_bytes);
+    let mut decoder = SseDecoder::new(if chat { state.options.max_provider_event_bytes } else { state.options.max_event_bytes });
     let mut reject = None;
     let mut hold_deadline = None;
     let mut json_prefix = Vec::new();
@@ -557,8 +558,8 @@ async fn probe_inner(
             let mut stop = state.stop.clone();
             let next = tokio::select! {
                 _ = stop.wait() => return Err(stopping_error()),
-                _ = tokio::time::sleep_until(hold_deadline.unwrap_or(deadline)), if hold_deadline.is_some() => break 'read,
-                next = tokio::time::timeout_at((tokio::time::Instant::now() + policy.idle_timeout).min(deadline), source.bytes.next()) =>
+                _ = deadline::sleep_until(hold_deadline.unwrap_or_else(tokio::time::Instant::now)), if hold_deadline.is_some() => break 'read,
+                next = deadline::timeout_at(deadline.cap(tokio::time::Instant::now() + policy.idle_timeout), source.bytes.next()) =>
                     next.map_err(|_| if tokio::time::Instant::now() >= deadline { super::retry::total_timeout() }
                     else { ServiceError::new(504, "upstream_idle_timeout", "Upstream stream stopped responding") })?,
             };

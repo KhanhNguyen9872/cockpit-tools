@@ -1,5 +1,6 @@
 //! Preserve native Chat/legacy Completions options when the selected provider
 //! already speaks that protocol. OAuth routes still use the Responses adapter.
+use crate::modules::codex_native_api::deadline::{self, Deadline};
 use super::{
     contract::{ServiceError, WireApi},
     diagnostics::transport_failure,
@@ -120,7 +121,7 @@ async fn forward_with_policy(
         let mut stop = state.stop.clone();
         let canonical = tokio::select! {
             _ = stop.wait() => Err(stopping_error()),
-            result = tokio::time::timeout_at(deadline, super::upstream::raw_stream(&state, response, policy.idle_timeout)) => result.map_err(|_| super::retry::total_timeout()).and_then(|value| value),
+            result = deadline::timeout_at(deadline, super::upstream::raw_stream(&state, response, policy.idle_timeout)) => result.map_err(|_| super::retry::total_timeout()).and_then(|value| value),
         };
         let canonical = match canonical {
             Ok(value) => value,
@@ -175,7 +176,7 @@ async fn forward_with_policy(
             state: state.clone(),
             source,
             tracker,
-            decoder: SseDecoder::new(state.options.max_event_bytes),
+            decoder: SseDecoder::new(state.options.max_provider_event_bytes),
             usage: None,
             terminal: false,
             finished: false,
@@ -196,9 +197,9 @@ async fn forward_with_policy(
                 let mut stop = current.state.stop.clone();
                 let next = tokio::select! {
                     _ = stop.wait() => Err(stopping_error()),
-                    _ = tokio::time::sleep_until(current.deadline) => Err(super::retry::total_timeout()),
-                    _ = tokio::time::sleep_until(current.idle_deadline) => Err(ServiceError::new(504,"upstream_idle_timeout","Upstream stream stopped responding")),
-                    _ = tokio::time::sleep_until(current.keepalive_deadline), if !current.keepalive.is_zero() => {
+                    _ = deadline::sleep_until(current.deadline) => Err(super::retry::total_timeout()),
+                    _ = deadline::sleep_until(current.idle_deadline) => Err(ServiceError::new(504,"upstream_idle_timeout","Upstream stream stopped responding")),
+                    _ = deadline::sleep_until(current.keepalive_deadline), if !current.keepalive.is_zero() => {
                         current.keepalive_deadline = tokio::time::Instant::now() + current.keepalive;
                         return Some((Ok::<_, std::io::Error>(Bytes::from_static(b": keep-alive\n\n")), current));
                     },
@@ -285,7 +286,7 @@ async fn forward_with_policy(
             let mut stop = state.stop.clone();
             let result = tokio::select! {
                 _ = stop.wait() => Err(stopping_error()),
-                _ = tokio::time::sleep_until(deadline) => Err(super::retry::total_timeout()),
+                _ = deadline::sleep_until(deadline) => Err(super::retry::total_timeout()),
                 value = tokio::time::timeout(policy.idle_timeout, source.next()) => value
                     .map_err(|_| ServiceError::new(504, "upstream_idle_timeout", "Upstream response stopped responding")),
             };
@@ -414,7 +415,7 @@ struct StreamState {
     finished: bool,
     idle: std::time::Duration,
     idle_deadline: tokio::time::Instant,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     keepalive: std::time::Duration,
     keepalive_deadline: tokio::time::Instant,
     finished_choices: BTreeSet<u64>,

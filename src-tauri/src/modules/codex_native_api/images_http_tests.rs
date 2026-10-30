@@ -23,6 +23,8 @@ use super::super::{contract::*, start, Handle, Options};
 
 #[path = "images_batch_deadline_tests.rs"]
 mod batch_deadline_tests;
+#[path = "go_limits_images_tests.rs"]
+mod go_limits_tests;
 
 #[path = "images_credentials_retry_tests.rs"]
 mod credentials_retry_tests;
@@ -851,20 +853,27 @@ async fn later_image_failure_never_switches_owner_after_an_image_completed() {
     cleanup(handle, upstream, root).await;
 }
 
+fn oauth_image_completion_event() -> Value {
+    json!({"type":"response.completed","response":{"id":"timeout-image","status":"completed","output":[{"type":"image_generation_call","result":"AA=="}]}})
+}
+fn oauth_image_completion() -> axum::response::Response {
+    ([("content-type", "text/event-stream")], format!("data: {}\n\n", oauth_image_completion_event())).into_response()
+}
+
 #[tokio::test]
 async fn image_headers_use_image_open_timeout_instead_of_text_timeout() {
     let calls = Arc::new(AtomicUsize::new(0));
     let app = Router::new()
         .route(
-            "/v1/images/generations",
+            "/v1/responses",
             post(|State(calls): State<Arc<AtomicUsize>>| async move {
                 calls.fetch_add(1, Ordering::SeqCst);
                 tokio::time::sleep(Duration::from_millis(90)).await;
-                Json(json!({"data":[{"b64_json":"AA=="}]}))
+                oauth_image_completion()
             }),
         )
         .with_state(calls.clone());
-    let (handle, host, upstream, root) = fixture(app, false, false).await;
+    let (handle, host, upstream, root) = fixture(app, true, false).await;
     {
         let mut policy = host.policy.lock().unwrap();
         policy.open_timeout = Duration::from_millis(20);
@@ -902,21 +911,21 @@ async fn image_headers_use_image_open_timeout_instead_of_text_timeout() {
 #[tokio::test]
 async fn image_body_uses_image_idle_timeout_independently_of_text_idle() {
     let app = Router::new().route(
-        "/v1/images/generations",
+        "/v1/responses",
         post(|| async {
             let first =
-                stream::once(async { Ok::<_, std::io::Error>(Bytes::from_static(b"{\"data\":")) });
+                stream::once(async { Ok::<_, std::io::Error>(Bytes::from_static(b"data: {\"type\":\"response.created\",\"response\":{\"id\":\"timeout-image\",\"status\":\"in_progress\"}}\n\n")) });
             let tail = stream::once(async {
                 tokio::time::sleep(Duration::from_millis(100)).await;
-                Ok::<_, std::io::Error>(Bytes::from_static(b"[{\"b64_json\":\"AA==\"}]}"))
+                Ok::<_, std::io::Error>(Bytes::from(format!("data: {}\n\n", oauth_image_completion_event())))
             });
             (
-                [("content-type", "application/json")],
+                [("content-type", "text/event-stream")],
                 Body::from_stream(first.chain(tail)),
             )
         }),
     );
-    let (handle, host, upstream, root) = fixture(app, false, false).await;
+    let (handle, host, upstream, root) = fixture(app, true, false).await;
     {
         let mut policy = host.policy.lock().unwrap();
         policy.idle_timeout = Duration::from_millis(20);
@@ -955,15 +964,15 @@ async fn image_stream_open_attempts_include_first_attempt_and_have_their_own_bud
     let calls = Arc::new(AtomicUsize::new(0));
     let app = Router::new()
         .route(
-            "/v1/images/generations",
+            "/v1/responses",
             post(|State(calls): State<Arc<AtomicUsize>>| async move {
                 calls.fetch_add(1, Ordering::SeqCst);
                 tokio::time::sleep(Duration::from_millis(200)).await;
-                Json(json!({"data":[{"b64_json":"AA=="}]}))
+                oauth_image_completion()
             }),
         )
         .with_state(calls.clone());
-    let (handle, host, upstream, root) = fixture(app, false, false).await;
+    let (handle, host, upstream, root) = fixture(app, true, false).await;
     {
         let mut policy = host.policy.lock().unwrap();
         policy.image_open_timeout = Duration::from_millis(30);
@@ -990,7 +999,8 @@ async fn image_stream_open_attempts_include_first_attempt_and_have_their_own_bud
         .unwrap();
     assert_eq!(response.status(), 504);
     let _: Value = response.json().await.unwrap();
-    assert_eq!(calls.load(Ordering::SeqCst), 4);
+    // OAuth streams upstream even when the caller collects JSON.
+    assert_eq!(calls.load(Ordering::SeqCst), 6);
     assert_eq!(host.capacity.available_permits(), 1);
     cleanup(handle, upstream, root).await;
 }
@@ -1092,16 +1102,16 @@ async fn exhausted_image_stream_open_budget_can_retry_an_alternate_before_output
     let calls = Arc::new(AtomicUsize::new(0));
     let app = Router::new()
         .route(
-            "/v1/images/generations",
+            "/v1/responses",
             post(|State(calls): State<Arc<AtomicUsize>>| async move {
                 if calls.fetch_add(1, Ordering::SeqCst) < 2 {
                     tokio::time::sleep(Duration::from_millis(200)).await;
                 }
-                Json(json!({"data":[{"b64_json":"AA=="}]}))
+                oauth_image_completion()
             }),
         )
         .with_state(calls.clone());
-    let (handle, host, upstream, root) = fixture(app, false, false).await;
+    let (handle, host, upstream, root) = fixture(app, true, false).await;
     {
         let mut policy = host.policy.lock().unwrap();
         policy.image_open_timeout = Duration::from_millis(30);

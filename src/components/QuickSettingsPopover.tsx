@@ -785,6 +785,13 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
     }
   };
 
+  useEffect(() => {
+    if (!isOpen || type !== 'codex') return;
+    const reload = () => { void loadConfig(); };
+    window.addEventListener('config-updated', reload);
+    return () => window.removeEventListener('config-updated', reload);
+  }, [isOpen, type]);
+
   const getRefreshKeyForType = (t: QuickSettingsType): keyof GeneralConfig => {
     switch (t) {
       case 'antigravity': return 'auto_refresh_minutes';

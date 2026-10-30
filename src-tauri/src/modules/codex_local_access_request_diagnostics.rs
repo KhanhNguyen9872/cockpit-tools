@@ -112,7 +112,7 @@ fn queue_local_access_usage_event(event: CodexLocalAccessUsageEvent) {
         let result = tauri::async_runtime::spawn_blocking(move || {
             let (_guard, conn) = open_local_access_logs_db_for_write()?;
             if epoch == REQUEST_LOG_WRITE_EPOCH.load(Ordering::SeqCst) {
-                insert_local_access_usage_event(&conn, &event)?;
+                insert_live_local_access_usage_event(&conn, &event)?;
             }
             Ok::<_, String>(())
         })
@@ -733,7 +733,7 @@ fn apply_request_diagnostic_write(
     match write {
         RequestDiagnosticWrite::Usage(event, epoch) => {
             if epoch == REQUEST_LOG_WRITE_EPOCH.load(Ordering::SeqCst) {
-                insert_local_access_usage_event(conn, &event)?;
+                insert_live_local_access_usage_event(conn, &event)?;
             }
         }
         RequestDiagnosticWrite::Detail(mut detail, payload_epoch, log_epoch) => {
@@ -743,7 +743,9 @@ fn apply_request_diagnostic_write(
             if payload_epoch != REQUEST_DIAGNOSTICS_PAYLOAD_EPOCH.load(Ordering::SeqCst) {
                 detail.payloads.clear();
             }
+            let request_id = detail.request_id.clone();
             insert_request_diagnostic(conn, *detail)?;
+            refresh_live_request_summary(conn, &request_id);
         }
     }
     Ok(())

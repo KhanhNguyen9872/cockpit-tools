@@ -6,7 +6,8 @@ import { getCodexQuotaClass } from '../src/types/codex';
 import { getGrokQuotaClass } from '../src/types/grok';
 
 const source = readFileSync(new URL('../src-tauri/src/modules/codex_app_injection.rs', import.meta.url), 'utf8');
-const usageLabels = JSON.parse(readFileSync(new URL('../src/locales/en.json', import.meta.url), 'utf8')).common.codexUsage;
+const translations = JSON.parse(readFileSync(new URL('../src/locales/en.json', import.meta.url), 'utf8'));
+const usageLabels = translations.common.codexUsage;
 const statuslineSource = readFileSync(new URL('../src-tauri/src/modules/codex_app_injection_statusline.rs', import.meta.url), 'utf8');
 type ScriptKind = 'injection_script' | 'deepseek_balance_injection_script';
 const values: Record<string, unknown> = {
@@ -29,6 +30,10 @@ const values: Record<string, unknown> = {
   usage_state: {}, refresh_error: null,
   usage_labels: {
     ...usageLabels,
+    requestTier:translations.codex.apiService.logs.requestedTier,responseTier:translations.codex.apiService.logs.responseTier,
+    legacyTier:translations.codex.apiService.logs.legacyTier,tierHint:translations.codex.apiService.logs.serviceTierHint,
+    tierFast:translations.codex.speed.fast,tierUltrafast:translations.codex.speed.ultrafast,tierStandard:translations.codex.speed.standard,
+    tierAuto:translations.codex.contextOverride.automatic,tierUnknown:translations.common.requestProxy.unknown,
     title: 'Quota and usage', session: 'Current session', speed: 'Output speed', cache: 'Cache hits', cacheShort: 'Cache',
     speedHint: 'Current chat output tokens divided by post-first-response generation time', cacheHint: 'Cached input divided by input tokens',
     aggregateHint: 'Sum of account percentages without plan capacity weighting', waiting: 'Waiting for session tokens',
@@ -284,7 +289,7 @@ function dropdown(model: string, hidden = false) {
   dropdown.setAttribute('class', '_ModelPickerDropdownContent_test');
   dropdown.hidden = hidden;
   const row = new Element();
-  row.setAttribute('data-model-picker-model-row', 'true');
+  row.setAttribute('class', '_ViewToggleModelLabel_5d7qv_2');
   row.textContent = model;
   dropdown.appendChild(row);
   return dropdown;
@@ -365,11 +370,151 @@ test('quota badge reads visible DeepSeek and updates the model, badge, and obser
 });
 
 test('only a visible picker dropdown can supply a model when the current trigger is a placeholder', () => {
-  const h = harness('injection_script', [composer('Select effort')]);
+  const active = composer('Select effort');
+  active.trigger.setAttribute('aria-expanded', 'true');
+  const h = harness('injection_script', [active]);
   h.body.appendChild(dropdown('deepseek-v4-pro', true));
   h.body.appendChild(dropdown('grok-4.6'));
   assert.equal(h.evaluate().selectedModel, 'grok-4.6');
   assert.match(h.host().textContent, /Build 90%/);
+});
+
+test('multiple visible composers follow focus and preserve that owner while the usage dialog is focused', () => {
+  const main = composer('gpt-6-sol');
+  const side = composer('gpt-6-astra', false, 500, secondThread);
+  const h = harness('injection_script', [main, side]);
+  h.evaluate();
+  side.editor.focus();
+  h.dispatch('focusin');
+  assert.equal(h.root().threadId, secondThread);
+  assert.equal(h.host().style.top, '512px');
+  const result = h.evaluate();
+  assert.equal(result.selectedModel, 'gpt-6-astra');
+  h.host().click();
+  assert.equal(h.root().threadId, secondThread);
+  assert.equal(h.root().quotaDetailsOpen, true);
+  main.editor.focus();
+  h.dispatch('focusin');
+  assert.equal(h.root().threadId, firstThread);
+  assert.equal(h.root().quotaDetailsOpen, false);
+});
+
+test('standalone DeepSeek balance follows the active composer without touching native controls', () => {
+  const main = composer('deepseek-v4-pro');
+  const side = composer('deepseek-v4-pro', false, 500, secondThread);
+  const h = harness('deepseek_balance_injection_script', [main, side]);
+  h.evaluate();
+  const original = side.card.innerHTML;
+  side.editor.focus();
+  h.dispatch('focusin');
+  assert.equal(h.root().card, side.card);
+  assert.equal(h.host().style.top, '512px');
+  assert.equal(side.card.innerHTML, original);
+  main.editor.focus();
+  h.dispatch('focusin');
+  assert.equal(h.root().card, main.card);
+  assert.equal(h.host().style.top, '912px');
+});
+
+test('an open native portal selects its composer and cannot leak model or speed into a focused sibling', () => {
+  const main = composer('Select effort');
+  const side = composer('6 Astra', false, 500, secondThread);
+  const h = harness('injection_script', [main, side]);
+  side.trigger.setAttribute('data-state', 'open');
+  const menu = dropdown('6 Astra');
+  const fast = new Element('span');
+  fast.setAttribute('data-fast-mode-enabled', 'true');
+  const ultra = new Element('svg');
+  ultra.setAttribute('class', '_UltrafastIcon_5d7qv_2');
+  fast.appendChild(ultra);
+  menu.appendChild(fast);
+  h.body.appendChild(menu);
+  const usage = sessionUsage(h.now());
+  usage.__binding.model = 'gpt-6-astra';
+  menu.focus();
+  let result = h.evaluate({ usage_state: usage });
+  assert.equal(result.threadId, secondThread);
+  assert.equal(result.usageSelection.model, 'gpt-6-astra');
+  assert.equal(result.usageSelection.serviceTier, 'ultrafast');
+  main.editor.focus();
+  result = h.evaluate({ usage_state: usage });
+  assert.equal(result.threadId, firstThread);
+  assert.equal(result.selectedModel, null);
+  assert.equal(result.usageSelection.serviceTier, 'default');
+});
+
+test('ambiguous native menus require the current open trigger aria-controls identity', () => {
+  const active = composer('Select effort');
+  active.trigger.setAttribute('aria-expanded', 'true');
+  const h = harness('injection_script', [active]);
+  const first = dropdown('grok-4.6');
+  first.setAttribute('id', 'other-menu');
+  const current = dropdown('6 Astra');
+  current.setAttribute('id', 'current-menu');
+  h.body.appendChild(first);
+  h.body.appendChild(current);
+  assert.equal(h.evaluate().selectedModel, null);
+  active.trigger.setAttribute('aria-controls', 'current-menu');
+  assert.equal(h.evaluate().selectedModel, '6 Astra');
+  active.trigger.setAttribute('aria-expanded', 'false');
+  assert.equal(h.evaluate().selectedModel, null);
+});
+
+test('current Astra three-tier menu reports Standard, Fast and Ultrafast without changing session means', () => {
+  const active = composer('6 Astra');
+  active.trigger.setAttribute('aria-expanded', 'true');
+  const h = harness('injection_script', [active]);
+  const menu = dropdown('6 Astra');
+  const toggle = new Element('span');
+  toggle.setAttribute('class', '_FastModeToggleContent_5d7qv_2');
+  menu.appendChild(toggle);
+  h.body.appendChild(menu);
+  const usage = sessionUsage(h.now());
+  usage.__binding.model = 'gpt-6-astra';
+  usage.__binding.serviceTier = 'priority';
+  for (const tier of ['ultrafast', 'priority', null]) {
+    toggle.textContent = '';
+    toggle.setAttribute('data-fast-mode-enabled', String(tier !== null));
+    if (tier === 'ultrafast') {
+      const icon = new Element('svg');
+      icon.setAttribute('class', '_UltrafastIcon_5d7qv_2');
+      toggle.appendChild(icon);
+    }
+    const result = h.evaluate({ usage_state: usage });
+    assert.equal(result.usageSelection.model, 'gpt-6-astra');
+    assert.equal(result.usageSelection.serviceTier, tier);
+    assert.equal(metric(h.host(), 'speed').textContent, '↗50.0 tok/s');
+    assert.equal(metric(h.host(), 'cache').textContent, 'Cache 80.0%');
+  }
+});
+
+test('an explicit empty composer conversation ID never inherits the selected sidebar conversation', () => {
+  const active = composer('6 Astra');
+  active.conversation.setAttribute('data-above-composer-conversation-id', '');
+  const h = harness('injection_script', [active]);
+  const sidebar = new Element();
+  sidebar.setAttribute('data-app-action-sidebar-thread-selected', 'true');
+  sidebar.setAttribute('data-app-action-sidebar-thread-id', secondThread);
+  h.body.appendChild(sidebar);
+  const result = h.evaluate();
+  assert.equal(result.threadId, null);
+  active.conversation.removeAttribute('data-above-composer-conversation-id');
+  active.conversation.setAttribute('data-above-composer-portal', 'true');
+  assert.equal(h.evaluate().threadId, null, 'native pending composer omits its unresolved ID but keeps the portal');
+});
+
+test('a reused composer with an unresolved new conversation clears the prior model and metrics', () => {
+  const active = composer('deepseek-v4-pro');
+  const h = harness('injection_script', [active]);
+  h.evaluate({ usage_state: sessionUsage(h.now()) });
+  assert.match(h.host().textContent, /Balance/);
+  active.trigger.textContent = 'Select effort';
+  active.conversation.setAttribute('data-above-composer-conversation-id', 'local:client-new-thread:pending');
+  const result = h.evaluate({ usage_state: sessionUsage(h.now()) });
+  assert.equal(result.threadId, null);
+  assert.equal(result.selectedModel, null);
+  assert.equal(h.root().visibleModel, null);
+  assert.doesNotMatch(h.host().textContent, /Balance|50\.0/);
 });
 
 test('placeholder text retains the same composer model briefly, then returns to the host fallback', () => {
@@ -451,11 +596,14 @@ test('composer account status keeps uppercase plan rows and distinguishes offici
   } finally { Object.assign(values, previous); }
 });
 
-function sessionUsage(now: number, threadId = firstThread) {
+function sessionUsage(now: number, threadId = firstThread): Record<string, any> {
   return {
+    __binding:{binding:'fixture-service-key-instance',model:'gpt-6-sol',serviceTier:'default'},
     [threadId]: {
       threadId, currentTurnId: 'active-turn',
-      outputSpeed: { threadId, tokensPerSecond: 50, samples: 2, observedAtMs: now - 10000 } as { threadId: string; tokensPerSecond: number; samples: number; observedAtMs: number } | undefined,
+      outputSpeed: { threadId,binding:'fixture-service-key-instance', tokensPerSecond:50, samples:2, observedAtMs:now - 10000,avgCacheHitRate:.8,totalInputTokens:1000,totalCachedTokens:800,
+        latestTokensPerSecond:50,latestObservedAtMs:now - 10000,requestId:'latest-'+threadId,model:'gpt-6-sol',
+        selection:{model:'gpt-6-sol',serviceTier:'default'},latestInputTokens:1000,latestCachedTokens:800 },
       events: [
         { t: new Date(now - 20000).toISOString(), turn_id: 'active-turn', turn_output_tokens: 100, input_tokens: 100, cached_input_tokens: 80 },
         { t: new Date(now - 10000).toISOString(), turn_id: 'active-turn', turn_output_tokens: 600, input_tokens: 900, cached_input_tokens: 720 },
@@ -472,14 +620,14 @@ test('one native button presents a shared status strip with distinct labels, val
   assert.equal(h.host().getAttribute('aria-haspopup'), 'dialog');
   assert.equal(h.host().querySelectorAll('button').length, 0);
   const metrics = h.host().querySelectorAll('[data-cockpit-quota-metric]');
-  assert.deepEqual(metrics.map(metric => metric.textContent), ['5h 75%', 'Week 50%', '↗50 tok/s', 'Cache 80%']);
+  assert.deepEqual(metrics.map(metric => metric.textContent), ['5h 75%', 'Week 50%', '↗50.0 tok/s', 'Cache 80.0%']);
   assert.ok(metrics.every(metric => metric.tagName === 'span' && metric.getAttribute('title')));
-  assert.deepEqual(metrics.map(metric => metric.querySelector('[data-cockpit-metric-value]')?.textContent), ['75%', '50%', '50', '80%']);
+  assert.deepEqual(metrics.map(metric => metric.querySelector('[data-cockpit-metric-value]')?.textContent), ['75%', '50%', '50.0', '80.0%']);
   assert.deepEqual(metrics.map(metric => metric.querySelector('[data-cockpit-metric-label]')?.textContent.trim() || null), ['5h', 'Week', null, 'Cache']);
   const speed = metrics[2];
   assert.equal(speed.querySelector('[data-cockpit-metric-unit]')!.textContent.trim(), 'tok/s');
   assert.equal(speed.querySelector('[data-cockpit-metric-icon]')!.getAttribute('aria-hidden'), 'true');
-  assert.equal(speed.getAttribute('aria-label'), '50 tok/s');
+  assert.equal(speed.getAttribute('aria-label'), '50.0 tok/s');
   assert.equal(h.host().querySelectorAll('[data-cockpit-quota-refresh]').length, 0);
   assert.doesNotMatch(h.host().textContent, /Accounts|·/);
   const css = h.head.querySelector('[data-cockpit-quota-style]')!.textContent;
@@ -614,7 +762,7 @@ test('unlinked current chat metrics stay unknown and request records can still u
   const h = harness('injection_script', [active]);
   h.evaluate({ usage_state: sessionUsage(h.now(), secondThread) });
   h.host().click();
-  assert.match(h.details().querySelector('.session-metrics')!.textContent, /Output speed—.*Cache hits—/);
+  assert.match(h.details().querySelector('.session-metrics')!.textContent, /Average output speed—.*Average cache hits—/);
   dialogAction(h, 'tab', 'logs');
   assert.equal(dialogQuery(h).threadId, null);
   dialogResponse(h, { requests: { rows: [], nextCursor: null } });
@@ -657,7 +805,7 @@ test('overview uses real quotas, current chat metrics and service totals without
   });
   assert.equal(h.details().querySelectorAll('.business-section').length, 3);
   assert.match(h.details().querySelector('.quota-block')!.textContent, /lowercase-custom3143%211%/);
-  assert.match(h.details().querySelector('.session-metrics')!.textContent, /verified-current-modelxhigh.*50\s?tok\/s.*80\.0%.*900\s?ms/);
+  assert.match(h.details().querySelector('.session-metrics')!.textContent, /verified-current-modelxhigh.*50\.0\s?tok\/s.*80\.0%.*900\s?ms/);
   assert.match(h.details().querySelector('.stats-grid')!.textContent, /Requests6Success rate 83%Total tokens4\.6KEst\. value\$1\.28Avg\. latency1\.50\s?s/);
   assert.equal(h.details().querySelectorAll('.request-row').length, 0);
   assert.doesNotMatch(h.details().textContent, /not-an-overview-card|Recent account|Loading/);
@@ -902,15 +1050,26 @@ test('small nonzero estimated values retain API service precision instead of bec
   }
 });
 
-test('a timed-out data read remains visible for explicit retry instead of silently restarting', () => {
+test('a failed read shows retry feedback, retries finitely and still permits explicit retry', () => {
   const h = harness('injection_script',[composer('gpt-6-sol')]);
   h.evaluate();
   h.host().click();
-  const failed = dialogQuery(h);
-  h.advance(6000);
+  let failed = dialogQuery(h);
   dialogResponse(h,{error:true},failed);
   assert.match(h.details().textContent,/Could not load data/);
-  h.advance(10000);
+  for (const delay of [2000,5000,10000]) {
+    h.advance(delay - 1);
+    h.root().render();
+    assert.equal(dialogQuery(h).requestToken,failed.requestToken);
+    h.advance(1);
+    h.root().render();
+    const retry = dialogQuery(h);
+    assert.notEqual(retry.requestToken,failed.requestToken);
+    assert.doesNotMatch(h.details().textContent,/Could not load data/);
+    dialogResponse(h,{error:true},retry);
+    failed = retry;
+  }
+  h.advance(60000);
   h.root().render();
   assert.equal(dialogQuery(h).requestToken,failed.requestToken);
   assert.ok(h.details().querySelector('[data-cockpit-dialog-action="retry"]'));
@@ -919,7 +1078,29 @@ test('a timed-out data read remains visible for explicit retry instead of silent
   assert.doesNotMatch(h.details().textContent,/Could not load data/);
 });
 
-test('request tabs support keyboard navigation with stable dialog size and reset the page on return', () => {
+test('host heartbeat recovery refreshes failed dialog reads and rejects late former replies', () => {
+  const h = harness('injection_script',[composer('gpt-6-sol')]);
+  h.evaluate({usage_state:sessionUsage(h.now())});
+  h.host().click();
+  dialogResponse(h,{summary:{requests:37}});
+  h.details().querySelector('[data-cockpit-quota-refresh]')!.click();
+  const failed = dialogQuery(h);
+  dialogResponse(h,{error:true},failed);
+  h.advance(9000);
+  h.intervals.forEach(tick => tick());
+  assert.equal(h.root().hostAvailable,false);
+  assert.match(h.details().textContent,/Host unavailable/);
+  h.evaluate({usage_state:sessionUsage(h.now())});
+  const retry = dialogQuery(h);
+  assert.notEqual(retry.requestToken,failed.requestToken);
+  assert.equal(h.root().dialogState.summary.requests,37);
+  dialogResponse(h,{summary:{requests:999}},failed);
+  assert.equal(h.root().dialogState.summary.requests,37);
+  dialogResponse(h,{summary:{requests:38}},retry);
+  assert.equal(h.root().dialogState.summary.requests,38);
+});
+
+test('request tabs support keyboard navigation with stable dialog size and retain verified rows during refresh on return', () => {
   const h = harness('injection_script', [composer('gpt-6-sol')]);
   h.evaluate();
   h.host().click();
@@ -942,7 +1123,7 @@ test('request tabs support keyboard navigation with stable dialog size and reset
   assert.equal(h.details(), details);
   assert.equal(dialogQuery(h).cursor, null);
   assert.equal(h.root().dialogState.paged, false);
-  assert.equal(h.details().querySelectorAll('.request-row').length, 0);
+  assert.equal(h.details().querySelectorAll('.request-row').length, 2);
   assert.equal(h.details().querySelector('.request-scroll')!.scrollTop, 0);
 });
 
@@ -953,7 +1134,7 @@ test('session information rejects another thread even in an otherwise matching h
   dialogResponse(h, { session: { threadId: secondThread, model: 'wrong-conversation-model', firstResponseMs: 45 } });
   const session = h.details().querySelector('.session-metrics')!;
   assert.doesNotMatch(session.textContent, /wrong-conversation-model|0\.05s/);
-  assert.match(session.textContent, /Model—.*Output speed50\s?tok\/s.*Cache hits80\.0%.*First response—/);
+  assert.match(session.textContent, /Model—.*Average output speed50\.0\s?tok\/s.*Average cache hits80\.0%.*First response—/);
 });
 
 test('dialog rejects success and error responses with mismatched token, chat, scope, period, cursor or view', () => {
@@ -1113,7 +1294,7 @@ test('click opens shared details, close and Escape close them and restore trigge
   h.host().click();
   assert.equal(h.details().style.display, 'flex');
   assert.equal(h.details().getAttribute('role'), 'dialog');
-  assert.match(h.details().textContent, /Current session.*Output speed50\s?tok\/s.*Cache hits80\.0%/);
+  assert.match(h.details().textContent, /Current session.*Average output speed50\.0\s?tok\/s.*Average cache hits80\.0%/);
   assert.equal(h.details().querySelector('[data-cockpit-quota-close]')!.focused, true);
   h.details().querySelector('[data-cockpit-quota-close]')!.click();
   assert.equal(h.details().style.display, 'none');
@@ -1145,9 +1326,10 @@ test('outside mouse, touch and pen presses close the dialog without consuming th
     assert.equal(h.host().focused,false);
     outside.click();
     assert.equal(clicks,1);
-    assert.equal(h.root().dialogState.pending.requestToken,pending.requestToken,'closing retains the in-flight query');
+    assert.equal(h.root().dialogState.pending,null,'closing releases the in-flight query');
     h.host().click();
     assert.equal(h.details().style.display,'flex');
+    assert.notEqual(dialogQuery(h).requestToken,pending.requestToken);
   }
 });
 
@@ -1190,7 +1372,7 @@ test('usage details retain breakdowns and controls without repeated totals or ex
     assert.match(css, /\.plan-table[^}]*text-align:center/);
     assert.doesNotMatch(details.textContent, /5h75%|Week50%/);
     assert.match(h.host().textContent, /5h 75%Week 50%/);
-    assert.match(details.textContent, /Current session.*Output speed.*Cache hits/);
+    assert.match(details.textContent, /Current session.*Average output speed.*Average cache hits/);
     assert.ok(details.querySelector('[data-cockpit-quota-close]'));
     assert.ok(details.querySelector('[data-cockpit-quota-refresh]'));
     for (const key of ['aggregateHint', 'speedHint', 'cacheHint', 'waiting'] as const) {
@@ -1210,20 +1392,20 @@ test('switching the current composer thread immediately clears previous metrics 
   assert.equal(h.root().threadId, secondThread);
   assert.equal(h.details().style.display, 'none');
   assert.match(h.host().textContent, /— tok\/sCache —/);
-  assert.doesNotMatch(h.host().textContent, /50\s?tok\/s|Cache 80%/);
+  assert.doesNotMatch(h.host().textContent, /50\.0\s?tok\/s|Cache 80.0%/);
   active.conversation.setAttribute('data-above-composer-conversation-id', `local:client-new-thread:${secondThread}`);
   h.root().render();
   assert.equal(h.root().threadId, '');
   assert.match(h.host().textContent, /— tok\/sCache —/);
 });
 
-test('a new turn clears prior-turn cache but retains independently measured current-chat speed', () => {
+test('a new or stopped turn retains verified session average speed and cache', () => {
   const h = harness('injection_script', [composer('gpt-6-sol')]);
   const usage = sessionUsage(h.now());
   h.evaluate({ usage_state: usage });
   usage[firstThread].currentTurnId = 'new-turn';
   h.evaluate({ usage_state: usage });
-  assert.match(h.host().textContent, /50 tok\/sCache —/);
+  assert.match(h.host().textContent, /50\.0 tok\/sCache 80.0%/);
 });
 
 test('toolbar gap shrinks by removing cache before speed and restores all metrics when widened', () => {
@@ -1236,12 +1418,12 @@ test('toolbar gap shrinks by removing cache before speed and restores all metric
     h.root().render();
   };
   assert.equal(h.host().querySelectorAll('[data-cockpit-quota-metric]').length, 4);
-  shrinkGap(200);
-  assert.deepEqual(h.host().querySelectorAll('[data-cockpit-quota-metric]').map(node => node.textContent), ['5h 75%', 'Week 50%', '↗50 tok/s']);
+  shrinkGap(220);
+  assert.deepEqual(h.host().querySelectorAll('[data-cockpit-quota-metric]').map(node => node.textContent), ['5h 75%', 'Week 50%', '↗50.0 tok/s']);
   shrinkGap(140);
   assert.deepEqual(h.host().querySelectorAll('[data-cockpit-quota-metric]').map(node => node.textContent), ['5h 75%', 'Week 50%']);
   h.host().click();
-  assert.match(h.details().textContent, /Output speed50\s?tok\/s.*Cache hits80\.0%/);
+  assert.match(h.details().textContent, /Average output speed50\.0\s?tok\/s.*Average cache hits80\.0%/);
   shrinkGap(50);
   assert.equal(h.host().style.display, 'none');
   assert.equal(h.details().style.display, 'none');
@@ -1284,7 +1466,7 @@ test('actual status strip width rather than composer width decides placement for
   assert.equal(h.host().querySelectorAll('[data-cockpit-quota-metric]').length, 2);
   assert.match(h.host().textContent, /5h 123456%/);
   h.host().click();
-  assert.match(h.details().textContent, /Output speed50\s?tok\/s.*Cache hits80\.0%/);
+  assert.match(h.details().textContent, /Average output speed50\.0\s?tok\/s.*Average cache hits80\.0%/);
 });
 
 test('host disconnect ends refresh loading and keeps the dialog usable until reconnect', () => {
@@ -1320,11 +1502,11 @@ test('repeat injection reuses nodes, observers and handlers, and Escape renders 
   assert.equal(h.body.querySelectorAll('[data-cockpit-quota-details]').length, 1);
   assert.equal(h.head.querySelectorAll('[data-cockpit-quota-style]').length, 1);
   assert.equal(h.root().observer, observer);
-  for (const name of ['resize', 'scroll', 'keydown', 'pointerdown']) assert.equal(h.handlers.get(name)!.size, 1);
+  for (const name of ['resize', 'scroll', 'keydown', 'pointerdown', 'focusin']) assert.equal(h.handlers.get(name)!.size, 1);
   assert.equal(h.intervals.size, 1);
   h.host().click();
   h.dispatch('keydown', { key: 'Escape' });
-  assert.match(h.host().textContent, /5h 42%.*50\s?tok\/s.*Cache 80%/);
+  assert.match(h.host().textContent, /5h 42%.*50\.0\s?tok\/s.*Cache 80.0%/);
   h.host().click();
   assert.match(h.details().textContent, /PLUS142%50%/);
   assert.doesNotMatch(h.details().textContent, /5h42%/);
@@ -1350,14 +1532,18 @@ test('switching to standalone DeepSeek and back cleans up status line handlers a
   h.evaluate();
   assert.equal(h.handlers.get('keydown')!.size, 1);
   assert.equal(h.handlers.get('pointerdown')!.size, 1);
+  assert.equal(h.handlers.get('focusin')!.size, 1);
   h.evaluateAs('deepseek_balance_injection_script');
   assert.equal(h.handlers.get('keydown')!.size, 0);
   assert.equal(h.handlers.get('pointerdown')!.size, 0);
+  assert.equal(h.handlers.get('focusin')!.size, 1, 'only the active DeepSeek renderer retains a focus listener');
   assert.equal(h.root().keyHandler, undefined);
   assert.equal(h.root().outsidePointerHandler, undefined);
+  assert.equal(h.root().focusHandler, undefined);
   assert.equal(h.body.querySelector('[data-cockpit-quota-footer]'), null);
   h.evaluate();
   assert.equal(h.handlers.get('keydown')!.size, 1);
+  assert.equal(h.handlers.get('focusin')!.size, 1);
   assert.deepEqual(h.root().layoutObserver.targets, [active.footer, active.permissions, active.trigger]);
   assert.equal(h.host().parentElement, h.body);
   assert.equal(h.body.querySelector('[data-cockpit-deepseek-balance]'), null);
@@ -1479,12 +1665,12 @@ test('aged throughput retains its speed styling and marks its age only in the hi
   const usage = sessionUsage(h.now());
   h.evaluate({ usage_state: usage });
   const speed = metric(h.host(), 'speed');
-  assert.equal(speed.textContent, '↗50 tok/s');
+  assert.equal(speed.textContent, '↗50.0 tok/s');
   assert.equal(speed.getAttribute('data-stale'), null);
   h.advance(121000);
   h.evaluate({ usage_state: usage });
   assert.equal(metric(h.host(), 'speed'), speed);
-  assert.equal(speed.textContent, '↗50 tok/s');
+  assert.equal(speed.textContent, '↗50.0 tok/s');
   assert.equal(speed.getAttribute('data-stale'), 'true');
   assert.match(speed.getAttribute('title')!, /Recent sample/);
   assertTone(speed);
@@ -1507,7 +1693,7 @@ test('normal quota values keep raw pool totals with account overview colors and 
   h.host().click();
   assert.equal(h.details().style.display, 'flex');
   assert.doesNotMatch(h.details().textContent, /5h295%|Week270%/);
-  assert.match(h.details().textContent, /Current session.*Output speed/);
+  assert.match(h.details().textContent, /Current session.*Average output speed/);
 });
 
 test('quota colors use the displayed totals independently of pool capacity or account count', () => {
@@ -1570,16 +1756,55 @@ test('cache values stay ordinary numbers for low, high and missing hit rates', (
   const h = harness('injection_script', [composer('gpt-6-sol')]);
   for (const cached of [0, 10, 20, 80, 150]) {
     const usage = sessionUsage(h.now());
-    usage[firstThread].events.forEach(event => { event.cached_input_tokens = event.input_tokens * cached / 100; });
+    usage[firstThread].outputSpeed.totalCachedTokens = 1000 * cached / 100;
     h.evaluate({ usage_state: usage });
     const cache = metric(h.host(), 'cache');
-    assert.equal(cache.querySelector('[data-cockpit-metric-value]')!.textContent, `${Math.min(cached, 100)}%`);
+    assert.equal(cache.querySelector('[data-cockpit-metric-value]')!.textContent, cached > 100 ? '—' : `${cached}.0%`);
     assertTone(cache);
     assertTone(metric(h.host(), 'speed'));
   }
   h.evaluate({ usage_state: {} });
   assert.equal(metric(h.host(), 'cache').textContent, 'Cache —');
   assertTone(metric(h.host(), 'cache'));
+});
+
+test('footer and overview cache percentages truncate to exactly one decimal without rounding', () => {
+  const h = harness('injection_script', [composer('gpt-6-sol')]);
+  for (const [input, cached, expected] of [
+    [1000, 997, '99.7%'],
+    [10000, 9999, '99.9%'],
+    [100000, 99999, '99.9%'],
+    [300, 299, '99.6%'],
+    [3, 1, '33.3%'],
+    [100, 29, '29.0%'],
+    [100000, 1, '0.0%'],
+    [1000, 0, '0.0%'],
+    [1000, 1000, '100.0%'],
+    [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1, '99.9%'],
+  ] as const) {
+    const usage = sessionUsage(h.now());
+    Object.assign(usage[firstThread].outputSpeed, { totalInputTokens: input, totalCachedTokens: cached });
+    h.evaluate({ usage_state: usage });
+    assert.equal(metric(h.host(), 'cache').querySelector('[data-cockpit-metric-value]')!.textContent, expected);
+    h.host().click();
+    assert.ok(h.details().textContent.includes('Average cache hits' + expected));
+    h.details().querySelector('[data-cockpit-quota-close]')!.click();
+  }
+});
+
+test('footer and overview output speeds truncate to exactly one decimal without rounding', () => {
+  const h = harness('injection_script', [composer('gpt-6-sol')]);
+  for (const [rate, expected] of [
+    [35, '35.0'], [35.79, '35.7'], [99.99, '99.9'], [0.09, '0.0'], [28.7, '28.7'],
+  ] as const) {
+    const usage = sessionUsage(h.now());
+    usage[firstThread].outputSpeed.tokensPerSecond = rate;
+    h.evaluate({ usage_state: usage });
+    assert.equal(metric(h.host(), 'speed').textContent, `↗${expected} tok/s`);
+    h.host().click();
+    assert.ok(h.details().textContent.replace(/\s/g, '').includes('Averageoutputspeed' + expected + 'tok/s'));
+    h.details().querySelector('[data-cockpit-quota-close]')!.click();
+  }
 });
 
 test('Grok uses its shared window for warning colors while DeepSeek balance stays uncolored', () => {
@@ -1694,8 +1919,8 @@ test('narrow toolbar hides cached nodes and restores the same objects without di
   h.evaluate({ usage_state: sessionUsage(h.now()) });
   const keys = ['five-hour', 'weekly', 'speed', 'cache'];
   const nodes = keys.map(key => metric(h.host(), key));
-  active.trigger.rect.left = 396;
-  active.trigger.rect.width = 504;
+  active.trigger.rect.left = 416;
+  active.trigger.rect.width = 484;
   h.root().render();
   assert.deepEqual(h.host().children, nodes.slice(0, 3));
   assert.equal(nodes[3].parentElement, null);
@@ -1726,7 +1951,7 @@ test('first metric mount has its warning state and no progress properties or ani
   assert.doesNotMatch(css, /data-cockpit-progress|cockpit-quota-fill|transition:\s*width/);
 });
 
-for (const oldVersion of [3, 4, 5, 6, 7, 8, 9, 10]) test(`upgrading v${oldVersion} injection replaces old styles and listeners with v11 exactly once`, () => {
+for (const oldVersion of [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) test(`upgrading v${oldVersion} injection replaces old styles and listeners with v14 exactly once`, () => {
   const h = harness('injection_script', [composer('gpt-6-sol')]);
   h.evaluate();
   const oldHost = h.host();
@@ -1734,7 +1959,7 @@ for (const oldVersion of [3, 4, 5, 6, 7, 8, 9, 10]) test(`upgrading v${oldVersio
   oldStyle.textContent = '[data-cockpit-progress]::before{width:var(--cockpit-quota-fill-width)}';
   h.root().statuslineVersion = oldVersion;
   h.evaluate({ five_hour: 30, five_hour_capacity: 300 });
-  assert.equal(h.root().statuslineVersion, 11);
+  assert.equal(h.root().statuslineVersion, 14);
   assert.notEqual(h.host(), oldHost);
   assert.equal(oldHost.parentElement, null);
   assert.equal(oldStyle.parentElement, null);
@@ -1746,7 +1971,7 @@ for (const oldVersion of [3, 4, 5, 6, 7, 8, 9, 10]) test(`upgrading v${oldVersio
   h.evaluate();
   assert.equal(h.host(), host);
   assert.equal(h.head.querySelector('[data-cockpit-quota-style]'), style);
-  for (const name of ['resize', 'scroll', 'keydown', 'pointerdown']) assert.equal(h.handlers.get(name)!.size, 1);
+  for (const name of ['resize', 'scroll', 'keydown', 'pointerdown', 'focusin']) assert.equal(h.handlers.get(name)!.size, 1);
   assert.equal(h.intervals.size, 1);
 });
 
@@ -1755,16 +1980,16 @@ test('statusline speed uses only verified measurements for the selected conversa
   const active = composer('gpt-6-sol');
   const h = harness('injection_script', [active]);
   const usage = { ...sessionUsage(h.now()), ...sessionUsage(h.now(), secondThread) };
-  usage[firstThread].outputSpeed = { threadId: firstThread, tokensPerSecond: 259 / 7.372, samples: 1, observedAtMs: h.now() };
-  usage[secondThread].outputSpeed = { threadId: secondThread, tokensPerSecond: 80, samples: 3, observedAtMs: h.now() };
+  Object.assign(usage[firstThread].outputSpeed,{tokensPerSecond:20,latestTokensPerSecond:259 / 7.372,latestObservedAtMs:h.now()});
+  Object.assign(usage[secondThread].outputSpeed,{tokensPerSecond:25,latestTokensPerSecond:80,latestObservedAtMs:h.now()});
   h.evaluate({ usage_state: usage });
-  assert.equal(metric(h.host(), 'speed').textContent, '↗35 tok/s', 'rollout intervals would incorrectly show 50');
+  assert.equal(metric(h.host(), 'speed').textContent, '↗20.0 tok/s', 'the session mean is independent of the last request');
   active.conversation.setAttribute('data-above-composer-conversation-id', secondThread);
   h.root().render();
-  assert.equal(metric(h.host(), 'speed').textContent, '↗80 tok/s');
+  assert.equal(metric(h.host(), 'speed').textContent, '↗25.0 tok/s');
   active.conversation.setAttribute('data-above-composer-conversation-id', firstThread);
   h.root().render();
-  assert.equal(metric(h.host(), 'speed').textContent, '↗35 tok/s');
+  assert.equal(metric(h.host(), 'speed').textContent, '↗20.0 tok/s');
 });
 
 test('missing or mismatched API timing never falls back to rollout or other conversation speeds', () => {
@@ -1780,8 +2005,306 @@ test('missing or mismatched API timing never falls back to rollout or other conv
       [firstThread]: { ...usage[firstThread], outputSpeed: measured },
     } });
     assert.equal(metric(h.host(), 'speed').textContent, '↗— tok/s');
-    assert.equal(metric(h.host(), 'cache').textContent, 'Cache 80%', 'cache remains independent of request timing');
+    assert.equal(metric(h.host(), 'cache').textContent, 'Cache —', 'missing or mismatched request identity cannot inherit rollout cache');
   }
   h.evaluate({ usage_state: {} });
   assert.equal(metric(h.host(), 'speed').textContent, '↗— tok/s');
+});
+
+test('footer and overview share session means after generation stops, ignoring the last request', () => {
+  const h = harness('injection_script', [composer('gpt-6-sol')]);
+  const usage = sessionUsage(h.now());
+  Object.assign(usage[firstThread].outputSpeed, { tokensPerSecond: 29, latestTokensPerSecond: 66,
+    latestInputTokens: 1000, latestCachedTokens: 920, avgCacheHitRate: .74, totalCachedTokens: 740 });
+  h.evaluate({ usage_state: usage });
+  assert.equal(metric(h.host(), 'speed').textContent, '↗29.0 tok/s');
+  assert.equal(metric(h.host(), 'cache').textContent, 'Cache 74.0%');
+  usage[firstThread].events = [];
+  usage[firstThread].currentTurnId = 'stopped-or-new-turn';
+  h.advance(600000);
+  for (let index = 0; index < 20; index++) h.evaluate({ usage_state: usage });
+  assert.equal(metric(h.host(), 'speed').textContent, '↗29.0 tok/s');
+  assert.equal(metric(h.host(), 'cache').textContent, 'Cache 74.0%');
+  h.host().click();
+  assert.match(h.details().querySelector('.session-metrics')!.textContent,
+    /Average output speed29\.0\s?tok\/sAverage cache hits74\.0%/);
+});
+
+test('a cache-only session shows a verified zero cache ratio without inventing speed', () => {
+  const h = harness('injection_script', [composer('gpt-6-sol')]);
+  const usage = sessionUsage(h.now());
+  h.evaluate({ usage_state: usage });
+  Object.assign(usage[firstThread].outputSpeed, { requestId: 'new-cache-only-request', latestObservedAtMs: h.now(),
+    latestTokensPerSecond: null, samples: 0, tokensPerSecond: 0, latestInputTokens: 80, latestCachedTokens: 0, totalInputTokens: 80, totalCachedTokens: 0 });
+  h.evaluate({ usage_state: usage });
+  assert.equal(metric(h.host(), 'speed').textContent, '↗— tok/s');
+  assert.equal(metric(h.host(), 'cache').textContent, 'Cache 0.0%');
+  assert.equal(metric(h.host(), 'cache').hasAttribute('data-cockpit-metric-unknown'), false);
+});
+
+test('session cache totals preserve missing versus zero and never use rollout data to fill gaps', () => {
+  const h = harness('injection_script', [composer('gpt-6-sol')]);
+  for (const cached of [undefined, null, '', '0', -1, NaN, Infinity, 1001, Number.MAX_SAFE_INTEGER + 1]) {
+    const usage = sessionUsage(h.now());
+    Object.assign(usage[firstThread].outputSpeed, { totalCachedTokens: cached, latestCacheHitRate: .8 });
+    h.evaluate({ usage_state: usage });
+    assert.equal(metric(h.host(), 'cache').textContent, 'Cache —', String(cached));
+    assert.equal(metric(h.host(), 'speed').textContent, '↗50.0 tok/s');
+  }
+  for (const input of [undefined, null, 0, -1, '1000', Number.MAX_SAFE_INTEGER + 1]) {
+    const usage = sessionUsage(h.now());
+    usage[firstThread].outputSpeed.totalInputTokens = input;
+    h.evaluate({ usage_state: usage });
+    assert.equal(metric(h.host(), 'cache').textContent, 'Cache —', String(input));
+  }
+  const zero = sessionUsage(h.now());
+  zero[firstThread].outputSpeed.totalCachedTokens = 0;
+  h.evaluate({ usage_state: zero });
+  assert.equal(metric(h.host(), 'cache').textContent, 'Cache 0.0%');
+});
+
+test('model changes preserve verified session means, including switching back', () => {
+  const active = composer('gpt-6-sol');
+  const h = harness('injection_script', [active]);
+  const usage = sessionUsage(h.now());
+  h.evaluate({ usage_state: usage });
+  h.advance(1000);
+  active.trigger.textContent = '6.1 Sol';
+  let result = h.evaluate({ usage_state: usage });
+  assert.equal(result.usageSelection.model, null);
+  assert.match(h.host().textContent, /50\.0 tok\/sCache 80.0%/);
+  const selected = sessionUsage(h.now());
+  selected.__binding.model = 'gpt-6.1-sol';
+  Object.assign(selected[firstThread].outputSpeed, { model: 'gpt-6.1-sol', selection: { model: 'gpt-6.1-sol', serviceTier: 'default' },
+    latestObservedAtMs: h.now(), latestTokensPerSecond: 70, latestCachedTokens: 900 });
+  result = h.evaluate({ usage_state: selected });
+  assert.equal(result.usageSelection.model, 'gpt-6.1-sol');
+  assert.equal(metric(h.host(), 'speed').textContent, '↗50.0 tok/s');
+  assert.equal(metric(h.host(), 'cache').textContent, 'Cache 80.0%');
+  h.advance(1000);
+  active.trigger.textContent = 'gpt-6-sol';
+  h.evaluate({ usage_state: usage });
+  assert.match(h.host().textContent, /50\.0 tok\/sCache 80.0%/, 'returning to a previous model keeps the session mean');
+});
+
+test('native fast metadata follows explicit choices while footer means remain stable', () => {
+  const active = composer('gpt-6-sol');
+  const h = harness('injection_script', [active]);
+  const usage = sessionUsage(h.now());
+  h.evaluate({ usage_state: usage });
+  const toggle = new Element('span');
+  toggle.setAttribute('data-fast-mode-enabled', 'true');
+  active.footer.appendChild(toggle);
+  h.advance(1000);
+  let result = h.evaluate({ usage_state: usage });
+  assert.equal(result.usageSelection.serviceTier, 'priority');
+  assert.match(h.host().textContent, /50\.0 tok\/sCache 80.0%/);
+  const fast = sessionUsage(h.now());
+  Object.assign(fast[firstThread].outputSpeed, { requestId: 'fast-request', latestObservedAtMs: h.now(),
+    selection: { model: 'gpt-6-sol', serviceTier: 'priority' }, latestTokensPerSecond: 66, latestCachedTokens: 920 });
+  result = h.evaluate({ usage_state: fast });
+  assert.equal(result.usageSelection.serviceTier, 'priority');
+  assert.equal(metric(h.host(), 'speed').textContent, '↗50.0 tok/s');
+  assert.equal(metric(h.host(), 'cache').textContent, 'Cache 80.0%');
+  h.advance(1000);
+  toggle.setAttribute('data-fast-mode-enabled', 'false');
+  h.evaluate({ usage_state: usage });
+  assert.match(h.host().textContent, /50\.0 tok\/sCache 80.0%/);
+  const unknown = sessionUsage(h.now());
+  unknown.__binding.serviceTier = 'priority';
+  result = h.evaluate({ usage_state: unknown });
+  assert.equal(result.usageSelection.serviceTier, null, 'false does not distinguish default from auto and must not guess');
+});
+
+test('same-conversation composer replacement preserves cached rows and open state', () => {
+  const active = composer('gpt-6-sol');
+  const h = harness('injection_script', [active]);
+  h.evaluate({ usage_state: sessionUsage(h.now()) });
+  openRequests(h);
+  dialogResponse(h, { requests: { rows: [requestRecord('kept')], nextCursor: null } });
+  const replacement = composer('gpt-6-sol');
+  active.root.remove();
+  h.body.appendChild(replacement.root);
+  h.root().render();
+  assert.equal(h.details().style.display, 'flex');
+  assert.match(h.details().textContent, /kept@example.com/);
+});
+
+test('request tier rendering follows API service evidence and keeps returned raw tier separate', () => {
+  const h = harness('injection_script', [composer('gpt-6-sol')]);
+  h.evaluate();
+  openRequests(h);
+  dialogResponse(h, { requests: { rows: [
+    requestRecord('fast', { requestedServiceTier: 'FAST', responseServiceTier: 'default' }),
+    requestRecord('legacy', { serviceTier: 'priority' }),
+    requestRecord('adjusted', { requestedServiceTier: 'auto', serviceTierAdaptation:
+      { requestedTier: 'priority', sentTier: 'default', reason: 'official_default_only' } }),
+  ], nextCursor: null } });
+  const rows = h.details().querySelectorAll('.request-row');
+  assert.match(rows[0].textContent, /highRequest: FastReported: default/);
+  assert.doesNotMatch(rows[0].textContent, /Adjusted to Standard/);
+  assert.match(rows[1].textContent, /Request: Not recordedReported: Not recordedLegacy: priority/);
+  assert.match(rows[2].textContent, /Request: FastReported: Not recordedAdjusted to Standard/);
+});
+
+test('a different API service binding cannot reuse latest or mean measurements from the former binding', () => {
+  const h = harness('injection_script', [composer('gpt-6-sol')]);
+  const usage = sessionUsage(h.now());
+  h.evaluate({ usage_state: usage });
+  assert.equal(metric(h.host(), 'cache').textContent, 'Cache 80.0%');
+  usage.__binding.binding = 'different-service-key-instance';
+  h.evaluate({ usage_state: usage });
+  assert.match(h.host().textContent, /— tok\/sCache —/);
+  h.host().click();
+  assert.match(h.details().querySelector('.session-metrics')!.textContent, /Average output speed—Average cache hits—/);
+  usage[firstThread].outputSpeed.binding = usage.__binding.binding;
+  h.evaluate({ usage_state: usage });
+  assert.equal(metric(h.host(), 'cache').textContent, 'Cache 80.0%');
+});
+
+test('only exact known native service-tier SVGs establish Fast or Ultrafast with a closed picker', () => {
+  const icons = JSON.parse(readFileSync(new URL('./fixtures/codex-native-tier-icons.json', import.meta.url), 'utf8')).icons;
+  for (const icon of icons) for (const variant of ['native','other-viewBox','modified-path']) {
+    const active = composer('gpt-6-sol');
+    const h = harness('injection_script', [active]);
+    const svg = new Element('svg');
+    svg.setAttribute('viewBox', variant === 'other-viewBox' ? '0 0 24 24' : icon.viewBox);
+    const path = new Element('path');
+    path.setAttribute('d', variant === 'modified-path' ? icon.path + ' M0 0' : icon.path);
+    svg.appendChild(path);
+    active.trigger.appendChild(svg);
+    const usage = sessionUsage(h.now());
+    usage.__binding.serviceTier = null;
+    usage[firstThread].outputSpeed.selection.serviceTier = icon.tier;
+    const result = h.evaluate({ usage_state: usage });
+    if (variant === 'native') {
+      assert.equal(result.usageSelection.serviceTier, icon.tier);
+      assert.equal(metric(h.host(), 'speed').textContent, '↗50.0 tok/s');
+    } else {
+      assert.equal(result.usageSelection.serviceTier, null, variant + ' is not confirmed native tier evidence');
+      assert.match(h.host().textContent, /50\.0 tok\/sCache 80.0%/);
+    }
+  }
+});
+
+test('native tier changes retain session averages without waiting for a new request', () => {
+  const h = harness('injection_script', [composer('gpt-6-sol')]);
+  const usage = sessionUsage(h.now());
+  usage.__binding.serviceTier = null;
+  usage[firstThread].outputSpeed.selection.serviceTier = null;
+  usage[firstThread].outputSpeed.requestedServiceTier = null;
+  h.evaluate({ usage_state: usage });
+  assert.equal(metric(h.host(), 'speed').textContent, '↗50.0 tok/s');
+  assert.equal(metric(h.host(), 'cache').textContent, 'Cache 80.0%');
+  h.advance(1000);
+  const fast = sessionUsage(h.now());
+  fast.__binding.serviceTier = 'priority';
+  fast[firstThread].outputSpeed.selection.serviceTier = 'priority';
+  fast[firstThread].outputSpeed.latestObservedAtMs = h.now();
+  h.evaluate({ usage_state: fast });
+  assert.equal(metric(h.host(), 'speed').textContent, '↗50.0 tok/s');
+  h.advance(1000);
+  h.evaluate({ usage_state: usage });
+  assert.match(h.host().textContent, /50\.0 tok\/sCache 80.0%/, 'session means do not depend on the selected speed mode');
+  usage[firstThread].outputSpeed.latestObservedAtMs = h.now();
+  h.evaluate({ usage_state: usage });
+  assert.equal(metric(h.host(), 'cache').textContent, 'Cache 80.0%');
+});
+
+test('overview response default empty request payload cannot erase a cached request list on tab roundtrip', () => {
+  const h = harness('injection_script', [composer('gpt-6-sol')]);
+  h.evaluate({ usage_state: sessionUsage(h.now()) });
+  openRequests(h);
+  dialogResponse(h, { requests: { rows: [requestRecord('cached')], nextCursor: 'next-page' } });
+  dialogAction(h, 'tab', 'overview');
+  dialogResponse(h, { summary: { requests: 37 }, requests: { rows: [], nextCursor: null } });
+  dialogAction(h, 'tab', 'logs');
+  assert.match(h.details().textContent, /cached@example.com/);
+  assert.equal(h.root().dialogState.nextCursor, 'next-page');
+});
+
+test('live request binding receives cancellation on close and a new token on reopen while rows stay cached', () => {
+  const h = harness('injection_script', [composer('gpt-6-sol')]);
+  const sent: unknown[] = [];
+  h.window.__cockpitUsageRequest = (query: string) => sent.push(JSON.parse(query));
+  h.evaluate({ usage_state: sessionUsage(h.now()) });
+  openRequests(h);
+  const before = dialogQuery(h).requestToken;
+  dialogResponse(h, { requests: { rows: [requestRecord('kept')], nextCursor: null } });
+  h.details().querySelector('[data-cockpit-quota-close]')!.click();
+  assert.equal(sent.at(-1), null);
+  h.host().click();
+  assert.notEqual(dialogQuery(h).requestToken, before);
+  assert.match(h.details().textContent, /kept@example.com/);
+});
+
+test('closing a menu after disabling Fast retains its explicit native choice instead of reverting to stale profile settings', () => {
+  const active = composer('gpt-6-sol');
+  const h = harness('injection_script', [active]);
+  const usage = sessionUsage(h.now());
+  usage.__binding.serviceTier = 'priority';
+  usage[firstThread].outputSpeed.selection.serviceTier = 'priority';
+  h.evaluate({ usage_state: usage });
+  active.trigger.setAttribute('aria-expanded', 'true');
+  const menu = dropdown('gpt-6-sol');
+  const toggle = new Element('span');
+  toggle.setAttribute('data-fast-mode-enabled', 'false');
+  menu.appendChild(toggle);
+  h.body.appendChild(menu);
+  h.advance(1000);
+  let result = h.evaluate({ usage_state: usage });
+  assert.equal(result.usageSelection.serviceTier, null, 'explicit false only rejects Fast; it cannot name default or auto');
+  assert.match(h.host().textContent, /50\.0 tok\/sCache 80.0%/);
+  menu.remove();
+  h.advance(1000);
+  result = h.evaluate({ usage_state: usage });
+  assert.equal(result.usageSelection.serviceTier, null);
+  const normal = sessionUsage(h.now());
+  normal.__binding.serviceTier = 'priority';
+  Object.assign(normal[firstThread].outputSpeed, { selection: { model:'gpt-6-sol',serviceTier:null },
+    tokensPerSecond:30,totalCachedTokens:700,latestObservedAtMs:h.now(),latestTokensPerSecond:66,latestCachedTokens:920,requestId:'after-fast-disabled' });
+  h.evaluate({ usage_state: normal });
+  assert.equal(metric(h.host(), 'speed').textContent, '↗30.0 tok/s');
+  assert.equal(metric(h.host(), 'cache').textContent, 'Cache 70.0%');
+  const newMenu = dropdown('gpt-6-sol');
+  const newToggle = new Element('span');
+  newToggle.setAttribute('data-fast-mode-enabled','true');
+  newMenu.appendChild(newToggle);
+  h.body.appendChild(newMenu);
+  h.advance(1000);
+  result = h.evaluate({ usage_state: normal });
+  assert.equal(result.usageSelection.serviceTier, 'priority', 'a new explicit native observation replaces the cached one');
+});
+
+test('cached native per-chat tier observations never carry across conversations, models or service bindings', () => {
+  for (const change of ['thread','model','binding']) {
+    const active = composer('gpt-6-sol');
+    const h = harness('injection_script', [active]);
+    const usage = { ...sessionUsage(h.now()), ...sessionUsage(h.now(), secondThread) };
+    usage.__binding.serviceTier = 'priority';
+    usage[firstThread].outputSpeed.selection.serviceTier = 'priority';
+    usage[secondThread].outputSpeed.selection.serviceTier = 'priority';
+    const toggle = new Element('span');
+    toggle.setAttribute('data-fast-mode-enabled','false');
+    active.footer.appendChild(toggle);
+    let result = h.evaluate({ usage_state: usage });
+    assert.equal(result.usageSelection.serviceTier, null);
+    toggle.remove();
+    h.evaluate({ usage_state: usage });
+    assert.equal(h.root().nativeSpeedState.enabled, false);
+    if (change === 'thread') active.conversation.setAttribute('data-above-composer-conversation-id',secondThread);
+    else if (change === 'model') {
+      active.trigger.textContent = 'gpt-6.1-sol';
+      usage.__binding.model = 'gpt-6.1-sol';
+      usage[firstThread].outputSpeed.model = 'gpt-6.1-sol';
+      usage[firstThread].outputSpeed.selection.model = 'gpt-6.1-sol';
+    } else {
+      usage.__binding.binding = 'new-service-binding';
+      usage[firstThread].outputSpeed.binding = usage.__binding.binding;
+    }
+    result = h.evaluate({ usage_state: usage });
+    assert.equal(result.usageSelection.serviceTier, 'priority', change + ' reads its own verified configuration');
+    assert.equal(h.root().nativeSpeedState, null, change + ' clears the former native observation');
+    if (change === 'thread') assert.equal(metric(h.host(), 'speed').textContent, '↗50.0 tok/s');
+  }
 });

@@ -3713,7 +3713,11 @@ mod tests {
 
         let error = build_usable_resolved_binary(broken, "test".to_string(), None)
             .expect_err("an existing launcher that cannot run must be rejected");
-        assert!(error.message.contains("missing-native-binary"));
+        assert!(
+            error.message.contains("missing-native-binary"),
+            "unexpected launcher probe failure: {}",
+            error.message
+        );
 
         let working = root.join("working-codex");
         fs::write(&working, "#!/bin/sh\necho codex-cli-test 1.0\n")

@@ -157,7 +157,11 @@ pub(super) async fn canonical_stream(
         } else {
             Transform::Responses
         },
-        state.options.max_event_bytes,
+        if route.wire_api == super::contract::WireApi::Chat && !route.chatgpt {
+            state.options.max_provider_event_bytes
+        } else {
+            state.options.max_event_bytes
+        },
     );
     state.multi_agent_context = multi_agent_context;
     let bytes = stream::unfold(state, |mut state| async move {
@@ -519,7 +523,7 @@ mod output_repair_tests {
         let restored_tool =
             json!({"type":"custom_tool_call","name":"shell","call_id":"c","input":"pwd"});
         assert_eq!(ws_events[1]["item"], restored_tool);
-        let mut collector = super::super::output_items::OutputCollector::new(4096);
+        let mut collector = super::super::output_items::OutputCollector::new();
         let changed: Vec<_> = ws_events
             .iter_mut()
             .map(|event| collector.observe(event).unwrap())

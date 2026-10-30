@@ -1,4 +1,5 @@
 //! A downstream Responses socket can use either upstream WebSocket or HTTP/SSE.
+use crate::modules::codex_native_api::deadline::{self, Deadline};
 use super::super::{
     contract::{Caller, ExecutionPolicy, ServiceError},
     events::SseDecoder,
@@ -47,7 +48,7 @@ pub(super) async fn passthrough(
     let mut stop = state.stop.clone();
     tokio::select! {
         _=stop.wait()=>Err(stopping_error()),
-        result=tokio::time::timeout_at((tokio::time::Instant::now()+state.options.request_timeout).min(prepared.execution.prepare_deadline()),state.host.responses_websocket_passthrough(caller,&prepared.route))=>result.map_err(|_| {
+        result=deadline::timeout_at((tokio::time::Instant::now()+state.options.request_timeout).min(prepared.execution.prepare_deadline()),state.host.responses_websocket_passthrough(caller,&prepared.route))=>result.map_err(|_| {
             if tokio::time::Instant::now()>=prepared.execution.total_deadline { super::super::retry::total_timeout() }
             else {ServiceError::new(504,"request_policy_timeout","WebSocket transport policy timed out")}
         })?,
@@ -60,7 +61,7 @@ pub(super) async fn open(
     prepared: &mut Prepared,
     tracker: &mut RequestTracker,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     history: &mut History,
 ) -> Result<Transport, ServiceError> {
     open_with_retries(
@@ -83,7 +84,7 @@ pub(super) async fn open_with_retries(
     prepared: &mut Prepared,
     tracker: &mut RequestTracker,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     history: &mut History,
     retries: OpeningRetries,
 ) -> Result<Transport, ServiceError> {
@@ -257,7 +258,7 @@ async fn collect_json(
     state: &AppState,
     source: super::super::upstream::ByteStream,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
 ) -> Result<Value, ServiceError> {
     let data = collect_bytes(state, source, policy, deadline).await?;
     serde_json::from_slice(&data).map_err(|_| {
@@ -273,14 +274,14 @@ async fn collect_bytes(
     state: &AppState,
     mut source: super::super::upstream::ByteStream,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
 ) -> Result<Vec<u8>, ServiceError> {
     let mut data = Vec::new();
     loop {
         let mut stop = state.stop.clone();
         let next = tokio::select! {
             _=stop.wait()=>return Err(stopping_error()),
-            _=tokio::time::sleep_until(deadline)=>return Err(super::super::retry::total_timeout()),
+            _=deadline::sleep_until(deadline)=>return Err(super::super::retry::total_timeout()),
             result=tokio::time::timeout(policy.idle_timeout,source.next())=>result.map_err(|_|ServiceError::new(504,"upstream_idle_timeout","Upstream response stopped responding"))?,
         };
         match next {

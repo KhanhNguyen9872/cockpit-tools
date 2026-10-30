@@ -322,7 +322,7 @@ async fn native_acquire_image_source_permits(
             .await
             {
                 Ok((_, permit)) => permit,
-                Err(error) if error.code == "account_busy" => continue,
+                Err(error) if matches!(error.code, "account_busy" | "quota_reserved") => continue,
                 Err(error) => return Err(error),
             };
             if let Ok(image_permit) = gate.try_acquire_owned() {

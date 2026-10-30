@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { CODEX_PATH_RECOVERY_CANCELLED, codexPathRecoveryKey, withCodexPathRecovery } from "../stores/useCodexPathRecoveryStore";
 import { withProxyEnginePrerequisite } from "../utils/codexProxyEnginePrerequisite";
 import { createPlatformInstanceService } from "./platform/createPlatformInstanceService";
 import type {
@@ -36,6 +37,12 @@ const service = createPlatformInstanceService("codex");
 
 export const getInstanceDefaults = service.getInstanceDefaults;
 export const listInstances = service.listInstances;
+/** Fresh launch reconciliation; failed native probes must not reuse cached status. */
+let launchConfirmationRead: Promise<InstanceProfile[]> | undefined;
+export function listInstancesForLaunchConfirmation(): Promise<InstanceProfile[]> {
+  return launchConfirmationRead ??= invoke<InstanceProfile[]>("codex_list_instances", { fresh: true })
+    .finally(() => { launchConfirmationRead = undefined; });
+}
 export const deleteInstance = service.deleteInstance;
 export async function startInstance(
   instanceId: string,
@@ -48,13 +55,29 @@ export async function startInstance(
   console.info("[Codex Start][Service] invoke codex_start_instance started", {
     instanceId,
   });
+  let attempted = false;
   try {
-    return await withProxyEnginePrerequisite(invoke<InstanceProfile>("codex_start_instance", {
+    const args = {
       instanceId,
       transferConflictingAccount:
         options?.transferConflictingAccount === true ? true : null,
       skipFailedStep: options?.skipFailedStep ?? null,
-    }));
+    };
+    return await withCodexPathRecovery(
+      () => {
+        attempted = true;
+        return withProxyEnginePrerequisite(invoke<InstanceProfile>("codex_start_instance", args));
+      },
+      { key: codexPathRecoveryKey("codex_start_instance", args) },
+    );
+  } catch (error) {
+    if (attempted && String(error).replace(/^Error:\s*/, "") === CODEX_PATH_RECOVERY_CANCELLED) {
+      window.dispatchEvent(new CustomEvent("codex:instance-launch-progress", { detail: {
+        type: "cancelled", cancelled: true, instanceId,
+        isDefault: instanceId === "__default__", operation: "instance-launch", canRetry: false,
+      } }));
+    }
+    throw error;
   } finally {
     console.info(
       "[Codex Start][Service] invoke codex_start_instance finished",
@@ -72,7 +95,12 @@ export async function cancelInstanceStart(instanceId: string): Promise<void> {
 }
 export const stopInstance = service.stopInstance;
 export const closeAllInstances = service.closeAllInstances;
-export const openInstanceWindow = service.openInstanceWindow;
+export async function openInstanceWindow(instanceId: string): Promise<void> {
+  return withCodexPathRecovery(
+    () => service.openInstanceWindow(instanceId),
+    { key: codexPathRecoveryKey("codex_open_instance_window", { instanceId }) },
+  );
+}
 
 export async function createInstance(payload: {
   name: string;
@@ -146,7 +174,10 @@ export async function updateInstance(payload: {
   if (payload.deferBindAccountApplication !== undefined) {
     body.deferBindAccountApplication = payload.deferBindAccountApplication;
   }
-  return await invoke("codex_update_instance", body);
+  return await withCodexPathRecovery(
+    () => invoke<InstanceProfile>("codex_update_instance", body),
+    { key: codexPathRecoveryKey("codex_update_instance", body) },
+  );
 }
 
 export async function getCodexInstanceQuickConfig(
@@ -280,33 +311,39 @@ export async function previewCodexInstanceLaunchCommand(payload: {
   terminal?: string;
   launchCommand?: string | null;
 }): Promise<CodexInstanceLaunchPreviewInfo> {
-  return await invoke("codex_preview_instance_launch_command", {
+  const args = {
     userDataDir: payload.userDataDir,
     workingDir: payload.workingDir ?? null,
     extraArgs: payload.extraArgs ?? "",
     terminal: payload.terminal ?? null,
     launchCommand: payload.launchCommand ?? null,
-  });
+  };
+  return withCodexPathRecovery(
+    () => invoke<CodexInstanceLaunchPreviewInfo>("codex_preview_instance_launch_command", args),
+    { key: codexPathRecoveryKey("codex_preview_instance_launch_command", args) },
+  );
 }
 
 export async function getCodexInstanceLaunchCommand(
   instanceId: string,
   terminal?: string,
 ): Promise<CodexInstanceLaunchInfo> {
-  return await invoke("codex_get_instance_launch_command", {
-    instanceId,
-    terminal: terminal ?? null,
-  });
+  const args = { instanceId, terminal: terminal ?? null };
+  return withCodexPathRecovery(
+    () => invoke<CodexInstanceLaunchInfo>("codex_get_instance_launch_command", args),
+    { key: codexPathRecoveryKey("codex_get_instance_launch_command", args) },
+  );
 }
 
 export async function executeCodexInstanceLaunchCommand(
   instanceId: string,
   terminal?: string,
 ): Promise<string> {
-  return await invoke("codex_execute_instance_launch_command", {
-    instanceId,
-    terminal: terminal ?? null,
-  });
+  const args = { instanceId, terminal: terminal ?? null };
+  return withCodexPathRecovery(
+    () => invoke<string>("codex_execute_instance_launch_command", args),
+    { key: codexPathRecoveryKey("codex_execute_instance_launch_command", args) },
+  );
 }
 
 export async function syncThreadsAcrossInstances(): Promise<CodexInstanceThreadSyncSummary> {

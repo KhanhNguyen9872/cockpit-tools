@@ -82,6 +82,7 @@ impl InjectionDialogPoller {
             "period": query.period,
             "cursor": query.cursor,
             "view": query.view,
+            "binding": query.binding,
         });
         value[status] = json!(true);
         value

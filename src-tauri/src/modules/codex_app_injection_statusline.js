@@ -2,13 +2,14 @@
 (() => {
   const root = window.__cockpitCodexInjection || (window.__cockpitCodexInjection = {});
   const ownSelector = '[data-cockpit-quota-footer], [data-cockpit-quota-details], [data-cockpit-quota-style]';
-  if (root.statuslineVersion !== 11) {
+  if (root.statuslineVersion !== 14) {
     root.observer?.disconnect();
     root.layoutObserver?.disconnect();
     if (root.watchdogTimer) window.clearInterval(root.watchdogTimer);
     if (root.resizeHandler) window.removeEventListener('resize', root.resizeHandler);
     if (root.scrollHandler) window.removeEventListener('scroll', root.scrollHandler, true);
     if (root.keyHandler) window.removeEventListener('keydown', root.keyHandler);
+    if (root.focusHandler) window.removeEventListener('focusin', root.focusHandler);
     if (root.outsidePointerHandler) window.removeEventListener('pointerdown', root.outsidePointerHandler, true);
     document.querySelectorAll(ownSelector).forEach(node => node.remove());
     root.observer = null;
@@ -16,13 +17,16 @@
     root.resizeHandler = null;
     root.scrollHandler = null;
     root.keyHandler = null;
+    root.focusHandler = null;
     root.outsidePointerHandler = null;
     root.layoutObserver = null;
     root.layoutNodes = null;
     root.metricNodes = null;
     root.metricHost = null;
+    root.nativeSpeedState = null;
+    root.visibleModelFooter = null;
     usageDialog.reset(root);
-    root.statuslineVersion = 11;
+    root.statuslineVersion = 14;
   }
   const staleBalanceRoot = window.__cockpitDeepSeekBalance;
   if (staleBalanceRoot) {
@@ -30,6 +34,7 @@
     staleBalanceRoot.observer?.disconnect();
     if (staleBalanceRoot.resizeHandler) window.removeEventListener('resize', staleBalanceRoot.resizeHandler);
     if (staleBalanceRoot.scrollHandler) window.removeEventListener('scroll', staleBalanceRoot.scrollHandler, true);
+    if (staleBalanceRoot.focusHandler) window.removeEventListener('focusin', staleBalanceRoot.focusHandler);
     badgeLayout.disconnect(staleBalanceRoot);
     delete window.__cockpitDeepSeekBalance;
   }
@@ -52,9 +57,18 @@
   }
   root.usageState = usageState;
   let observedModelThisRender = null;
+  let usageSelectionThisRender = null;
 
   const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const formatPercent = value => Number.isFinite(value) ? Math.round(value) + '%' : missingLabel;
+  const speedDecimal = new Intl.NumberFormat('en-US', {
+    useGrouping:false, minimumFractionDigits:1, maximumFractionDigits:1, roundingMode:'trunc',
+  });
+  const formatCachePercent = ({ input, cached }) => {
+    // Truncate the token ratio exactly, without floating-point or upward rounding.
+    const tenths = BigInt(cached) * 1000n / BigInt(input);
+    return String(tenths / 10n) + '.' + String(tenths % 10n) + '%';
+  };
   const shortProductLabel = value => {
     const text = String(value || '').trim();
     return text.replace(/^grok[\s_\-]*/i, '') || text || 'Grok';
@@ -80,6 +94,26 @@
     usage: Boolean(options.usage), stale: Boolean(options.stale), unknown: Boolean(options.unknown),
     tone: options.tone ?? null, unit: options.unit || '' });
 
+  function normalizeModel(value) {
+    return String(value || '').trim().toLowerCase().replace(/^gpt[-\s]*/, '').replace(/[^a-z0-9]/g, '');
+  }
+  function normalizeTier(value) {
+    const tier = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return tier === 'fast' ? 'priority' : tier === 'standard' ? 'default' : tier || null;
+  }
+  // Exact public SVGs used by the native model-label service-tier renderer.
+  // A new/unknown icon is unavailable evidence, never a generic lightning match.
+  function nativeIconTier(trigger) {
+    const known = [{"tier":"priority","viewBox":"0 0 20 20","path":"M9.80999 17.8302C9.49666 18.1969 9.08999 18.3869 8.58999 18.4002C8.09666 18.4136 7.69666 18.2436 7.38999 17.8902C7.08999 17.5436 7.02666 17.0636 7.19999 16.4502L8.06999 13.2902H3.89999C3.43333 13.2902 3.06999 13.1602 2.80999 12.9002C2.55666 12.6336 2.42999 12.3136 2.42999 11.9402C2.42999 11.5602 2.55666 11.2169 2.80999 10.9102L10.16 2.18022C10.4733 1.81356 10.8767 1.62356 11.37 1.61022C11.87 1.59689 12.27 1.76689 12.57 2.12022C12.8767 2.47356 12.9433 2.95356 12.77 3.56023L11.87 6.78023H16.05C16.51 6.78023 16.87 6.91356 17.13 7.18023C17.3967 7.44023 17.53 7.76023 17.53 8.14023C17.53 8.52023 17.4 8.86023 17.14 9.16023L9.80999 17.8302ZM15.89 8.50023C15.93 8.44689 15.95 8.39356 15.95 8.34023C15.9567 8.28689 15.94 8.24356 15.9 8.21023C15.86 8.17023 15.8033 8.15023 15.73 8.15023H11.1C10.9133 8.15023 10.7533 8.10356 10.62 8.01023C10.4933 7.91689 10.4067 7.79023 10.36 7.63023C10.3133 7.47023 10.3167 7.29023 10.37 7.09023L11.33 3.62022C11.3567 3.52022 11.3467 3.44356 11.3 3.39022C11.2533 3.33022 11.19 3.30356 11.11 3.31022C11.0367 3.31689 10.9733 3.35356 10.92 3.42023L4.04999 11.5702C4.00999 11.6236 3.98666 11.6769 3.97999 11.7302C3.97999 11.7836 3.99999 11.8269 4.03999 11.8602C4.07999 11.8936 4.13999 11.9102 4.21999 11.9102H8.78999C9.00333 11.9102 9.17666 11.9569 9.30999 12.0502C9.44999 12.1436 9.54333 12.2736 9.58999 12.4402C9.63666 12.6002 9.63333 12.7802 9.57999 12.9802L8.63999 16.3902C8.61333 16.4902 8.62333 16.5702 8.66999 16.6302C8.71666 16.6836 8.77666 16.7069 8.84999 16.7002C8.92999 16.6936 8.99666 16.6602 9.04999 16.6002L15.89 8.50023Z"},{"tier":"ultrafast","viewBox":"-1 -1 22 22","path":"M12.496 1.55042C13.3266 0.810781 14.6664 1.57948 14.3945 2.70277L13.3867 6.86097H18.0634C19.0535 6.86124 19.5922 8.01841 18.955 8.77601L11.248 17.9284C11.0114 18.2091 10.5914 18.2449 10.3105 18.0084C10.0297 17.7718 9.99389 17.3518 10.2304 17.0709L17.7089 8.19105H15.206C15.199 8.46403 15.1069 8.74127 14.9043 8.98206L7.24312 18.0797C6.45061 19.0208 4.92981 18.25 5.21968 17.0543L6.1689 13.1383H1.7607C0.663874 13.1383 0.0668853 11.8562 0.773392 11.0172L8.43453 1.91956C9.22701 0.978906 10.7474 1.74955 10.458 2.94495L9.50874 6.86097H12.0175L12.956 2.98987L12.7773 3.17933C12.5246 3.44588 12.1034 3.45737 11.8369 3.20472C11.5706 2.95204 11.5599 2.53172 11.8125 2.26527L12.4169 1.62659L12.496 1.55042Z"}];
+    for (const node of trigger?.querySelectorAll('svg') || []) {
+      if (node.getClientRects().length === 0) continue;
+      const paths = node.querySelectorAll('path');
+      if (paths.length !== 1) continue;
+      const icon = known.find(value => node.getAttribute('viewBox') === value.viewBox && paths[0].getAttribute('d') === value.path);
+      if (icon) return icon.tier;
+    }
+    return null;
+  }
   function syncMetrics(host, fields, count) {
     if (root.metricHost !== host || !root.metricNodes) {
       root.metricHost = host;
@@ -139,7 +173,7 @@
   function setDetailsOpen(open, trigger, restoreFocus = true) {
     root.quotaDetailsOpen = open;
     if (trigger) root.lastTrigger = trigger;
-    if (!open) root.refreshError = null;
+    if (!open) { root.refreshError = null; usageDialog.cancel(root); }
     root.render();
     if (open) document.querySelector('[data-cockpit-quota-close]')?.focus();
     else if (restoreFocus) {
@@ -150,29 +184,48 @@
   function render() {
     let host = document.querySelector('[data-cockpit-quota-footer]');
     let details = document.querySelector('[data-cockpit-quota-details]');
-    const card = usageMetrics.visibleCard();
+    const card = usageMetrics.visibleCard(root.card);
     const footer = card?.querySelector('[class*="_ComposerLayoutFooter_"], [class*="_footer_"]') || card;
     const permissions = footer && [...footer.querySelectorAll('[data-composer-navigation-target="permissions"]')].find(node => node.getClientRects().length > 0);
     if (!card || !permissions) {
       if (host) host.style.display = 'none';
       if (details) details.style.display = 'none';
+      if (root.quotaDetailsOpen) usageDialog.cancel(root);
       root.quotaDetailsOpen = false;
       root.threadId = '';
+      root.nativeSpeedState = null;
+      root.visibleModel = null;
+      root.visibleModelAt = 0;
       root.visibleModelFooter = null;
       badgeLayout.disconnect(root);
       return;
     }
     const modelTrigger = [...footer.querySelectorAll('[data-composer-navigation-target="reasoning"]')].find(node => node.getClientRects().length > 0);
+    // Portal menus live outside the composer. Only consume a menu owned by this
+    // open trigger; another composer must not supply this conversation's tier.
+    const openTriggers = [...document.querySelectorAll('[data-composer-navigation-target="reasoning"]')]
+      .filter(node => node.getClientRects().length > 0 && (node.getAttribute('aria-expanded') === 'true' || node.getAttribute('data-state') === 'open'));
+    const dropdowns = [...document.querySelectorAll('[class*="ModelPickerDropdownContent_"]')]
+      .filter(node => node.getClientRects().length > 0);
+    const menuId = modelTrigger?.getAttribute('aria-controls');
+    const modelDropdown = openTriggers.includes(modelTrigger)
+      ? (menuId ? dropdowns.find(node => node.getAttribute('id') === menuId)
+        : openTriggers.length === 1 && dropdowns.length === 1 ? dropdowns[0] : null) : null;
     const nextThreadId = usageMetrics.threadId(card);
-    if (root.threadId !== nextThreadId || root.card !== card) {
+    if (root.threadId !== nextThreadId) {
       root.quotaDetailsOpen = false;
       root.refreshError = null;
       root.threadId = nextThreadId;
-      root.card = card;
       root.lastTrigger = null;
       root.lastTriggerIndex = 0;
       usageDialog.reset(root);
+      root.nativeSpeedState = null;
+      root.visibleModel = null;
+      root.visibleModelAt = 0;
     }
+    // React may replace the composer card without changing its conversation.
+    // That must not erase a verified list or close an already open dialog.
+    root.card = card;
     if (!host) {
       host = document.createElement('button');
       host.setAttribute('type', 'button');
@@ -198,10 +251,8 @@
         nodes.push(modelTrigger.querySelector('[class*="ModelPickerTriggerContent_"]'));
         nodes.push(modelTrigger);
       }
-      const dropdown = [...document.querySelectorAll('[class*="ModelPickerDropdownContent_"]')].find(node => node.getClientRects().length > 0);
-      if (dropdown) {
-        nodes.push(dropdown.querySelector('[data-model-picker-model-row]'));
-        nodes.push(dropdown.querySelector('[class*="ViewToggleModelLabel_"]'));
+      if (modelDropdown) {
+        nodes.push(modelDropdown.querySelector('[class*="ViewToggleModelLabel_"]'));
       }
       for (const node of nodes) {
         if (!node || node.getClientRects().length === 0) continue;
@@ -216,24 +267,54 @@
       root.visibleModelAt = Date.now();
       observedModelThisRender = visibleModel;
     }
+    const fastNodes = [...footer.querySelectorAll('[data-fast-mode-enabled]')];
+    if (modelDropdown) fastNodes.push(...modelDropdown.querySelectorAll('[data-fast-mode-enabled]'));
+    const fastNode = fastNodes.find(node => node.getClientRects().length > 0
+      && ['true','false'].includes(node.getAttribute('data-fast-mode-enabled')));
+    const binding = root.usageState?.__binding;
+    const selectionKey = String(root.threadId || '') + '|' + String(binding?.binding || '')
+      + '|' + normalizeModel(visibleModel || root.visibleModel || binding?.model);
+    const iconTier = nativeIconTier(modelTrigger);
+    root.nativeSpeedState = fastNode ? {
+      key:selectionKey,enabled:fastNode.getAttribute('data-fast-mode-enabled') === 'true',
+      value:fastNode.getAttribute('data-fast-mode-enabled') === 'true'
+        ? fastNode.querySelector('[class*="UltrafastIcon_"]') || iconTier === 'ultrafast' ? 'ultrafast' : 'priority' : null,
+    } : iconTier ? {key:selectionKey,enabled:true,value:iconTier}
+      // Native per-chat choices can reach the renderer before config.toml is
+      // updated. Closing the menu is not evidence that its last choice changed.
+      : root.nativeSpeedState?.key === selectionKey ? root.nativeSpeedState : null;
+    const nativeTier = root.nativeSpeedState;
+    const configuredTier = normalizeTier(binding?.serviceTier);
+    const selectedTier = nativeTier?.enabled === true ? nativeTier.value
+      : nativeTier?.enabled === false && ['priority','ultrafast'].includes(configuredTier) ? 'not-fast' : configuredTier;
+    const modelLabel = visibleModel || root.visibleModel;
+    const configuredModel = typeof binding?.model === 'string' && binding.model.trim() ? binding.model.trim() : null;
+    usageSelectionThisRender = {
+      model:configuredModel && (!modelLabel || normalizeModel(modelLabel) === normalizeModel(configuredModel)) ? configuredModel : null,
+      serviceTier:selectedTier === 'not-fast' ? null : selectedTier,
+    };
     const modelStickyMs = 15000;
     const stickyFresh = Boolean(root.visibleModel) && Date.now() - (root.visibleModelAt || 0) <= modelStickyMs;
     const selectedModel = stickyFresh ? root.visibleModel : (fallbackModel || '');
     const badgeKind = classifyModel(selectedModel) || hostBadgeKind;
     const data = root.threadId && root.usageState[root.threadId];
-    const snapshot = data?.threadId === root.threadId ? usageMetrics.snapshot(data.events, Date.now(), data.currentTurnId) : null;
     // Only an exact current-thread request-log measurement may supply speed.
     // Rollout token-count intervals include tool/wait time and are never a fallback.
-    const measured = data?.threadId === root.threadId && data.outputSpeed?.threadId === root.threadId
+    const measured = binding?.binding && data?.threadId === root.threadId && data.outputSpeed?.threadId === root.threadId
+      && data.outputSpeed.binding === binding.binding
       ? data.outputSpeed : null;
     const rate = typeof measured?.tokensPerSecond === 'number' && Number.isFinite(measured.tokensPerSecond)
       && measured.tokensPerSecond > 0 && Number.isInteger(measured.samples) && measured.samples > 0
       && Number.isFinite(measured.observedAtMs) && measured.observedAtMs > 0 ? measured.tokensPerSecond : null;
-    const speedValue = rate === null ? missingLabel : rate >= 1 ? String(Math.round(rate))
-      : rate < 0.1 ? '< 0.1' : rate.toFixed(1);
+    const input = measured?.totalInputTokens, cached = measured?.totalCachedTokens;
+    const cacheMeasurement = Number.isSafeInteger(input) && input > 0 && Number.isSafeInteger(cached)
+      && cached >= 0 && cached <= input ? {input,cached} : null;
+    const speedValue = rate === null ? missingLabel : speedDecimal.format(rate);
     const speedStale = rate !== null && Date.now() - measured.observedAtMs > 120000;
     const speed = speedValue + ' tok/s';
-    const cache = snapshot?.cache == null ? missingLabel : snapshot.cache.toFixed(1) + '%';
+    const averageSpeed = rate === null ? missingLabel : speed;
+    const cache = cacheMeasurement === null ? missingLabel : formatCachePercent(cacheMeasurement);
+    const averageCache = cache;
     const fields = [];
     if (badgeKind === 'deepseek') {
       const line = balanceLines[0];
@@ -259,15 +340,15 @@
         fields.push(metricField('weekly', weeklyLabel, missingLabel, quotaEmptyLabel, { unknown: true }));
       }
     }
-    // Keep summary numbers compact. Full precision and all four values remain in the dialog.
+    // Keep summary numbers compact without rounding cache hit rates upward.
     const quotaFieldCount = fields.length;
-    const cacheShort = snapshot?.cache == null ? missingLabel : Math.round(snapshot.cache) + '%';
+    const cacheShort = cacheMeasurement === null ? missingLabel : formatCachePercent(cacheMeasurement);
     const sampleTime = rate !== null ? new Date(measured.observedAtMs).toLocaleString() : '';
     fields.push(metricField('speed', '', speedValue, usageLabels.speedHint
       + (speedStale ? ' ' + usageLabels.recent : '') + (sampleTime ? ' · ' + sampleTime : ''),
       { usage: true, stale: speedStale, unit: 'tok/s', unknown: rate === null }));
     fields.push(metricField('cache', usageLabels.cacheShort, cacheShort, usageLabels.cacheHint,
-      { usage: true, unknown: snapshot?.cache == null }));
+      { usage: true, stale:speedStale, unknown: cacheMeasurement === null }));
     let placement = null;
     // Keep the original measured gap. Yield cache first, then speed, without
     // moving native controls or changing the composer's height.
@@ -291,7 +372,7 @@
     }
     details.style.display = root.quotaDetailsOpen ? 'flex' : 'none';
     if (root.quotaDetailsOpen) {
-      usageDialog.render(root, details, {badgeKind, speed, cache, formatMoney, shortProductLabel});
+      usageDialog.render(root, details, {badgeKind, speed, averageSpeed, cache, averageCache, formatMoney, shortProductLabel});
       details.querySelector('[data-cockpit-quota-close]').onclick = () => setDetailsOpen(false);
       const refreshButton = details.querySelector('[data-cockpit-quota-refresh]');
       refreshButton.onclick = () => {
@@ -318,6 +399,10 @@
   if (!root.scrollHandler) {
     root.scrollHandler = () => root.scheduleRender();
     window.addEventListener('scroll', root.scrollHandler, {passive:true,capture:true});
+  }
+  if (!root.focusHandler) {
+    root.focusHandler = () => root.scheduleRender();
+    window.addEventListener('focusin', root.focusHandler);
   }
   if (!root.keyHandler) {
     root.keyHandler = event => {
@@ -353,7 +438,7 @@
       if (relevant) root.scheduleRender();
     });
     root.observer.observe(document.documentElement, {childList:true,subtree:true,characterData:true,attributes:true,
-      attributeFilter:['class','style','hidden','aria-hidden','data-state','data-dictation-view','data-above-composer-conversation-id','data-composer-placement','data-app-action-sidebar-thread-selected','data-app-action-sidebar-thread-id']});
+      attributeFilter:['class','style','hidden','aria-hidden','aria-expanded','data-state','data-fast-mode-enabled','data-dictation-view','data-above-composer-conversation-id','data-composer-placement','data-app-action-sidebar-thread-selected','data-app-action-sidebar-thread-id']});
   }
   const styleText = `
       [data-cockpit-quota-footer]{appearance:none;-webkit-appearance:none;position:fixed;transform:translate(-50%,-50%);z-index:2;display:flex;align-items:center;justify-content:center;gap:0;width:max-content;height:28px;box-sizing:border-box;font:inherit;font-size:12px;font-weight:500;line-height:17px;color:var(--color-token-text-secondary,#737373);background:var(--color-token-main-surface-primary,#fff);border:1px solid rgba(127,127,127,.12);border-radius:9px;padding:0 6px;margin:0;white-space:nowrap;pointer-events:auto;cursor:pointer;box-shadow:none}
@@ -399,5 +484,6 @@
     }, 1000);
   }
   render();
-  return {refreshRequestToken: pendingRefreshToken, selectedModel: observedModelThisRender, threadId: root.threadId || null, dialogRequest: usageDialog.query(root)};
+  return {refreshRequestToken: pendingRefreshToken, selectedModel: observedModelThisRender, usageSelection:usageSelectionThisRender,
+    threadId: root.threadId || null, dialogRequest: usageDialog.query(root)};
 })()

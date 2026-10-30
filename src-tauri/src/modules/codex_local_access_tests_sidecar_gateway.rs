@@ -721,7 +721,8 @@
         append_eligible_local_access_account_ids, append_usage_event,
         apply_account_usage_priority_ids, apply_codex_image_model_visibility,
         apply_codex_official_headers, apply_routing_strategy,
-        backup_current_profile_model_before_provider_gateway, bridge_websocket_streams,
+        backup_current_profile_model_before_provider_gateway, bound_oauth_quota_refresh_failures,
+        bound_oauth_quota_reserve_blocks_account, bridge_websocket_streams,
         build_account_scoped_upstream_body, build_base_url_with_host,
         build_chat_completion_payload, build_chat_completion_stream_body,
         build_codex_client_models_response, build_collection_base_url, build_images_api_payload,
@@ -735,6 +736,7 @@
         collect_local_access_profile_takeover_dirs_from_store, compare_routing_candidates,
         count_request_logs_for_model_ids, default_codex_model_ids, effective_api_key_account_ids,
         empty_stats_snapshot, extract_usage_capture,
+        filter_bound_oauth_quota_reserve_account,
         filter_websocket_client_message, insert_local_access_usage_event,
         load_stats_windows_and_recent_events_from_conn,
         inspect_local_access_profile_attachment, inspect_local_access_profile_config,
@@ -800,7 +802,7 @@
         CodexLocalAccessScope, CodexModelProviderGatewayChatTestRequest, GatewayResponseAdapter,
         ParsedRequest, ResolvedLocalApiKey, ResponseUsageCollector, RoutingCandidate,
         SidecarUsageDetails, SidecarUsageEvent, UsageCapture,
-        CODEX_AUTO_REVIEW_MODEL_ID,
+        BOUND_OAUTH_QUOTA_RESERVE_MAX_SNAPSHOT_AGE_SECONDS, CODEX_AUTO_REVIEW_MODEL_ID,
         CODEX_GPT_RESERVE_MODEL_ID,
         CODEX_IMAGEGEN_ACTOR_HEADER, CODEX_IMAGE_MODEL_ID,
         DEFAULT_CODEX_IMAGE_GENERATION_MODEL,
@@ -829,7 +831,7 @@
         CodexLocalAccessApiKey, CodexLocalAccessClientBaseUrlHost,
         CodexLocalAccessCustomRoutingRule, CodexLocalAccessImageGenerationMode,
         CodexLocalAccessModelRoute, CodexLocalAccessModelRouting,
-        CodexLocalAccessProviderGateway, CodexLocalAccessRequestKind,
+        CodexLocalAccessProviderGateway, CodexLocalAccessQuotaReserve, CodexLocalAccessRequestKind,
         CodexLocalAccessRoutingStrategy, CodexLocalAccessStats, CodexLocalAccessStatsWindow,
         CodexLocalAccessTimeouts, CodexLocalAccessUsageEvent, CodexTokenBreakdown,
     };
@@ -1122,6 +1124,7 @@
             model_pricings: Vec::new(),
             excluded_models: Vec::new(),
             session_affinity: true,
+            session_identity_mapping_enabled: true,
             session_affinity_ttl_ms: DEFAULT_SESSION_AFFINITY_TTL_MS,
             session_affinity_default_enabled_migrated: true,
             responses_websockets_enabled: false,
@@ -1140,7 +1143,7 @@
             account_concurrency_default_migrated: true,
             account_concurrency_wait_ms: DEFAULT_ACCOUNT_CONCURRENCY_WAIT_MS,
             bound_oauth_account_id: None,
-
+            bound_oauth_quota_reserve: None,
             account_ids,
             created_at: 0,
             updated_at: 0,
@@ -2671,6 +2674,11 @@ http_headers = { "x-cockpit-instance-id" = "default" }
             excluded_models: vec!["gpt-5.4-mini".to_string()],
         }];
         collection.bound_oauth_account_id = Some("account-b".to_string());
+        collection.bound_oauth_quota_reserve = Some(CodexLocalAccessQuotaReserve {
+            hourly_percent: 20,
+            weekly_percent: 30,
+            strict: false, safety_margin_percent: 3,
+});
 
         let changed = remove_account_refs_from_collection(
             &mut collection,
@@ -2687,6 +2695,7 @@ http_headers = { "x-cockpit-instance-id" = "default" }
         assert_eq!(collection.custom_routing_rules[0].account_id, "account-c");
         assert!(collection.account_model_rules.is_empty());
         assert!(collection.bound_oauth_account_id.is_none());
+        assert!(collection.bound_oauth_quota_reserve.is_none());
     }
 
     #[test]
@@ -4022,3 +4031,5 @@ http_headers = { "x-cockpit-instance-id" = "default" }
 
         fs::remove_dir_all(profile_dir).expect("cleanup overlay profile");
     }
+
+    include!("codex_local_access_tests_sidecar_reserve.rs");

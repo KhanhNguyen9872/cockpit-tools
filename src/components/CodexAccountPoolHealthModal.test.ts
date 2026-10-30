@@ -52,7 +52,7 @@ function pool(patch: Partial<CodexLocalAccessAccountPoolHealth> = {}): CodexLoca
     apiKeyId: "key-1", apiKeyLabel: "Client A", provider: "codex", model: "gpt-6-astra",
     requestKind: "text", errorCode: "auth_not_found", errorMessage: "no auth available",
     diagnosticAvailable: false, candidateAuths: 0, scopedAuths: 0, availableAuths: 0,
-    unavailableAuths: 0, modelExcludedAuths: 0, imagePolicyBlockedAuths: 0,
+    unavailableAuths: 0, modelExcludedAuths: 0, quotaReservedAuths: 0, imagePolicyBlockedAuths: 0,
     accountStatuses: [], lastFailureAt: 1, ...patch,
   };
 }
@@ -219,7 +219,7 @@ test("reported members use backend attribution even with a client model alias", 
 });
 
 test("model and policy failures offer no recovery, including bulk recovery via account health", () => {
-  for (const reason of ["model_not_supported", "model_not_available", "not_found", "model_excluded", "model_disabled", "image_policy_blocked", "disabled", "pool_unavailable"]) {
+  for (const reason of ["model_not_supported", "model_not_available", "not_found", "model_excluded", "model_disabled", "quota_reserved", "image_policy_blocked", "disabled", "pool_unavailable"]) {
     assertNoRecovery(render({ accountHealth: [health("deepseek", { schedulerReason: reason })] }).tree);
     const { tree } = render({
       accountHealth: [health("deepseek")],
@@ -301,7 +301,7 @@ test("selection-stage reasons distinguish unknown diagnostics, missing candidate
   assert.equal(reason({ diagnosticAvailable: true }), "poolNoCandidatesDetail");
   assert.equal(reason({ diagnosticAvailable: true, candidateAuths: 1 }), "poolScopeMismatchDetail");
   assert.equal(reason({ diagnosticAvailable: true, candidateAuths: 1, scopedAuths: 1 }), "poolUnknownDetail");
-  for (const counter of ["unavailableAuths", "modelExcludedAuths", "imagePolicyBlockedAuths"] as const) {
+  for (const counter of ["unavailableAuths", "modelExcludedAuths", "quotaReservedAuths", "imagePolicyBlockedAuths"] as const) {
     const result = codexAccountPoolDiagnosticReason(pool({ diagnosticAvailable: true, candidateAuths: 2, scopedAuths: 2, [counter]: 1 }));
     assert.ok(result.key.endsWith("poolBlockedDetail"));
     assert.equal(Object.values(result.values).filter((count) => count === 1).length, 1);

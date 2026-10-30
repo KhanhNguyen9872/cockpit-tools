@@ -16,6 +16,7 @@ const (
 	codexBuiltinImage25SunburstModelID = "gpt-image-2.5-sunburst"
 	codexBuiltinImageModelID           = "gpt-image-2.5"
 	codexBuiltinGPT61SolModelID        = "gpt-6.1-sol"
+	codexBuiltinGPT61TerraModelID      = "gpt-6.1-terra"
 	codexBuiltinGPT6AstraModelID       = "gpt-6-astra"
 	codexBuiltinGPT6SolModelID         = "gpt-6-sol"
 	codexBuiltinGPT6LunaModelID        = "gpt-6-luna"
@@ -180,16 +181,18 @@ func withCodexPaidBuiltins(models []*ModelInfo) []*ModelInfo {
 	models = upsertModelInfos(
 		WithCodexBuiltins(models),
 		codexBuiltinGPT61SolModelInfo(),
+		codexBuiltinGPT61TerraModelInfo(),
 		codexBuiltinGPT6AstraModelInfo(),
 		codexBuiltinGPT6SolModelInfo(),
 		codexBuiltinGPT6LunaModelInfo(),
 	)
-	// Promote the shipped GPT-6 family to the front in 6.1 sol, astra, sol, luna order.
+	// Promote the shipped GPT-6 family to the front in 6.1 sol, terra, astra, sol, luna order.
 	// Applying the single-model helper from the last ID backwards leaves the
 	// relative order of every other model untouched.
 	models = prioritizeModelInfoByID(models, codexBuiltinGPT6LunaModelID)
 	models = prioritizeModelInfoByID(models, codexBuiltinGPT6SolModelID)
 	models = prioritizeModelInfoByID(models, codexBuiltinGPT6AstraModelID)
+	models = prioritizeModelInfoByID(models, codexBuiltinGPT61TerraModelID)
 	return prioritizeModelInfoByID(models, codexBuiltinGPT61SolModelID)
 }
 
@@ -282,6 +285,16 @@ func codexBuiltinGPT61SolModelInfo() *ModelInfo {
 		SupportedInputModalities: []string{"text", "image"}, SupportedOutputModalities: []string{"text"},
 		Thinking: &ThinkingSupport{Levels: []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
 	}
+}
+
+func codexBuiltinGPT61TerraModelInfo() *ModelInfo {
+	model := codexBuiltinGPT6LunaModelInfo()
+	model.Created = 0
+	model.ID = codexBuiltinGPT61TerraModelID
+	model.Version = codexBuiltinGPT61TerraModelID
+	model.DisplayName = "GPT-6.1 Terra"
+	model.Description = "A fast, efficient model for visual reasoning, computer use, and writing."
+	return model
 }
 
 func codexBuiltinGPT6AstraModelInfo() *ModelInfo {

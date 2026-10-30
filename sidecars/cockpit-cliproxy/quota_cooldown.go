@@ -253,7 +253,7 @@ func (s *quotaCooldownSelector) Pick(ctx context.Context, provider, model string
 		if nextCtx, recovered := maybeAutoRecoverAuthPool(ctx, s.manifest, model, auths); recovered {
 			return s.Pick(nextCtx, provider, model, opts, auths)
 		}
-		err := noAuthAvailableError()
+		err := noAuthAvailableError(nil)
 		return nil, s.ReportAuthSelectionFailure(ctx, provider, model, auths, err)
 	}
 	return s.fallback.Pick(ctx, provider, model, opts, filtered)
@@ -371,6 +371,9 @@ func shouldAutoRecoverAuth(m *manifest, auth *coreauth.Auth, model, requestKind 
 	if isImageRequestKind(requestKind) && account != nil && !imageGenerationAllowedForAccount(account) {
 		return false
 	}
+	if quotaReserveBlockReasonWithState(account, nil, now) != "" {
+		return false
+	}
 	return true
 }
 
@@ -393,7 +396,7 @@ func clearRuntimeAuthAvailability(auth *coreauth.Auth) {
 
 func poolMemberRecoverableReason(code string) bool {
 	switch strings.ToLower(strings.TrimSpace(code)) {
-	case "disabled", "missing", "model_excluded", "model_disabled", "image_policy_blocked":
+	case "disabled", "missing", "model_excluded", "model_disabled", "image_policy_blocked", "quota_reserved":
 		return false
 	default:
 		return true

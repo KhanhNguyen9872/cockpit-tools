@@ -1,3 +1,4 @@
+use crate::modules::codex_native_api::deadline::{self, Deadline};
 use std::{collections::VecDeque, sync::Arc};
 
 use axum::{
@@ -98,7 +99,7 @@ async fn run(
     mut policy: ExecutionPolicy,
 ) {
     let client_headers = headers.clone();
-    let first = match first_create(&state, &mut socket, policy.websocket_initial_timeout).await {
+    let first = match first_create(&state, &mut socket).await {
         Ok(body) => body,
         Err(error) => {
             // Shutdown may race a client's Close frame. Until a valid create
@@ -202,7 +203,7 @@ async fn run(
     let mut last_local_checkpoint_id: Option<String> = None;
     let mut interrupt_pending = false;
     let mut observation = ResponseObservation::default();
-    let mut output_items = super::output_items::OutputCollector::new(state.options.max_event_bytes);
+    let mut output_items = super::output_items::OutputCollector::new();
     // Publishing an idle handshake makes response.interrupt possible, but does
     // not prove execution. Retain the bounded pre-business fence after both
     // fresh opens and reused response.create sends, even after MAX_HOLD.
@@ -219,10 +220,10 @@ async fn run(
             let mut stop = state.stop.clone();
             tokio::select! {
                 _ = stop.wait() => return Err(stopping_error()),
-                _ = tokio::time::sleep_until(client_deadline), if !active => return Err(ServiceError::new(408, "websocket_idle_timeout", "Client WebSocket is idle")),
-                _ = tokio::time::sleep_until(upstream_deadline), if active => return Err(ServiceError::new(504, "upstream_idle_timeout", "Upstream WebSocket stopped responding")),
-                _ = tokio::time::sleep_until(turn_deadline), if active => return Err(super::retry::total_timeout()),
-                _ = tokio::time::sleep_until(reused_hold_deadline), if probe_reused && !reused_handshake.is_empty() => {
+                _ = deadline::sleep_until(client_deadline), if !active => return Err(ServiceError::new(408, "websocket_idle_timeout", "Client WebSocket is idle")),
+                _ = deadline::sleep_until(upstream_deadline), if active => return Err(ServiceError::new(504, "upstream_idle_timeout", "Upstream WebSocket stopped responding")),
+                _ = deadline::sleep_until(turn_deadline), if active => return Err(super::retry::total_timeout()),
+                _ = deadline::sleep_until(reused_hold_deadline), if probe_reused && !reused_handshake.is_empty() => {
                     // Make the active ID available for response.interrupt without
                     // treating elapsed time as evidence of model/tool execution.
                     let mut events = Vec::new();
@@ -241,13 +242,13 @@ async fn run(
                         }
                         tracker.first_response();
                         tracker.payload("upstream_response", "websocket", &HeaderMap::new(), &text);
-                        timed_client_until(&state, Some(turn_deadline), client_sink.send(Message::Text(text.into()))).await?;
+                        timed_client_until(&state, turn_deadline.instant(), client_sink.send(Message::Text(text.into()))).await?;
                     }
                 },
-                _ = tokio::time::sleep_until(heartbeat_deadline), if !policy.websocket_heartbeat.is_zero() => {
+                _ = deadline::sleep_until(heartbeat_deadline), if !policy.websocket_heartbeat.is_zero() => {
                     heartbeat_deadline = tokio::time::Instant::now() + policy.websocket_heartbeat;
-                    if let Some(sink) = &mut upstream_sink { timed_until(&state, active.then_some(turn_deadline), sink.send(UpstreamMessage::Ping(Vec::new().into()))).await?; }
-                    timed_client_until(&state, active.then_some(turn_deadline), client_sink.send(Message::Ping(Vec::new().into()))).await?;
+                    if let Some(sink) = &mut upstream_sink { timed_until(&state, active.then_some(turn_deadline).and_then(Deadline::instant), sink.send(UpstreamMessage::Ping(Vec::new().into()))).await?; }
+                    timed_client_until(&state, active.then_some(turn_deadline).and_then(Deadline::instant), client_sink.send(Message::Ping(Vec::new().into()))).await?;
                 },
                 next = async {
                     if !active {
@@ -263,18 +264,18 @@ async fn run(
                             return if active { Err(ServiceError::new(499, "client_disconnected", "Client WebSocket disconnected")) } else { Ok(()) };
                         }
                         Some(Ok(Message::Ping(value))) => {
-                            timed_client_until(&state, active.then_some(turn_deadline), client_sink.send(Message::Pong(value))).await?;
+                            timed_client_until(&state, active.then_some(turn_deadline).and_then(Deadline::instant), client_sink.send(Message::Pong(value))).await?;
                         }
                         Some(Ok(Message::Pong(_))) => {}
                         Some(Ok(Message::Binary(_))) => {
                             let error = ServiceError::new(400, "invalid_websocket_message", "Responses WebSocket requires JSON text messages");
-                            timed_client_until(&state, active.then_some(turn_deadline), client_sink.send(Message::Text(error_event(&error).to_string().into()))).await?;
+                            timed_client_until(&state, active.then_some(turn_deadline).and_then(Deadline::instant), client_sink.send(Message::Text(error_event(&error).to_string().into()))).await?;
                         },
                         Some(Ok(Message::Text(text))) => {
                             let body: Value = match super::request_body::websocket_json(&state, text.clone()).await {
                                 Ok(body) => body,
                                 Err(error) => {
-                                    timed_client_until(&state, active.then_some(turn_deadline), client_sink.send(Message::Text(error_event(&error).to_string().into()))).await?;
+                                    timed_client_until(&state, active.then_some(turn_deadline).and_then(Deadline::instant), client_sink.send(Message::Text(error_event(&error).to_string().into()))).await?;
                                     continue;
                                 }
                             };
@@ -282,7 +283,7 @@ async fn run(
                                 Some("response.create" | "response.append") => {
                                     if active {
                                         if let Some(error) = enqueue_request(&mut pending_messages, text.as_str()) {
-                                            timed_client_until(&state, Some(turn_deadline), client_sink.send(Message::Text(error_event(&error).to_string().into()))).await?;
+                                            timed_client_until(&state, turn_deadline.instant(), client_sink.send(Message::Text(error_event(&error).to_string().into()))).await?;
                                         }
                                         continue;
                                     }
@@ -300,7 +301,7 @@ async fn run(
                                     refresh_rebuild_policy(&state, &tracker, &mut policy).await?;
                                     let execution = super::execution::Execution::new(&tracker, &policy);
                                     turn_deadline = execution.total_deadline;
-                                    let capture = tokio::time::timeout_at((tokio::time::Instant::now()+state.options.request_timeout).min(execution.prepare_deadline()), state.host.payload_logging_enabled()).await.unwrap_or(false);
+                                    let capture = deadline::timeout_at((tokio::time::Instant::now()+state.options.request_timeout).min(execution.prepare_deadline()), state.host.payload_logging_enabled()).await.unwrap_or(false);
                                     tracker.context("GET", "/v1/responses", &client_headers, capture);
                                     tracker.authorized(&caller, &requested_model);
                                     let next = execution.run(super::execution::prepare(&state, prepare_next_turn(&state, &caller, &headers, body, interrupted_owner.as_ref().map(|owner| owner.account.as_str()), &prepared, &history))).await?;
@@ -315,7 +316,7 @@ async fn run(
                                     tracker.track_rebuild(prepared.binding.rebuild_abort_handle());
                                     tracker.prepared_metadata(&prepared);
                                     active = true; response_id = None; interrupt_pending = false; observation = ResponseObservation::default(); last_local_checkpoint_id = None;
-                                    output_items = super::output_items::OutputCollector::new(state.options.max_event_bytes);
+                                    output_items = super::output_items::OutputCollector::new();
                                     probe_reused = pre_business_enabled(&prepared, upstream_local);
                                     opening_retries = OpeningRetries::default();
                                     reused_handshake.clear();
@@ -348,8 +349,9 @@ async fn run(
                                             prepared.multi_agent_context.inherit_plaintext(&previous_multi_agent_context);
                                         }
                                         let sink = upstream_sink.as_mut().ok_or_else(|| ServiceError::new(500, "websocket_transport_unavailable", "Upstream transport is unavailable"))?;
+                                        tracker.check_quota_before_send()?;
                                         history.begin(&prepared);
-                                        timed_until(&state, Some(turn_deadline), async {
+                                        timed_until(&state, turn_deadline.instant(), async {
                                             if tokio::time::Instant::now() >= turn_deadline { return Err(tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "WebSocket write timed out"))); }
                                             tracker.begin_attempt("websocket");
                                             tracker.capability_fallback(prepared.capability_fallback.clone());
@@ -364,7 +366,7 @@ async fn run(
                                     if target.is_some_and(|id| completed_ids.iter().any(|completed| completed == id)) && (!active || target != response_id.as_deref()) { continue; }
                                     if !active || target.is_none() || target != response_id.as_deref() {
                                         let error = ServiceError::new(409, "unknown_interrupt_response", "Interrupt must refer to this connection's active response");
-                                        timed_client_until(&state, active.then_some(turn_deadline), client_sink.send(Message::Text(error_event(&error).to_string().into()))).await?;
+                                        timed_client_until(&state, active.then_some(turn_deadline).and_then(Deadline::instant), client_sink.send(Message::Text(error_event(&error).to_string().into()))).await?;
                                         continue;
                                     }
                                     if upstream_http {
@@ -390,13 +392,13 @@ async fn run(
                                     if !interrupt_pending {
                                         // An explicit client interrupt is not a retryable rejection.
                                         probe_reused = false;
-                                        if let Some(sink) = &mut upstream_sink { timed_until(&state, Some(turn_deadline), sink.send(UpstreamMessage::Text(text.to_string().into()))).await?; }
+                                        if let Some(sink) = &mut upstream_sink { timed_until(&state, turn_deadline.instant(), sink.send(UpstreamMessage::Text(text.to_string().into()))).await?; }
                                         interrupt_pending = true;
                                     }
                                 }
                                 _ => {
                                     let error = ServiceError::new(400, "unsupported_websocket_event", "Expected response.create or response.interrupt");
-                                    timed_client_until(&state, active.then_some(turn_deadline), client_sink.send(Message::Text(error_event(&error).to_string().into()))).await?;
+                                    timed_client_until(&state, active.then_some(turn_deadline).and_then(Deadline::instant), client_sink.send(Message::Text(error_event(&error).to_string().into()))).await?;
                                 },
                             }
                         }
@@ -412,7 +414,7 @@ async fn run(
                             return if active { Err(ServiceError::new(502, "incomplete_upstream_stream", "Upstream closed before completing the response")) } else { Ok(()) };
                         }
                         Some(Err(error)) => return Err(error),
-                        Some(Ok(UpstreamMessage::Ping(value))) => { if let Some(sink) = &mut upstream_sink { timed_until(&state, Some(turn_deadline), sink.send(UpstreamMessage::Pong(value))).await?; } }
+                        Some(Ok(UpstreamMessage::Ping(value))) => { if let Some(sink) = &mut upstream_sink { timed_until(&state, turn_deadline.instant(), sink.send(UpstreamMessage::Pong(value))).await?; } }
                         Some(Ok(UpstreamMessage::Pong(_))) | Some(Ok(UpstreamMessage::Frame(_))) => {}
                         Some(Ok(UpstreamMessage::Binary(_))) => return Err(ServiceError::new(502, "invalid_upstream_event", "Upstream Responses WebSocket returned a binary message")),
                         Some(Ok(UpstreamMessage::Text(text))) => {
@@ -506,7 +508,7 @@ async fn run(
                                 let mut downstream = None;
                                 if interrupt_pending && protocol::is_interrupt_rejection(&event) {
                                     interrupt_pending = false;
-                                    timed_client_until(&state, Some(turn_deadline), client_sink.send(Message::Text(text.into()))).await?;
+                                    timed_client_until(&state, turn_deadline.instant(), client_sink.send(Message::Text(text.into()))).await?;
                                     continue;
                                 }
                                 let original = (!upstream_local && matches!(event["type"].as_str(),
@@ -559,7 +561,7 @@ async fn run(
                                     if upstream_http { upstream_stream = futures_util::stream::empty().boxed(); }
                                     client_deadline = tokio::time::Instant::now() + policy.websocket_idle_timeout;
                                 }
-                                match timed_client_until(&state, active.then_some(turn_deadline), client_sink.send(Message::Text(text.into()))).await {
+                                match timed_client_until(&state, active.then_some(turn_deadline).and_then(Deadline::instant), client_sink.send(Message::Text(text.into()))).await {
                                     Ok(()) => { if let Some(outcome) = downstream.as_mut() { outcome.success(); } },
                                     Err(error) => { if let Some(outcome) = downstream.as_mut() { outcome.fail(&error); } return Err(error); },
                                 }
@@ -595,7 +597,7 @@ async fn while_connected<T>(
     state: &AppState,
     socket: &mut WebSocket,
     pending: &mut VecDeque<String>,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     future: impl std::future::Future<Output = Result<T, ServiceError>>,
 ) -> Result<T, ServiceError> {
     tokio::pin!(future);
@@ -603,17 +605,17 @@ async fn while_connected<T>(
         tokio::select! {
             result = &mut future => return result,
             next = socket.recv() => match next {
-                Some(Ok(Message::Ping(value))) => timed_until(state, Some(deadline), socket.send(Message::Pong(value))).await?,
+                Some(Ok(Message::Ping(value))) => timed_until(state, deadline.instant(), socket.send(Message::Pong(value))).await?,
                 Some(Ok(Message::Pong(_))) => {},
                 None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return Err(ServiceError::new(499, "client_disconnected", "Client WebSocket disconnected")),
                 Some(Ok(Message::Text(text))) => {
                     if let Some(error) = opening_control(state, text, pending).await {
-                        timed_client_until(state, Some(deadline), socket.send(Message::Text(error_event(&error).to_string().into()))).await?;
+                        timed_client_until(state, deadline.instant(), socket.send(Message::Text(error_event(&error).to_string().into()))).await?;
                     }
                 },
                 Some(Ok(Message::Binary(_))) => {
                     let error = ServiceError::new(400, "invalid_websocket_message", "Responses WebSocket requires JSON text messages");
-                    timed_client_until(state, Some(deadline), socket.send(Message::Text(error_event(&error).to_string().into()))).await?;
+                    timed_client_until(state, deadline.instant(), socket.send(Message::Text(error_event(&error).to_string().into()))).await?;
                 },
             }
         }
@@ -716,7 +718,7 @@ async fn while_split_connected<T>(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
     pending: &mut VecDeque<String>,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     future: impl std::future::Future<Output = Result<T, ServiceError>>,
 ) -> Result<T, ServiceError> {
     tokio::pin!(future);
@@ -724,17 +726,17 @@ async fn while_split_connected<T>(
         tokio::select! {
             result = &mut future => return result,
             next = stream.next() => match next {
-                Some(Ok(Message::Ping(value))) => timed_until(state, Some(deadline), sink.send(Message::Pong(value))).await?,
+                Some(Ok(Message::Ping(value))) => timed_until(state, deadline.instant(), sink.send(Message::Pong(value))).await?,
                 Some(Ok(Message::Pong(_))) => {},
                 None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return Err(ServiceError::new(499, "client_disconnected", "Client WebSocket disconnected")),
                 Some(Ok(Message::Text(text))) => {
                     if let Some(error) = opening_control(state, text, pending).await {
-                        timed_client_until(state, Some(deadline), sink.send(Message::Text(error_event(&error).to_string().into()))).await?;
+                        timed_client_until(state, deadline.instant(), sink.send(Message::Text(error_event(&error).to_string().into()))).await?;
                     }
                 },
                 Some(Ok(Message::Binary(_))) => {
                     let error = ServiceError::new(400, "invalid_websocket_message", "Responses WebSocket requires JSON text messages");
-                    timed_client_until(state, Some(deadline), sink.send(Message::Text(error_event(&error).to_string().into()))).await?;
+                    timed_client_until(state, deadline.instant(), sink.send(Message::Text(error_event(&error).to_string().into()))).await?;
                 },
             }
         }
@@ -746,7 +748,7 @@ async fn open_response(
     prepared: &mut Prepared,
     tracker: &mut RequestTracker,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     mut retries: OpeningRetries,
 ) -> Result<
     (
@@ -800,16 +802,14 @@ async fn open_response(
         let headers = websocket_headers(&headers, prepared.route.chatgpt);
         let wire_headers = headers.clone();
         let upstream_identity = super::diagnostics::capture_header_identity(&headers);
+        tracker.check_quota_before_send()?;
         let connected = super::transport::connect_websocket_tracked(
             &prepared.route,
             &url,
             headers,
             state.options.max_event_bytes,
             policy.websocket_connect_timeout.min(
-                prepared
-                    .execution
-                    .prepare_deadline()
-                    .min(deadline)
+                deadline.cap(prepared.execution.prepare_deadline())
                     .saturating_duration_since(tokio::time::Instant::now()),
             ),
             state.stop.clone(),
@@ -868,8 +868,9 @@ async fn open_response(
             &wire_body.to_string(),
         );
         let initial = async {
-            timed_until(state, Some(deadline), upstream.send(UpstreamMessage::Text(wire_body.to_string().into()))).await?;
-            let initial_deadline = (tokio::time::Instant::now() + policy.websocket_initial_timeout).min(deadline);
+            tracker.check_quota_before_send()?;
+            timed_until(state, deadline.instant(), upstream.send(UpstreamMessage::Text(wire_body.to_string().into()))).await?;
+            let initial_deadline = deadline.cap(tokio::time::Instant::now() + policy.websocket_initial_timeout);
             let mut buffered = Vec::new();
             let mut size = 0usize;
             let mut hold_deadline = None;
@@ -877,8 +878,8 @@ async fn open_response(
                 let mut stop = state.stop.clone();
                 let next = tokio::select! {
                     _ = stop.wait() => return Err(stopping_error()),
-                    _ = tokio::time::sleep_until(hold_deadline.unwrap_or(initial_deadline)), if hold_deadline.is_some() => return Ok(buffered),
-                    result = tokio::time::timeout_at(initial_deadline, upstream.next()) => result.map_err(|_| {
+                    _ = deadline::sleep_until(hold_deadline.unwrap_or(initial_deadline)), if hold_deadline.is_some() => return Ok(buffered),
+                    result = deadline::timeout_at(initial_deadline, upstream.next()) => result.map_err(|_| {
                         if tokio::time::Instant::now() >= deadline { super::retry::total_timeout() }
                         else { ServiceError::new(504, "websocket_initial_timeout", "Upstream WebSocket did not send its first event") }
                     })?,
@@ -1034,7 +1035,7 @@ async fn retry_opening_failure(
     prepared: &mut Prepared,
     tracker: &mut RequestTracker,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     retries: &mut OpeningRetries,
     error: &ServiceError,
     kind: OpeningFailure,
@@ -1072,7 +1073,7 @@ async fn retry_opening_failure(
         let mut stop = state.stop.clone();
         let refresh = tokio::select! {
             _ = stop.wait() => return Err(stopping_error()),
-            result = tokio::time::timeout_at(deadline, mapping::refresh(state, prepared)) => result.map_err(|_| super::retry::total_timeout())?,
+            result = deadline::timeout_at(deadline, mapping::refresh(state, prepared)) => result.map_err(|_| super::retry::total_timeout())?,
         };
         retries.refreshed = true;
         match refresh {
@@ -1139,7 +1140,7 @@ async fn retry_opening_failure(
         let mut stop = state.stop.clone();
         tokio::select! {
             _ = stop.wait() => return Err(stopping_error()),
-            result = tokio::time::timeout_at(deadline, state.host.route_failed_attempt(&prepared.route, &prepared.route.model, if model_unavailable { 404 } else { error.status }, wait, error.credential_scope, Some(&error.message))) => result.map_err(|_| super::retry::total_timeout())?,
+            result = deadline::timeout_at(deadline, state.host.route_failed_attempt(&prepared.route, &prepared.route.model, if model_unavailable { 404 } else { error.status }, wait, error.credential_scope, Some(&error.message))) => result.map_err(|_| super::retry::total_timeout())?,
         }
     }
     // Authentication failures and throttling must never spend network retries.
@@ -1157,7 +1158,7 @@ async fn retry_opening_failure(
         let mut stop = state.stop.clone();
         let replacement = tokio::select! {
             _ = stop.wait() => return Err(stopping_error()),
-            result = tokio::time::timeout_at(deadline, mapping::retry_other_account(state, prepared)) => result.map_err(|_| super::retry::total_timeout())?,
+            result = deadline::timeout_at(deadline, mapping::retry_other_account(state, prepared)) => result.map_err(|_| super::retry::total_timeout())?,
         };
         match replacement {
             Ok(()) => {
@@ -1362,14 +1363,13 @@ async fn opening_control(
 async fn first_create(
     state: &AppState,
     socket: &mut WebSocket,
-    timeout: std::time::Duration,
 ) -> Result<Value, ServiceError> {
-    let deadline = tokio::time::Instant::now() + timeout;
+    let deadline = Deadline::NONE;
     loop {
         let mut stop = state.stop.clone();
         let next = tokio::select! {
             _ = stop.wait() => return Err(stopping_error()),
-            result = tokio::time::timeout_at(deadline, socket.recv()) => result.map_err(|_| ServiceError::new(408, "websocket_start_timeout", "No response.create was received before the deadline"))?,
+            result = deadline::timeout_at(deadline, socket.recv()) => result.map_err(|_| ServiceError::new(408, "websocket_start_timeout", "No response.create was received before the deadline"))?,
         };
         match next {
             Some(Ok(Message::Text(text))) => {
@@ -1379,7 +1379,7 @@ async fn first_create(
                     Err(error) if error.status == 400 => {
                         timed_client_until(
                             state,
-                            Some(deadline),
+                            deadline.instant(),
                             socket.send(Message::Text(error_event(&error).to_string().into())),
                         )
                         .await?;
@@ -1395,13 +1395,13 @@ async fn first_create(
                 );
                 timed_client_until(
                     state,
-                    Some(deadline),
+                    deadline.instant(),
                     socket.send(Message::Text(error_event(&error).to_string().into())),
                 )
                 .await?;
             }
             Some(Ok(Message::Ping(value))) => {
-                timed_client_until(state, Some(deadline), socket.send(Message::Pong(value)))
+                timed_client_until(state, deadline.instant(), socket.send(Message::Pong(value)))
                     .await?;
             }
             Some(Ok(Message::Pong(_))) => {}
@@ -1480,7 +1480,7 @@ async fn timed_write<T, E: std::error::Error + 'static>(
     tokio::select! {
         biased;
         _ = stop.wait() => Err(stopping_error()),
-        result = tokio::time::timeout_at(write_deadline, future) => result
+        result = deadline::timeout_at(write_deadline, future) => result
             .map_err(|_| ServiceError::new(504, "websocket_send_timeout", "WebSocket write timed out"))?
             .map_err(|error| super::diagnostics::transport_failure(502, "websocket_send_failed", "WebSocket write failed", &error)),
     }
@@ -1656,7 +1656,7 @@ async fn refresh_rebuild_policy(
     policy: &mut ExecutionPolicy,
 ) -> Result<(), ServiceError> {
     let deadline = super::execution::Execution::new(tracker, policy).prepare_deadline();
-    let current = tokio::time::timeout_at(deadline, super::retry::execution_policy(state))
+    let current = deadline::timeout_at(deadline, super::retry::execution_policy(state))
         .await
         .map_err(|_| {
             ServiceError::new(

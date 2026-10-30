@@ -168,6 +168,10 @@ func lookupCodexClientModelTemplate(templates map[string]map[string]any, id stri
 	if template, ok := templates[id]; ok {
 		return template, true
 	}
+	if id == "gpt-6.1-terra" {
+		template, ok := templates["gpt-6-luna"]
+		return template, ok
+	}
 	if id == "gpt-reserve" {
 		template, ok := templates["gpt-5.6-luna"]
 		return template, ok

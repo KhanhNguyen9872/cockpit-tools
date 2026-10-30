@@ -1,3 +1,5 @@
+import type { CodexLocalAccessOAuthQuotaReserve } from '../types/codexLocalAccess';
+
 export const CODEX_OPEN_ADD_ACCOUNT_EVENT = 'codex-open-add-account';
 export const CODEX_SUITE_ENSURE_MOUNTED_EVENT = 'codex-suite-ensure-mounted';
 
@@ -12,6 +14,7 @@ export type CodexAddAccountTab =
 export type CodexOAuthBindingRetryDetail = {
   targetKind: 'local_access' | 'api_key_account';
   targetAccountId?: string;
+  quotaReserve?: CodexLocalAccessOAuthQuotaReserve | null;
 };
 
 export type CodexOpenAddAccountDetail = {
@@ -48,6 +51,7 @@ export function requestCodexOpenAddAccount(detail: CodexOpenAddAccountDetail = {
     ? {
         targetKind: detail.retryOAuthBinding.targetKind,
         targetAccountId: detail.retryOAuthBinding.targetAccountId?.trim() || undefined,
+        quotaReserve: detail.retryOAuthBinding.quotaReserve ?? null,
       }
     : undefined;
   const tab = detail.tab ?? 'tempLogin';

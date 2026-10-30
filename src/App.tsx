@@ -1,4 +1,7 @@
 import { CodexAccountServiceHost } from './components/codex/CodexAccountServiceHost';
+import { AppBackground } from './components/AppBackground';
+import { CodexPathRecoveryDialog } from './components/codex/CodexPathRecoveryDialog';
+import { recoverLegacyCodexPath } from './utils/codexPathRecoveryEvents';
 import { listenSafely as listen } from "./utils/tauriEventListener";
 import {
   Suspense,
@@ -415,7 +418,8 @@ type AppPathMissingDetail = {
   retry?:
     | { kind: 'default'; runtimeTarget?: string }
     | { kind: 'instance'; instanceId?: string; runtimeTarget?: string }
-    | { kind: 'switchAccount'; accountId?: string; runtimeTarget?: string };
+    | { kind: 'switchAccount'; accountId?: string; runtimeTarget?: string }
+    | { kind: 'codexCommand'; command: 'switch_codex_account' | 'codex_local_access_activate'; args: Record<string, unknown>; runtimeTarget?: undefined; instanceId?: undefined; accountId?: undefined };
 };
 
 type AppLaunchCandidate = {
@@ -3102,9 +3106,12 @@ function MainApp() {
     const handlePayload = (payload: unknown) => {
       if (!payload || typeof payload !== 'object') return;
       const detail = payload as AppPathMissingDetail;
+      if (detail.app === 'codex') {
+        recoverLegacyCodexPath(detail.retry);
+        return;
+      }
       if (
         detail.app !== 'antigravity' &&
-        detail.app !== 'codex' &&
         detail.app !== 'claude' &&
         detail.app !== 'vscode' &&
         detail.app !== 'windsurf' &&
@@ -3191,9 +3198,6 @@ function MainApp() {
             appPathMissing.retry?.kind === 'instance' &&
             isClaudeWindowsAppLaunchTarget(normalizedPath);
           setAppPathDraft(shouldClearClaudeDefaultTarget ? '' : normalizedPath);
-          if (appPathMissing.app === 'codex' && config.codex_launch_on_switch === false) {
-            setAppPathMissing(null);
-          }
         }
       } catch (error) {
         console.error('Failed to load app path config:', error);
@@ -3606,6 +3610,7 @@ function MainApp() {
     <div
       className={`app-container${isWindowsPlatform() ? ' app-container-windows' : ''}${sideNavLayoutMode === 'classic' ? ' app-container-side-nav-classic' : ''}${sideNavLayoutMode === 'classic' && sideNavClassicCollapsed ? ' app-container-side-nav-classic-collapsed' : ''}`}
     >
+      <AppBackground />
       {/* 更新通知：活跃状态时保持挂载，关闭后继续保留当前更新状态 */}
       {shouldRenderUpdateNotification && (
         <div style={showUpdateNotification ? undefined : { display: 'none' }}>
@@ -3696,14 +3701,6 @@ function MainApp() {
                     {t(
                       'appPath.missing.claudeMultiInstanceRequiresExe',
                       'Claude 应用多开需要真实 Claude.exe 路径；Microsoft Store 启动目标仅适用于默认桌面端。',
-                    )}
-                  </p>
-                ) : null}
-                {appPathMissing.app === 'codex' ? (
-                  <p className="app-path-missing-hint">
-                    {t(
-                      'appPath.missing.codexLaunchHint',
-                      '切号已完成。启动应用请先设置路径；若切号后不需要启动，请到设置中关闭「切换 Codex 时自动启动 Codex App」。',
                     )}
                   </p>
                 ) : null}
@@ -4029,11 +4026,11 @@ function MainApp() {
 
 function App() {
   const windowLabel = getCurrentWindow().label;
-  if (windowLabel === 'floating-card' || windowLabel.startsWith('instance-floating-card-')) {
-    return <FloatingCardWindow />;
-  }
-
-  return <MainApp />;
+  const floating = windowLabel === 'floating-card' || windowLabel.startsWith('instance-floating-card-');
+  return <>
+    {floating ? <FloatingCardWindow /> : <MainApp />}
+    <CodexPathRecoveryDialog />
+  </>;
 }
 
 export default App;

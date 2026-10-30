@@ -11,6 +11,8 @@ import { apiServiceProxyAccount } from "../services/codexProxyTargetService";
 import { CodexSpeedControl } from "../components/codex/CodexSpeedControl";
 import { CodexAccountProxyCard } from "../components/codex/CodexAccountProxyCard";
 import { canUseCodexAccountProxy } from "../utils/codexAccountProxy";
+import { resolveCodexAccountCardSkin } from "../utils/codexAccountCardSkin";
+import "../styles/pages/codex-account-card-skins.css";
 import { CodexTeamQuotaHistory } from "../components/codex/CodexTeamQuotaHistory";
 import { isCodexAccountReauthRequired, isCodexClientReauthNoticeOnly, isCodexRefreshTokenNoticeOnly, isCodexRefreshTokenReusedAccount, isCodexServerRevokedReauth } from "../utils/codexSwitchAuthFailure";
 import { CODEX_LAUNCH_PREVIEW_API_SERVICE_CARD_KEY } from "../utils/codexLaunchPreviewInstancePreference";
@@ -570,6 +572,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
         const meta = resolveAccountMeta(account);
         const isCurrent = overviewCurrentAccountId === account.id;
         const isApiKeyAccount = isCodexApiKeyAccount(account);
+        const cardSkin = isApiKeyAccount ? resolveCodexAccountCardSkin(account.api_base_url) : "";
         const serverRevokedReauth = isCodexServerRevokedReauth(account);
         const refreshTokenReusedState = isCodexRefreshTokenReusedAccount(account);
         const clientAuthRequired =
@@ -726,7 +729,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
           : isQuotaAwareApiKeyAccount
             ? "new-api-exclusive"
             : planClass;
-        const displayPlanLabel = isSponsorApiKeyAccount
+        const displayPlanLabel = isSponsorApiKeyAccount && cardSkin !== "codex-card-skin-apikey-fun"
           ? apiProviderName
           : presentation.planLabel;
         const cockpitApiAccountBalanceText =
@@ -757,7 +760,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
         return (
           <div
             key={groupKey ? `${groupKey}-${account.id}` : account.id}
-            className={`codex-account-card ${isCurrent ? "current" : ""} ${isSelected ? "selected" : ""} ${isPendingOAuthAccount ? "pending-auth" : ""} ${isNewApiAccount ? "new-api-exclusive" : ""} ${isQuotaAwareApiKeyAccount ? "api-key-usage-account" : ""} ${isSponsorApiKeyAccount ? "sponsor-api-account" : ""}`}
+            className={`codex-account-card ${isCurrent ? "current" : ""} ${isSelected ? "selected" : ""} ${isPendingOAuthAccount ? "pending-auth" : ""} ${isNewApiAccount ? "new-api-exclusive" : ""} ${isQuotaAwareApiKeyAccount ? "api-key-usage-account" : ""} ${isSponsorApiKeyAccount ? "sponsor-api-account" : ""} ${cardSkin}`}
           >
             <div className="card-top">
               <div className="card-select">
@@ -886,6 +889,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
               </div>
             )}
             <CodexAccountProxyCard account={account} placement="summary" />
+            {renderResetCreditControls(account, 'expiry')}
             {!isApiKeyAccount && (
               <div className="account-sub-line">
                 <span className="codex-login-subline" title={signInLine}>
@@ -1246,6 +1250,37 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
           "codex.switchAuth.reauthorizeDescription",
           "当前登录凭据无法自动更新，请重新授权后继续使用。",
         );
+      const quotaReserveStatus = localAccessState?.quotaReserveStatus ?? null;
+      const quotaReserveWarningLine =
+        quotaReserveStatus?.warning &&
+        quotaReserveStatus.effectiveWindow &&
+        quotaReserveStatus.effectiveRemainingPercent != null &&
+        quotaReserveStatus.effectiveReservePercent != null
+          ? `${
+              quotaReserveStatus.effectiveWindow === "weekly"
+                ? t(
+                    "codex.localAccess.oauthBinding.quotaReserveWeeklyLabel",
+                    "周保留",
+                  )
+                : t(
+                    "codex.localAccess.oauthBinding.quotaReserveHourlyLabel",
+                    "5 小时保留",
+                  )
+            }：${Number(quotaReserveStatus.effectiveRemainingPercent.toFixed(2))}% / ${quotaReserveStatus.effectiveReservePercent}%`
+          : null;
+      const quotaRuntimeLine = quotaReserveStatus ? [
+        (localAccessCollection?.gatewayMode ?? "native") === "native"
+          ? t("codex.localAccess.oauthBinding.quotaInFlight", { count: quotaReserveStatus.inFlight ?? 0 }) : null,
+        quotaReserveStatus.strict
+          ? `${t("codex.localAccess.oauthBinding.safetyMargin")} ${quotaReserveStatus.safetyMarginPercent} ${t("codex.localAccess.oauthBinding.safetyMarginUnit")}` : null,
+        quotaReserveStatus.awaitingConfirmation
+          ? t("codex.localAccess.oauthBinding.quotaWaiting")
+          : !quotaReserveStatus.snapshotFresh
+            ? t("codex.localAccess.oauthBinding.quotaStale")
+            : quotaReserveStatus.blocked ? t("codex.localAccess.oauthBinding.quotaProtected") : null,
+        quotaReserveStatus.snapshotUpdatedAt
+          ? t("codex.localAccess.oauthBinding.quotaUpdated", { time: new Date(quotaReserveStatus.snapshotUpdatedAt * 1000).toLocaleTimeString() }) : null,
+      ].filter(Boolean).join(" · ") : null;
       const localAccessStatusTone = resolveCodexLocalAccessRuntimeStatus(
         localAccessCollection,
         localAccessState,
@@ -1523,6 +1558,21 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                     {t("codex.api.oauthBinding.actionShort", "绑定")}
                   </button>
                 </div>
+                {quotaRuntimeLine && <div className="codex-local-access-quota-runtime">{quotaRuntimeLine}</div>}
+                {quotaReserveWarningLine && (
+                  <div
+                    className={`codex-local-access-quota-reserve-warning ${
+                      quotaReserveStatus?.blocked ? "is-blocked" : "is-near"
+                    }`}
+                    title={t(
+                      "codex.localAccess.oauthBinding.quotaReserveDesc",
+                      "API 服务仅在 5 小时和周剩余额度均高于保留值时使用该 OAuth 账号。",
+                    )}
+                  >
+                    <CircleAlert size={13} />
+                    <span>{quotaReserveWarningLine}</span>
+                  </div>
+                )}
               </div>
   
               {localAccessQuotaPreviewItems.length > 0 && (
@@ -2077,6 +2127,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                       onError={(text) => setMessage(text ? { text, tone: "error" } : null)} />
                   </div>
                 )}
+                {renderResetCreditControls(account, 'expiry')}
                 {!isApiKeyAccount && (
                   <div className="account-sub-line codex-account-meta-inline">
                     <span className="codex-login-subline" title={signInLine}>

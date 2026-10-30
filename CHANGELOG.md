@@ -10,6 +10,91 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.3.75] - 2026-10-27
+
+### Added
+
+- Add GPT-6.1 Terra to API Service models and cost estimates, including standard, Fast, Flex and long-context pricing.
+- Add app background customization with four gradient presets, local image selection, a preview, intensity, blur and image positioning. The Custom tile shows a plus sign for choosing an image when none is saved. Changes take effect immediately and save automatically on this device, with a single Restore default action; account cards and controls keep their appearance.
+- Apply Codex account-card skins based on the actual API endpoint, including APIKEY.FUN, ai.ahzm.top and yunmoor.com, while preserving account content and actions.
+- Show the next Codex reset-credit expiry in its original position on account cards and the dashboard using the quota time style, highlighting approaching expiry; persist details, stagger refreshes around six hours with bounded concurrency, and update the shared cache immediately when details are opened. Thanks @iamvicliu ([#2724](https://github.com/jlcodes99/cockpit-tools/pull/2724)).
+- Add Antigravity Gemini 4 Argon, Gemini 3.8 Flash, and Claude 5.5 model groups while preserving older models, effort distinctions, and custom group settings; default automatic rotation checks only model groups actually reported by the current account. Thanks @Chain813 ([#2915](https://github.com/jlcodes99/cockpit-tools/pull/2915)).
+
+### Fixed
+
+- Restore Ultrafast for supported Sol 6.1 and Astra models when local API Key profiles use the client's default model list, including Windows. Preserve the model list and custom catalogs, with selection and requests using the native speed flow.
+- Align New API account-card quota bars with their remaining-quota labels, so the bar and available/total values use the same basis. Thanks @specetator ([#2923](https://github.com/jlcodes99/cockpit-tools/pull/2923)).
+- Prevent canceling one API request from restarting the shared Sidecar and interrupting other requests when cancellation is mistaken for a timeout. Thanks @limaomei-pixel ([#2909](https://github.com/jlcodes99/cockpit-tools/pull/2909)).
+- Restore flattened collaboration-tool calls to their declared namespace and name, preventing unsupported-call errors during agent coordination. Thanks @jamie950315 ([#2901](https://github.com/jlcodes99/cockpit-tools/pull/2901)).
+- Prevent third-party models in the shared client catalog from being routed to ChatGPT accounts that do not support them, while retaining official Reserve model access. Thanks @jamie950315 ([#2902](https://github.com/jlcodes99/cockpit-tools/pull/2902)).
+- Keep Gemini invalid-argument stream errors scoped to the affected request instead of incorrectly cooling down accounts; retain the upstream error for the caller. Thanks @jamie950315 ([#2904](https://github.com/jlcodes99/cockpit-tools/pull/2904)).
+- Send Kiro enterprise device-authorization and token-refresh requests in the JSON format expected by AWS IAM Identity Center. Thanks @peisencn ([#2799](https://github.com/jlcodes99/cockpit-tools/pull/2799)).
+- Preserve Claude Desktop Gateway privacy, permission, network, and model preferences when switching accounts, retaining the working configuration if a write fails; switch in the background without waiting for the old gateway’s in-flight request to finish. Thanks @fflow2023 ([#2907](https://github.com/jlcodes99/cockpit-tools/pull/2907)).
+- Use background-detected version metadata for Antigravity quota requests when legacy installation metadata is unavailable, retaining the minimum protocol version. Thanks @moyuan10086 ([#2900](https://github.com/jlcodes99/cockpit-tools/pull/2900)).
+- Keep data-management settings mounted after their first visit to reduce repeated backup scans, without loading them when other settings tabs are opened. Thanks @xhrxgr ([#2740](https://github.com/jlcodes99/cockpit-tools/pull/2740)).
+- Use the official client's localized Ultrafast description in injected speed menus instead of overriding it with English text; preserve speed-tier selection and request parameters.
+- Stop the development app and frontend server together when cancelling a local development run, preventing leftover windows and terminal logs while preserving unrelated app instances.
+- Avoid false Codex launch failures when Windows process queries are temporarily unavailable. Confirm the process returned by the launcher, preserve history when a session check cannot begin safely, and show an unconfirmed launch with read-only status checks instead of prompting duplicate launches; a detected running instance updates the dialog to success.
+- Unify missing Codex launch-path recovery across account switching, API Service, instances, CLI and native menu actions. Show the path dialog above other dialogs, support app selection, running-app detection and launch-on-switch settings, and resume the original operation after saving without duplicate launches on cancellation or failure.
+
+### Changed
+
+- Allow Repair chat index while Codex clients and CLI sessions are running. Back up and reset invalid indexes without changing chat records, detect concurrent changes before committing, and prompt a client restart afterward.
+- Clear all published announcements so old notices and automatic announcement popups disappear after a successful client refresh.
+
+### Acknowledgments
+
+- Thanks @qxo for the log-content and regular-expression filtering contribution ([#2397](https://github.com/jlcodes99/cockpit-tools/pull/2397)). The existing background-worker implementation is retained, including filtering timeouts and cancellation.
+
+## [1.3.74] - 2026-10-24
+
+### Fixed
+
+- Adapt to newer Codex clients, restoring native speed controls and quota notices for API services without OAuth and mixed OAuth/API profiles while preserving send restrictions for official, remote and image modes.
+- Recognize compressed Codex chat heads in session lists and restore them safely; export and synchronize standalone compressed chats without changing the source history.
+- Align Astra’s native question-dialog and clock tool capabilities and preserve the current Astra/Sol automatic review requirement without resetting saved model, reasoning or context preferences.
+- Keep injected model, speed, quota and chat metrics attached to the focused conversation when multiple composers or model menus are open; new chats no longer reuse another chat’s identity or cached selection.
+- Preserve concurrent chat history during restore and import, append chat index entries without replacing newer records, and allow safe index-repair retries. Respect the official client’s refusal to delete history still referenced by a branch and retain recovery backups when deletion is not confirmed.
+- Keep selection counts and batch action states consistent during rapid Codex session selection; reserve count width and remove fading transitions from the selection toolbar.
+- Fix some existing conversations, tool history and newer message types being rejected by local history checks in the Rust and Go API services. Preserve tool-call compatibility, account permissions, duplicate-execution protection and original upstream errors.
+- Fix CLI Launch in Codex launch previews reopening the same preview or being hidden behind it; continue to the working-directory and terminal dialog with the confirmed settings, and keep failures visible in the preview.
+- Preserve existing macOS Keychain access permissions when switching Antigravity accounts, avoiding repeated password prompts caused by resetting the credential's access policy.
+- API Service Rust engine connection failures now identify the attempted proxy and distinguish timeouts, unavailable local proxies and confirmed proxy authentication failures, instead of masking them as upstream authorization failures. Account and upstream rejections retain their original errors.
+- Recover Codex usage dialogs from temporary local read failures with bounded retries and resume queries after Cockpit reconnects, preserving verified data and pagination. Reduce repeated work in usage statistics queries.
+- Prioritize the configured Codex client path on Windows, including official MSIX installations. Resolve package identity from the selected executable instead of letting an invalid StartApps AppUserModelId block launch. Discover alternative registered clients only after a confirmed pre-launch failure, and avoid duplicate launches when the result is uncertain.
+- Accept Antigravity account files with a UTF-8 BOM after OAuth authorization without rolling back newer account notes. Validate encrypted backups before recovery, retain valid backups if recovery fails or is interrupted, preserve concurrent saves, and report missing encryption keys without replacing them.
+- Keep Antigravity desktop account switches consistent when the client falls back from the system credential store to its local token file. Preserve `id_token` in both stores and report fallback synchronization failures instead of claiming success.
+- Keep Codex account cards' request counts, token usage and costs visible while quota reset estimates update. Refresh statistics in the background without clearing unrelated accounts or windows, and clear expired-window counters when their quota resets.
+
+### Added
+
+- Add a dedicated Repair chat index entry to session management and the launch preview for editing and branching issues. It checks selected conversations and their ancestor history, backs up and resets out-of-bounds paginated indexes only when the original records are complete and the target client is stopped, and preserves chat records, accounts and provider settings.
+- Add a default-on Session ID mapping switch in API Service routing options and member settings. Turn it off to forward the original client Session-Id and Thread-Id values. Both directions show a confirmation explaining identifier isolation and possible cache reuse trade-offs, without persistent inline text; changes take effect after saving.
+
+### Changed
+
+- Align Antigravity quota queries with official client v2.25.0 to include `Gemini 4 Argon (Weekly)` alongside `Claude (5h)`, `Claude (Weekly)`, `Gemini (5h)`, and `Gemini (Weekly)`, and display Antigravity account quotas as single-column per-window progress rows matching Codex.
+- Align Antigravity incremental authorization with Antigravity-Manager v4.9.8 while retaining voice transcription permission. Use native OAuth request headers, refresh credentials with 15 minutes or less remaining, and retry `invalid_grant` once after a short delay before reporting failure. OAuth callbacks support IPv4 and IPv6 loopback addresses.
+
+## [1.3.73] - 2026-10-22
+
+### Changed
+
+- Remove the Rust API Service engine's five-minute text request limit, 32 MiB full-response limit, 8 MiB accumulated output limit, and Chat conversion limits of 32 MiB and 4,096 items. Change the Codex stream event limit from 8 MiB to a 50 MiB per-line limit.
+- Increase image API response limits from 32 MiB to 96 MiB and change the 64 MiB image upload limit from a combined request limit to a per-file limit. Keep the independent image API's five-minute total timeout.
+- Remove the 30-second wait limit for the first client WebSocket message, change Chat provider stream limits from 8 MiB to 4 MiB per line, and cap the account concurrency wait queue at 100 requests.
+- Restore optional OAuth quota reserves for API Service bindings, including 5-hour and weekly thresholds, safety margins, protection status and admission checks in both gateway engines. Quota reservation is unchecked by default for new bindings. Existing bindings keep their saved choice; enable protection again if an earlier version removed its settings.
+- API Service clients use the same current-chat average output speed and input-token-weighted cache hit rate in the footer and overview, retaining the measurements after generation stops. Request records distinguish requested and returned speed tiers.
+- Open and refresh recent API request records faster, with indexed summaries for new requests and immediate dialog updates. Existing request history is retained without a bulk rebuild.
+
+### Fixed
+
+- Activate quota compatibility in the current Codex API Service page on Windows and macOS without reloading the window or waiting for a later page load. Remove incorrect send blocking caused by exhausted subscription quota, hide the corresponding notice, and restore the local quota cache when enhancements stop.
+- Show output speed and cache hit rates in the footer and overview with exactly one decimal place, discarding remaining digits without rounding; 99.99% displays as 99.9%.
+- Reduce repeated account refreshes and statistics work after Codex switches, retaining confirmed counters during background refresh. Limit launch-time session checks and report timeouts or recovery failures inside the launch dialog.
+- Keep verified request records visible during background refresh failures and when switching dialog tabs. Distinguish empty results, unlinked chats and unavailable services, and reject replies from previous chats or service bindings.
+- Preserve verified current-chat average speed and cache measurements across brief database read failures, expire caches when their verification lapses, and clear measurements when the service binding or chat changes.
+
 ## [1.3.72] - 2026-10-21
 
 ### Added

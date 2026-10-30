@@ -7,6 +7,7 @@ import { TauriEvent, emit, listen } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
 import { dismissBootSplash } from '../utils/bootSplash';
 import { useCodexQuotaSync } from '../hooks/useCodexQuotaSync';
+import { isCodexLaunchCancelled } from '../utils/codexLaunchCancellation';
 import {
   buildAntigravityAccountPresentation,
   buildClaudeAccountPresentation,
@@ -1358,6 +1359,7 @@ export function FloatingCardWindow() {
       selectAccount(selectedPlatform, viewedAccount.id);
     } catch (error) {
       const rawError = String(error).replace(/^Error:\s*/, '').trim();
+      if (selectedPlatform === 'codex' && isCodexLaunchCancelled(error)) return;
       if (rawError.startsWith('APP_PATH_NOT_FOUND:claude')) {
         const detail = {
           app: 'claude',

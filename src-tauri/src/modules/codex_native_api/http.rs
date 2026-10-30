@@ -1,3 +1,4 @@
+use crate::modules::codex_native_api::deadline::{self, Deadline};
 use std::{io::Read, sync::Arc};
 
 use axum::{
@@ -471,9 +472,9 @@ async fn forward_with_policy(
                 } else {
                     tokio::select! {
                         _ = stop.wait() => Err(stopping_error()),
-                        _ = tokio::time::sleep_until(current.deadline) => Err(super::retry::total_timeout()),
-                        _ = tokio::time::sleep_until(current.idle_deadline) => Err(ServiceError::new(504, "upstream_idle_timeout", "Upstream stream stopped responding")),
-                        _ = tokio::time::sleep_until(current.keepalive_deadline), if !current.policy.keepalive.is_zero() => {
+                        _ = deadline::sleep_until(current.deadline) => Err(super::retry::total_timeout()),
+                        _ = deadline::sleep_until(current.idle_deadline) => Err(ServiceError::new(504, "upstream_idle_timeout", "Upstream stream stopped responding")),
+                        _ = deadline::sleep_until(current.keepalive_deadline), if !current.policy.keepalive.is_zero() => {
                             current.keepalive_deadline = tokio::time::Instant::now() + current.policy.keepalive;
                             return Some((Ok::<_, std::io::Error>(Bytes::from_static(b": keep-alive\n\n")), current));
                         },
@@ -709,7 +710,7 @@ pub(super) async fn open_response_stream(
     client_stream: bool,
     tracker: &mut RequestTracker,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
 ) -> Result<HttpResponseStream, ServiceError> {
     let mut bootstrap_attempts = 0;
     loop {
@@ -722,7 +723,7 @@ pub(super) async fn open_response_stream(
         let mut stop = state.stop.clone();
         let mut upstream = tokio::select! {
             _ = stop.wait() => Err(stopping_error()),
-            result = tokio::time::timeout_at(deadline, super::upstream::canonical_stream(state, response, &prepared.route, compact, prepared.grok_context.clone(), prepared.plan_tools_context.clone(), prepared.multi_agent_context.clone(), &prepared.body, policy.idle_timeout)) => result.map_err(|_| super::retry::total_timeout()).and_then(|value| value),
+            result = deadline::timeout_at(deadline, super::upstream::canonical_stream(state, response, &prepared.route, compact, prepared.grok_context.clone(), prepared.plan_tools_context.clone(), prepared.multi_agent_context.clone(), &prepared.body, policy.idle_timeout)) => result.map_err(|_| super::retry::total_timeout()).and_then(|value| value),
         }?;
         if upstream.is_sse && status.is_success() && client_stream {
             match prefetch(state, upstream.bytes, policy, deadline).await {
@@ -770,7 +771,7 @@ struct StreamingResponse {
     sequence: u64,
     pending_error: Option<ServiceError>,
     policy: ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     idle_deadline: tokio::time::Instant,
     keepalive_deadline: tokio::time::Instant,
 }
@@ -880,14 +881,14 @@ async fn read_bounded(
     mut stream: super::upstream::ByteStream,
     tracker: &mut RequestTracker,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
 ) -> Result<Vec<u8>, ServiceError> {
     let mut bytes = Vec::new();
     let mut stop = state.stop.clone();
     loop {
         let next = tokio::select! {
             _ = stop.wait() => return Err(stopping_error()),
-            _ = tokio::time::sleep_until(deadline) => return Err(super::retry::total_timeout()),
+            _ = deadline::sleep_until(deadline) => return Err(super::retry::total_timeout()),
             result = tokio::time::timeout(policy.idle_timeout, stream.next()) =>
                 result.map_err(|_| ServiceError::new(504, "upstream_idle_timeout", "Upstream response stopped responding"))?,
         };
@@ -924,7 +925,7 @@ async fn collect_sse(
     mut stream: super::upstream::ByteStream,
     tracker: &mut RequestTracker,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     initial_retry_after: Option<std::time::Duration>,
 ) -> Result<ResponseObservation, ServiceError> {
     let mut decoder = SseDecoder::new(state.options.max_event_bytes);
@@ -938,7 +939,7 @@ async fn collect_sse(
     'read: loop {
         let next = tokio::select! {
             _ = stop.wait() => return Err(stopping_error()),
-            _ = tokio::time::sleep_until(deadline) => return Err(super::retry::total_timeout()),
+            _ = deadline::sleep_until(deadline) => return Err(super::retry::total_timeout()),
             result = tokio::time::timeout(policy.idle_timeout, stream.next()) =>
                 result.map_err(|_| ServiceError::new(504, "upstream_idle_timeout", "Upstream response stopped responding"))?,
         };
@@ -1054,7 +1055,7 @@ async fn observe_late_official_rejection(
     prepared: &Prepared,
     event: &Value,
     previous_retry_after: Option<std::time::Duration>,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
 ) -> Result<(), ServiceError> {
     if !prepared.route.chatgpt_plan || !matches!(
         super::events::response_terminal_kind(event), Some("error" | "response.failed")
@@ -1073,7 +1074,7 @@ async fn observe_late_official_rejection(
     let observation_deadline = deadline.min(tokio::time::Instant::now() + state.options.request_timeout);
     tokio::select! {
         _ = stop.wait() => Err(stopping_error()),
-        result = tokio::time::timeout_at(observation_deadline,
+        result = deadline::timeout_at(observation_deadline,
             state.host.observe_official_failure(&prepared.route, &prepared.route.model, &failure)) => {
             if result.is_err() {
                 crate::modules::logger::log_warn(
@@ -1089,15 +1090,15 @@ pub(super) async fn prefetch(
     state: &AppState,
     mut bytes: super::upstream::ByteStream,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
 ) -> Result<super::upstream::ByteStream, ServiceError> {
     let mut stop = state.stop.clone();
     let idle = tokio::time::Instant::now() + policy.idle_timeout;
     loop {
         let next = tokio::select! {
             _ = stop.wait() => return Err(stopping_error()),
-            _ = tokio::time::sleep_until(deadline) => return Err(super::retry::total_timeout()),
-            _ = tokio::time::sleep_until(idle) => return Err(ServiceError::new(504, "upstream_idle_timeout", "Upstream stream stopped responding")),
+            _ = deadline::sleep_until(deadline) => return Err(super::retry::total_timeout()),
+            _ = deadline::sleep_until(idle) => return Err(ServiceError::new(504, "upstream_idle_timeout", "Upstream stream stopped responding")),
             next = bytes.next() => next,
         };
         match next {
@@ -1130,7 +1131,7 @@ struct ImmediateResponse {
     initial: bool,
     keepalive: std::time::Duration,
     next_keepalive: tokio::time::Instant,
-    total_deadline: tokio::time::Instant,
+    total_deadline: Deadline,
     codex_client: bool,
 }
 
@@ -1157,7 +1158,7 @@ fn immediate_response(
 pub(super) fn immediate_stream(
     operation: futures_util::future::BoxFuture<'static, Result<Response, ServiceError>>,
     keepalive: std::time::Duration,
-    total_deadline: tokio::time::Instant,
+    total_deadline: Deadline,
 ) -> Response {
     immediate_stream_for_client(operation, keepalive, total_deadline, false)
 }
@@ -1165,7 +1166,7 @@ pub(super) fn immediate_stream(
 fn immediate_stream_for_client(
     operation: futures_util::future::BoxFuture<'static, Result<Response, ServiceError>>,
     keepalive: std::time::Duration,
-    total_deadline: tokio::time::Instant,
+    total_deadline: Deadline,
     codex_client: bool,
 ) -> Response {
     let current = ImmediateResponse {
@@ -1188,7 +1189,7 @@ fn immediate_stream_for_client(
         if let Some(operation) = current.operation.as_mut() {
             let response = tokio::select! {
                 response = operation => response,
-                _ = tokio::time::sleep_until(current.next_keepalive), if !current.keepalive.is_zero() => {
+                _ = deadline::sleep_until(current.next_keepalive), if !current.keepalive.is_zero() => {
                     current.next_keepalive = tokio::time::Instant::now() + current.keepalive;
                     return Some((Ok(Bytes::from_static(b": keep-alive\n\n")), current));
                 }
@@ -1243,16 +1244,16 @@ fn immediate_stream_for_client(
 
 async fn immediate_error_response(
     response: Response,
-    total_deadline: tokio::time::Instant,
+    total_deadline: Deadline,
     codex_client: bool,
 ) -> Bytes {
     let status = response.status().as_u16();
     let retry_header = response.headers().get(header::RETRY_AFTER).cloned();
     let header_delay = retry_after_headers(response.headers());
     let deadline =
-        total_deadline.min(tokio::time::Instant::now() + std::time::Duration::from_secs(5));
+        total_deadline.cap(tokio::time::Instant::now() + std::time::Duration::from_secs(5));
     let body =
-        match tokio::time::timeout_at(deadline, to_bytes(response.into_body(), 64 * 1024)).await {
+        match deadline::timeout_at(deadline, to_bytes(response.into_body(), 64 * 1024)).await {
             Ok(Ok(bytes)) => bytes,
             Ok(Err(_)) => Bytes::from_static(b"Unable to read the bounded upstream error response"),
             Err(_) => Bytes::from_static(b"Upstream error response read timed out"),

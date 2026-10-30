@@ -806,12 +806,21 @@ async fn official_fallback_host_keeps_local_quota_and_proxy_enforcement_separate
         .as_mut()
         .unwrap()
         .bound_oauth_account_id = Some(fixture.source.id.clone());
+    host.collection_override
+        .as_mut()
+        .unwrap()
+        .bound_oauth_quota_reserve = Some(CodexLocalAccessQuotaReserve {
+        hourly_percent: 20,
+        weekly_percent: 20,
+        strict: true,
+        safety_margin_percent: 3,
+    });
     host.account_overrides
         .get_mut(&fixture.source.id)
         .unwrap()
         .quota =
         Some(serde_json::from_value(json!({"hourly_percentage":0,"weekly_percentage":0})).unwrap());
-    // Local exhaustion must not reject an independent official authorization.
+    // The local reserve must not reject an independent official authorization.
     let failed = official_route(&host).await;
     native_contract::Host::observe_official_failure(&host, &failed, &failed.model, &rejected())
         .await;

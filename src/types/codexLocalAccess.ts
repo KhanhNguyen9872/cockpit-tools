@@ -65,6 +65,12 @@ export interface CodexLocalAccessCustomRoutingRule {
   isPreferred: boolean;
 }
 
+export interface CodexLocalAccessOAuthQuotaReserve {
+  hourlyPercent: number;
+  weeklyPercent: number;
+  strict?: boolean;
+  safetyMarginPercent?: number;
+}
 
 export interface CodexLocalAccessAccountModelRule {
   accountId: string;
@@ -183,6 +189,8 @@ export interface CodexLocalAccessCollection {
   maxAccountConcurrency: number;
   accountConcurrencyWaitMs: number;
   excludedModels: string[];
+  /** Service-scoped; omitted legacy values default to enabled. */
+  sessionIdentityMappingEnabled?: boolean;
   sessionAffinity: boolean;
   sessionAffinityTtlMs: number;
   sessionAffinityDefaultEnabledMigrated?: boolean;
@@ -195,6 +203,7 @@ export interface CodexLocalAccessCollection {
   disableCooling: boolean;
   restrictFreeAccounts: boolean;
   boundOauthAccountId?: string | null;
+  boundOauthQuotaReserve?: CodexLocalAccessOAuthQuotaReserve | null;
   accountIds: string[];
   /** Paused service members retain their scopes and scheduling preferences. */
   pausedAccountIds?: string[];
@@ -524,6 +533,7 @@ export interface CodexLocalAccessAccountPoolHealth {
   availableAuths: number;
   unavailableAuths: number;
   modelExcludedAuths: number;
+  quotaReservedAuths: number;
   imagePolicyBlockedAuths: number;
   accountStatuses: CodexLocalAccessAccountPoolMemberHealth[];
   /** 账号范围/候选筛选诊断；不表示账号凭据或健康状态异常。 */
@@ -556,6 +566,20 @@ export interface CodexLocalAccessProfileAttachment {
   error: string | null;
 }
 
+export interface CodexLocalAccessQuotaReserveStatus {
+  accountId: string;
+  snapshotUpdatedAt: number | null;
+  snapshotFresh: boolean;
+  blocked: boolean;
+  warning: boolean;
+  effectiveWindow: "hourly" | "weekly" | null;
+  effectiveRemainingPercent: number | null;
+  effectiveReservePercent: number | null;
+  strict?: boolean;
+  safetyMarginPercent?: number;
+  inFlight?: number;
+  awaitingConfirmation?: boolean;
+}
 
 export interface CodexServiceMemberAccess {
   sourceAccountId: string;
@@ -591,6 +615,7 @@ export interface CodexLocalAccessState {
   accountPoolHealth: CodexLocalAccessAccountPoolHealth[];
   /** 手动恢复后仍在抑制窗口内的账号：异常列表里临时隐藏这些账号的行。 */
   recoverySuppressedAccountIds?: string[];
+  quotaReserveStatus: CodexLocalAccessQuotaReserveStatus | null;
 }
 
 export interface CodexLocalAccessAppendAccountSkipped {

@@ -25,4 +25,5 @@ mod tests {
     include!("system_tests.rs");
     include!("system_tests_floating_appearance.rs");
     include!("system_tests_codex_refresh_scope.rs");
+    include!("system_tests_codex_path_validation.rs");
 }

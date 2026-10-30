@@ -342,18 +342,16 @@ fn output_items_restore_completed_output_in_index_order_and_preserve_existing_ou
 }
 
 #[test]
-fn output_cache_and_repaired_terminal_size_remain_bounded() {
+fn output_cache_and_repaired_terminal_follow_go_without_an_aggregate_cap() {
     let mut decoder = SseDecoder::new(160);
     for index in 0..4 {
         let item = json!({"type":"response.output_item.done","output_index":index,"item":{"type":"message","content":"abcdefghijklmnopqrstuvwxyz"}});
-        let result = decoder.push(&event(&item));
-        if index < 2 {
-            result.unwrap();
-        } else {
-            assert_eq!(result.unwrap_err().code, "upstream_event_too_large");
-            break;
-        }
+        assert_eq!(decoder.push(&event(&item)).unwrap().len(), 1);
     }
+    let frames = decoder.push_frames(&event(&completion())).unwrap();
+    let terminal = frames.last().unwrap();
+    assert_eq!(terminal.value.as_ref().unwrap()["response"]["output"].as_array().unwrap().len(), 4);
+    assert!(terminal.bytes.len() > 160);
 }
 
 #[test]

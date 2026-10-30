@@ -11,9 +11,19 @@ struct Recorder {
     contexts: Mutex<Vec<DiagnosticContext>>,
     invalidations: Mutex<Vec<String>>,
     changed: Notify,
+    quota_checks: Mutex<Vec<String>>,
+    quota_denied: Mutex<Vec<String>>,
 }
 
 impl Host for Recorder {
+    fn check_quota_before_send(&self, account_id: &str) -> Result<(), ServiceError> {
+        self.quota_checks.lock().unwrap().push(account_id.into());
+        if self.quota_denied.lock().unwrap().iter().any(|id| id == account_id) {
+            return Err(ServiceError::new(429, "quota_reserved", "Synthetic reserve"));
+        }
+        Ok(())
+    }
+
     fn invalidate_transport(&self, identity: &str) -> bool {
         self.invalidations.lock().unwrap().push(identity.to_owned());
         true

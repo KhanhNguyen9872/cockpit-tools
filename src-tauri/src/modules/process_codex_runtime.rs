@@ -186,6 +186,8 @@ fn wait_for_codex_default_start_pid(
     default_app_dirs: &HashSet<String>,
     launch_not_before_epoch_secs: u64,
     timeout: Duration,
+    receipt_pid: Option<u32>,
+    package_family: Option<&str>,
 ) -> Option<u32> {
     let started = Instant::now();
     let mut stable_pid = None;
@@ -193,17 +195,20 @@ fn wait_for_codex_default_start_pid(
     let mut first_candidate_seen = false;
 
     while started.elapsed() < timeout {
-        let fast_entries = collect_codex_windows_default_process_entries(
-            expected_exe_path,
-            default_app_dirs,
-            true,
-        );
+        // Include child-inherited profile identities. A fast main-only scan can
+        // mistake a managed process for the default while it is still starting.
+        let (entries, _) = collect_codex_process_snapshot_from_sysinfo(expected_exe_path);
+        let fast_entries = filter_codex_windows_default_process_entries(&entries, default_app_dirs);
+        let receipt_candidate = codex_receipt_candidate(receipt_pid, before_default_pids, |pid| {
+            verify_codex_launch_receipt_pid(pid, expected_exe_path, package_family)
+        });
         let fast_pids = fast_entries
             .iter()
             .map(|(pid, _)| *pid)
             .collect::<Vec<u32>>();
+        let candidate_pids = receipt_candidate.map(|pid| vec![pid]).unwrap_or(fast_pids);
         let (candidate, streak) = next_codex_default_start_candidate(
-            &fast_pids,
+            &candidate_pids,
             before_default_pids,
             stable_pid,
             stable_count,
@@ -224,12 +229,7 @@ fn wait_for_codex_default_start_pid(
                 .copied()
                 .filter(|pid| is_pid_running(*pid))
                 .collect::<Vec<u32>>();
-            let full_entries = collect_codex_windows_default_process_entries(
-                expected_exe_path,
-                default_app_dirs,
-                false,
-            );
-            let full_pids = full_entries
+            let full_pids = fast_entries
                 .iter()
                 .map(|(pid, _)| *pid)
                 .collect::<HashSet<u32>>();
@@ -237,7 +237,7 @@ fn wait_for_codex_default_start_pid(
                 let started_after_launch =
                     codex_process_started_at_or_after(pid, launch_not_before_epoch_secs)
                         .unwrap_or(false);
-                if full_pids.contains(&pid)
+                if (receipt_candidate == Some(pid) || full_pids.contains(&pid))
                     && old_pids_still_running.is_empty()
                     && started_after_launch
                 {
@@ -319,189 +319,12 @@ fn start_codex_default_internal(
 
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
-
-        let mut launch_path_for_probe = resolve_codex_launch_path().ok();
-        let before_probe_started = Instant::now();
-        let default_home_path = resolve_codex_default_launch_home(prepared_home)?;
-        let standard_home = dirs::home_dir().map(|home| home.join(".codex"));
-        let codex_home_override =
-            codex_default_home_env_override(&default_home_path, standard_home.as_deref());
-        let default_home = default_home_path.to_string_lossy().into_owned();
-        crate::modules::logger::log_info(&format!(
-            "[Codex Start] default data directory={}, explicit_home={}",
-            default_home,
-            codex_home_override.is_some()
-        ));
-        let default_app_dirs = get_default_codex_windows_app_user_data_dirs(default_home.as_str());
-        let before_pids: HashSet<u32> = launch_path_for_probe
-            .as_ref()
-            .map(|path| {
-                collect_codex_windows_default_process_entries(
-                    path.to_string_lossy().as_ref(),
-                    &default_app_dirs,
-                    fast_after_close,
-                )
-                .into_iter()
-                .map(|(pid, _)| pid)
-                .collect()
-            })
-            .unwrap_or_default();
-        crate::modules::logger::log_info(&format!(
-            "[Codex Start] before pid probe mode={}, count={}, elapsed_ms={}",
-            if fast_after_close { "fast" } else { "full" },
-            before_pids.len(),
-            before_probe_started.elapsed().as_millis()
-        ));
-
-        let mut store_entry_launched = false;
-        let app_user_model_id = detect_codex_store_app_user_model_id();
-        if let Some(app_user_model_id) = app_user_model_id {
-            crate::modules::logger::log_info(&format!(
-                "[Codex Start] 启动策略候选=system-store-entry app_id={}",
-                app_user_model_id
-            ));
-            let args = build_codex_default_launch_args(extra_args);
-            let launch_env = launch_proxy
-                .env_overrides()
-                .into_iter()
-                .map(|(key, value)| (key.to_string(), value))
-                .collect::<Vec<_>>();
-            let launch_not_before_epoch_secs = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            match launch_codex_via_store_app_user_model_id(
-                &app_user_model_id,
-                codex_home_override.as_deref(),
-                None,
-                &args,
-                &launch_env,
-            ) {
-                Ok(()) => {
-                    store_entry_launched = true;
-                    // Activation may have refreshed an old Store installation.
-                    launch_path_for_probe = resolve_codex_launch_path().ok();
-                    crate::modules::logger::log_info(&format!(
-                        "[Codex Start] 已通过系统入口启动 Codex: {}",
-                        app_user_model_id
-                    ));
-                    if let Some(launch_path) = launch_path_for_probe.as_ref() {
-                        if let Some(pid) = wait_for_codex_default_start_pid(
-                            launch_path.to_string_lossy().as_ref(),
-                            &before_pids,
-                            &default_app_dirs,
-                            launch_not_before_epoch_secs,
-                            Duration::from_secs(15),
-                        ) {
-                            crate::modules::logger::log_info(&format!(
-                                "[Codex Start] 启动策略=system-store-entry app_id={} pid={}",
-                                app_user_model_id, pid
-                            ));
-                            return Ok(pid);
-                        }
-                    } else {
-                        crate::modules::logger::log_warn(
-                            "[Codex Start] pid probe skipped because launch path is unavailable",
-                        );
-                    }
-                    crate::modules::logger::log_warn(
-                        "[Codex Start] 系统入口已调用，但未确认旧默认实例退出并出现稳定的新 ChatGPT 主进程",
-                    );
-                }
-                Err(err) => {
-                    crate::modules::logger::log_warn(&format!(
-                        "[Codex Start] 系统入口启动失败，停止本次启动以避免重复激活: {}",
-                        err
-                    ));
-                    return Err(err);
-                }
-            }
-        } else {
-            crate::modules::logger::log_warn(
-                "[Codex Start] 未探测到 Codex AppUserModelId，准备回退可执行路径",
-            );
-        }
-
-        if store_entry_launched {
-            let message = "Codex 已通过系统入口启动，但未确认到主进程；请手动打开 Codex 后重试";
-            crate::modules::logger::log_warn(&format!("[Codex Start] {}", message));
-            return Err(crate::modules::windows_operation::format_error(
-                "launch_app",
-                message,
-                "系统入口已调用成功，但 15s 内未确认到 Codex 主进程；为避免重复启动，已跳过 exe 回退",
-                None,
-                &[],
-                true,
-                false,
-                true,
-            ));
-        }
-
-        let launch_path = resolve_codex_launch_path()?;
-        let launch_path_text = launch_path.to_string_lossy().to_string();
-        crate::modules::logger::log_info(&format!(
-            "[Codex Start] 启动策略=exe-path launch_path={}",
-            launch_path_text
-        ));
-        let mut cmd = Command::new(&launch_path);
-        apply_effective_proxy_env_to_command(&mut cmd, launch_proxy);
-        if should_detach_child() {
-            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
-            cmd.stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
-        }
-        // Codex 是 GUI 应用，不设置 CREATE_NO_WINDOW，否则会导致其内部 spawn CLI 子进程失败。
-        prepare_codex_windows_default_command(&mut cmd, extra_args, codex_home_override.as_deref());
-
-        let launch_not_before_epoch_secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let child = match spawn_command_with_trace(&mut cmd) {
-            Ok(child) => child,
-            Err(error)
-                if error.kind() == std::io::ErrorKind::PermissionDenied
-                    && is_windowsapps_launch_path(&launch_path) =>
-            {
-                if let Some(pid) = resolve_codex_pid(None, None) {
-                    crate::modules::logger::log_warn(&format!(
-                        "[Codex Start] WindowsApps 直接启动被拒绝；检测到已有 ChatGPT 进程 pid={}，但不将其作为本次启动成功结果 launch_path={}",
-                        pid, launch_path_text
-                    ));
-                }
-                return Err(crate::modules::windows_operation::format_error(
-                    "launch_app",
-                    "无法启动 WindowsApps 中的 ChatGPT；请手动打开 ChatGPT 后重试",
-                    &format!("启动 Codex 失败: {}", error),
-                    None,
-                    &[],
-                    true,
-                    false,
-                    true,
-                ));
-            }
-            Err(error) => return Err(format!("启动 Codex 失败: {}", error)),
-        };
-        crate::modules::logger::log_info(&format!(
-            "[Codex Start] 启动策略=exe-path launch_path={} pid={}",
-            launch_path_text,
-            child.id()
-        ));
-        if let Some(pid) = wait_for_codex_default_start_pid(
-            launch_path_text.as_str(),
-            &before_pids,
-            &default_app_dirs,
-            launch_not_before_epoch_secs,
-            Duration::from_secs(15),
-        ) {
-            return Ok(pid);
-        }
-        return Err(format!(
-            "ChatGPT 启动后未确认到稳定的新默认实例（launcher pid={}）",
-            child.id()
-        ));
+        return start_windows_codex_default(
+            extra_args,
+            fast_after_close,
+            launch_proxy,
+            prepared_home,
+        );
     }
 
     #[cfg(target_os = "linux")]
@@ -747,7 +570,12 @@ fn codex_windows_process_snapshot_is_stale(process: Option<(&str, Option<&str>)>
 
 #[cfg(target_os = "windows")]
 fn close_codex_default_windows(timeout_secs: u64) -> Result<(), String> {
-    let launch_path = resolve_codex_launch_path()?;
+    let Some(launch_path) = codex_close_path_or_confirmed_idle(
+        resolve_codex_launch_path(),
+        confirm_no_codex_windows_runtime,
+    )? else {
+        return Ok(());
+    };
     let launch_path_text = launch_path.to_string_lossy().to_string();
     let default_home = crate::modules::codex_account::get_codex_home()
         .to_string_lossy()

@@ -158,6 +158,15 @@
     "providerClear": "清空选择"
   },
   "common": {
+    "networkErrors": {
+      "upstream": "上游服务",
+      "proxyConnection": "通过代理“{{proxy}}”连接 {{target}} 失败，可能与代理或网络有关，请检查代理或更换节点后重试。",
+      "proxyTimeout": "通过代理“{{proxy}}”连接 {{target}} 超时，可能与代理或网络有关，请检查代理或更换节点后重试。",
+      "proxyAuth": "代理“{{proxy}}”认证失败，请检查代理用户名或密码。",
+      "localProxyUnavailable": "无法连接本地代理“{{proxy}}”，请检查代理服务是否运行。",
+      "directConnection": "连接 {{target}} 失败，请检查网络后重试。",
+      "directTimeout": "连接 {{target}} 超时，请检查网络后重试。"
+    },
     "codexUsage": {
       "title": "额度与用量",
       "session": "当前会话",
@@ -167,8 +176,8 @@
       "speed": "输出速度",
       "cache": "缓存命中率",
       "cacheShort": "缓存",
-      "speedHint": "当前会话近期有效 API 请求的加权输出速度，不含首响等待；无法关联或缺少计时显示 —。",
-      "cacheHint": "近期输入 Token 中命中缓存的比例，按输入量加权。",
+      "speedHint": "当前会话有效请求的平均输出速度，不含首响等待；缺少有效测量显示 —。",
+      "cacheHint": "当前会话有效请求按输入 Token 加权的平均缓存命中率。生成停止后保留；缺少计数显示 —。",
       "aggregateHint": "各账号窗口剩余百分比之和，不按套餐容量加权。颜色遵循账号总览：≥80% 绿，≥40% 黄，≥10% 橙，低于10% 红；未知值不着色。",
       "waiting": "等待会话用量记录",
       "refreshFailed": "额度刷新失败，已保留上次结果。请重试。",
@@ -225,7 +234,11 @@
       "avgLatency": "平均延迟",
       "successRate": "成功率",
       "verifiedStatistics": "已核实统计",
-      "excludedHistory": "有 {{count}} 条历史记录缺少派发依据，未计入"
+      "excludedHistory": "有 {{count}} 条历史记录缺少派发依据，未计入",
+      "averageSpeed": "平均输出速度",
+      "serviceUnavailable": "API 服务暂不可用，请重试。",
+      "tierAdjusted": "已调整为标准",
+      "averageCache": "平均缓存命中率"
     },
     "apiKeyAccount": "API Key 账号",
     "status": "状态",
@@ -1845,6 +1858,35 @@
       "refreshed": "已刷新用量",
       "usage": "用量",
       "tierOther": "其他"
+    },
+    "background": {
+      "title": "背景",
+      "description": "只更换软件背景，账号卡片和控件保持现有样式。",
+      "presets": "预设背景",
+      "default": "默认",
+      "mist": "雾蓝",
+      "forest": "森林",
+      "dusk": "暮紫",
+      "sand": "暖沙",
+      "custom": "自定义",
+      "chooseImage": "选择图片",
+      "replaceImage": "更换图片",
+      "imageHint": "支持 JPG、PNG、WebP，最大 10 MB；大图会在本机缩小。",
+      "preview": "预览",
+      "strength": "背景强度",
+      "blur": "模糊",
+      "pixels": "{{count}} 像素",
+      "position": "图片位置",
+      "center": "居中",
+      "top": "顶部",
+      "bottom": "底部",
+      "localHint": "修改立即生效并在当前设备自动保存，图片不会上传。恢复默认会移除已保存的图片。",
+      "restore": "恢复默认",
+      "imageType": "请选择 JPG、PNG 或 WebP 图片。",
+      "imageSize": "请选择小于 10 MB 的图片。",
+      "imageRead": "无法读取这张图片，请换一张重试。",
+      "storage": "背景读取或保存失败，请重试；原有背景仍会保留。",
+      "saveFailed": "当前背景已显示，但保存失败。请重试；上次保存的背景仍会保留。"
     }
   },
   "appPath": {
@@ -2570,7 +2612,18 @@
       "windowHint": "按实际时长匹配阈值，一周及以上使用周额度阈值；只有周额度时仅检查周额度。缺少时长时沿用主/次窗口映射。",
       "rule": "短周期剩余 <= {{shortCycle}}% 或周剩余 <= {{weekly}}%"
     },
+    "launchConfirmation": {
+      "title": "启动待确认",
+      "description": "启动请求已发出，尚未确认客户端状态。客户端可能已打开，请勿重复启动。",
+      "check": "检查状态",
+      "notRunning": "暂未检测到目标实例。请稍后检查，或关闭此窗口后重试启动。",
+      "checkFailed": "暂时无法读取运行状态，请稍后重试检查。",
+      "maintenanceDeferred": "暂时无法检查会话，已保留历史并跳过本次维护。"
+    },
     "launchErrors": {
+      "sessionRestoreFailed": "会话修复失败，备份恢复未完成，已停止启动。请先检查日志和备份，再重试。",
+      "sessionCheckTimeout": "会话检查超时，已停止启动。请重试，或查看日志。",
+      "sessionFileTooLarge": "会话文件首行过大，已停止启动。请查看日志。",
       "bindingFailed": "无法确认账号绑定，已停止启动，请重试切号。",
       "processScanFailed": "无法检查旧后台进程，已停止启动，请重试。",
       "proxyEntryFailed": "配置的代理入口无法启动，未改用其他出口，请重试。"
@@ -3132,7 +3185,8 @@
         "audioNotSupported": "此 OAuth 账号仅支持语音转写，其他音频操作需使用 API Key 供应商。",
         "audioUnavailable": "音频转发暂不可用。",
         "audioUpstreamFailed": "音频上游请求失败。",
-        "modelNotAvailable": "模型 {{model}} 不在当前 API Key 的可用模型范围内。"
+        "modelNotAvailable": "模型 {{model}} 不在当前 API Key 的可用模型范围内。",
+        "quotaReserved": "账号额度已保留或正在确认，请稍后重试。"
       },
       "testRateLimited": "服务可达，但上游限流或额度不足：{{detail}}。",
       "testHttpFailed": "服务可达，但请求返回 HTTP {{status}}：{{detail}}。",
@@ -3238,7 +3292,7 @@
           "poolUnavailable": "账号池无可用账号",
           "poolUnavailableDetail": "模型 {{model}} 的请求没有选出可用账号",
           "poolUnattributedDetail": "未收到逐账号诊断，无法归属到具体账号。请检查此 API Key 的账号范围及模型配置。",
-          "poolDiagnosticDetail": "模型 {{model}}：候选 {{candidate}}，范围匹配 {{scoped}}，可用 {{available}}，不可用 {{unavailable}}，模型排除 {{modelExcluded}}，生图策略拦截 {{imageBlocked}}",
+          "poolDiagnosticDetail": "模型 {{model}}：候选 {{candidate}}，范围匹配 {{scoped}}，可用 {{available}}，不可用 {{unavailable}}，模型排除 {{modelExcluded}}，额度保留 {{quotaReserved}}，生图策略拦截 {{imageBlocked}}",
           "poolNoCandidatesDetail": "本次请求没有候选账号。请检查请求模型和账号加载状态。",
           "poolScopeMismatchDetail": "候选账号未匹配此 API Key 的账号范围，或账号映射无法识别。请检查绑定账号及模型配置。",
           "inspectBinding": "检查绑定",
@@ -3250,7 +3304,7 @@
           "boundAccountNotLoadedDetail": "此绑定账号尚未加载到当前服务，请检查账号加载及账号池同步状态。",
           "boundAccountNotCandidateDetail": "此绑定账号已加载，但未进入本次请求的候选集，请检查请求模型、供应商及请求类型。",
           "scopeUnknownDetail": "当前范围诊断不足以确定具体原因，请检查绑定和服务日志。",
-          "poolBlockedDetail": "范围内筛选结果：不可调度 {{unavailable}}（如停用、冷却或鉴权失败），模型排除 {{modelExcluded}}，生图策略拦截 {{imageBlocked}}。请检查逐账号原因及对应设置。",
+          "poolBlockedDetail": "范围内筛选结果：不可调度 {{unavailable}}（如停用、冷却或鉴权失败），模型排除 {{modelExcluded}}，额度保留 {{quotaReserved}}，生图策略拦截 {{imageBlocked}}。请检查逐账号原因及对应设置。",
           "poolUnknownDetail": "当前诊断不足以确定具体原因。请检查此 API Key 的账号范围、模型配置和服务日志。",
           "clearHint": "清除仅移除此条诊断记录，不会修复配置、Token 或额度；请求再次失败时会重新出现。",
           "clearSuccess": "已清除诊断记录，不代表账号池已恢复可用。",
@@ -3357,7 +3411,23 @@
         "imageGenerationConfirm": {
           "title": "禁用 image_generation 能力",
           "message": "开启后，API 服务会在本地网关转发普通文本对话前移除 image_generation 工具声明，避免部分供应商报 “Image generation is not enabled”；不会删除 gpt-image 等生图模型。是否继续？"
-        }
+        },
+        "quotaReserveToggle": "保留 OAuth 额度",
+        "quotaReserveDesc": "API 服务仅在 5 小时和周剩余额度均高于保留值时使用该 OAuth 账号。",
+        "quotaReserveHourlyLabel": "5 小时保留",
+        "quotaReserveWeeklyLabel": "周保留",
+        "quotaReserveInvalid": "请输入 1 到 100 的整数",
+        "strictReserve": "严格保护",
+        "strictReserveDesc": "设置保留额度后自动启用安全垫保护；接近保留值时，每个账号仅发出一个请求，结束后确认最新额度。其他客户端用量不受此设置约束。",
+        "strictNativeOnly": "严格保护需要 Rust 原生引擎；切换 Go 前请先关闭严格保护。",
+        "safetyMargin": "安全垫",
+        "safetyMarginUnit": "个百分点",
+        "safetyMarginInvalid": "请输入 1 到 20 的整数",
+        "quotaInFlight": "在途 {{count}}",
+        "quotaWaiting": "等待额度确认",
+        "quotaStale": "额度待更新",
+        "quotaProtected": "已保留",
+        "quotaUpdated": "更新于 {{time}}"
       },
       "customRoutingEdit": "编辑自定义调度",
       "customRoutingTitle": "自定义调度",
@@ -4005,6 +4075,11 @@
       "windowReq": "{{count}} 次",
       "reset": "重置",
       "resetCredits": "重置 {{count}}",
+      "resetCreditExpiryHours": "{{hours}}时{{minutes}}分",
+      "resetCreditExpiryMinutes": "{{minutes}}分",
+      "resetCreditExpiryExpired": "已到期 · 查看详情",
+      "resetCreditExpiryUrgent": "将到期 {{time}} · {{duration}}",
+      "resetCreditExpiryNormal": "到期 {{time}} · {{duration}}",
       "resetCreditsTitle": "可用于重置当前 5 小时窗口的剩余次数：{{count}}",
       "resetCreditConfirm": "确认重置?",
       "resetCreditDialogTitle": "要重置你的使用量吗？",
@@ -4020,7 +4095,7 @@
       "resetCreditStatusRedeemed": "已使用",
       "resetCreditStatusExpired": "已过期",
       "resetCreditStatusUnknown": "未知",
-      "resetCreditNextExpiry": "最近到期：{{time}}",
+      "resetCreditNextExpiry": "最近重置到期 {{time}}",
       "resetCreditDetailsTitle": "重置次数明细",
       "resetCreditNoRecords": "暂无重置记录",
       "resetCreditRecordsLoadFailed": "加载重置记录失败：{{error}}",
@@ -4331,6 +4406,7 @@
         "syncSessions": "同步会话",
         "copyToInstance": "复制到实例",
         "repairVisibility": "修复可见性",
+        "repairIndex": "修复会话索引",
         "restoreSessions": "恢复会话",
         "exportSessions": "导出会话",
         "importSessions": "导入会话",
@@ -4364,6 +4440,10 @@
         "clear": "清空"
       },
       "messages": {
+        "deleteNotConfirmed": "客户端未确认删除完成，已停止本地清理并保留备份：{{error}}",
+        "historyReadFailed": "无法安全读取会话历史：{{error}}",
+        "restoreIndexRetry": "会话文件已保留，但更新会话列表失败；废纸篓原件仍在，可修复问题后重试：{{error}}",
+        "importIndexRetry": "会话文件已导入，但更新会话列表失败；文件与导入包已保留，可修复问题后重试：{{error}}",
         "pickOne": "请至少选择一条会话",
         "pickRestoreOne": "请至少选择一条待恢复会话",
         "syncNeedTwo": "至少需要两个实例才能同步会话",
@@ -4496,7 +4576,18 @@
         "previewAgain": "重新预览",
         "preview": "预览变更",
         "previewFailedWithError": "预览会话修复失败：{{error}}",
-        "confirmRepair": "确认修复"
+        "confirmRepair": "确认修复",
+        "modeHistory": "编辑/分支修复",
+        "modeHistoryDesc": "修复索引异常导致的消息编辑和创建聊天分支失败。",
+        "historyLiveHint": "可在客户端运行时直接修复。完成后请重启客户端并重新打开会话。",
+        "historyDescription": "检查所选会话及祖先历史，仅重置异常的分页索引。聊天记录、账号与 Provider 保持原样；支持运行中修复，完成后重启客户端以重新加载索引。",
+        "historyPreview": "发现 {{count}} 段可重建的异常历史索引；聊天记录保持原样。",
+        "historySuccess": "已重置 {{count}} 段异常历史索引。请重启客户端并重新打开会话以重建；备份已保留。",
+        "historyNoChanges": "未发现可安全重建的异常历史索引。",
+        "historyFailed": "历史索引修复未完成：{{error}}",
+        "historyChanged": "会话数据在修复期间发生变化，本次修复未写入。请稍后重试。",
+        "historyScan": "正在检查历史索引（{{current}}/{{total}}）…",
+        "historyReset": "正在备份并重置异常索引…"
       },
       "transferModal": {
         "exportTitle": "导出会话",
@@ -4839,6 +4930,11 @@
       },
       "routing": {
         "optionsTitle": "调度选项",
+        "sessionIdentityMapping": "会话 ID 映射",
+        "sessionIdentityMappingEnableHint": "开启后，切换上游账号会使用独立的 Session-Id 和 Thread-Id，会话标识隔离更强，但跨账号缓存复用可能减少。同一账号内仍复用已有映射。",
+        "sessionIdentityMappingDisableHint": "关闭后，保留客户端原始 Session-Id 和 Thread-Id。不同上游账号可能共用相同标识，隔离性减弱，但跨账号缓存复用可能增加。",
+        "sessionIdentityMappingCacheNote": "缓存命中率还取决于上游规则、账号范围和请求内容，不保证因切换而升降。",
+        "sessionIdentityMappingSaveNote": "确认后还需保存设置才会生效。",
         "sessionAffinity": "会话亲和",
         "sessionAffinityTtl": "过期时间（秒）",
         "responsesWebsockets": "WebSocket 响应传输",
@@ -6064,6 +6160,22 @@
       "label": "活跃额度同步",
       "description": "无需启动 API 服务。活跃本地账号按 5–30 秒动态刷新，会话文件变化触发补查；仅检查近期文件信息，不读取对话内容。沿用账号禁用、套餐与分组策略，默认关闭。",
       "error": "读取或保存设置失败，请重试。"
+    },
+    "pathRecovery": {
+      "title": "设置 Codex 启动路径",
+      "description": "未找到可用的 Codex 客户端路径。请选择程序，或先手动打开 Codex 再检测。",
+      "reload": "重新加载",
+      "timeout": "操作超时，请重试。不会自动继续启动。",
+      "noCandidates": "未检测到 Codex，请先手动打开客户端再检测，或选择程序路径。",
+      "pathRequired": "请选择或输入 Codex 客户端路径。",
+      "invalidPath": "此路径不是有效的 Codex 桌面客户端，请重新选择程序。",
+      "candidates": "检测结果",
+      "autoLaunchHint": "如果只需要切换账号、不需要启动桌面端，可关闭此开关。关闭后仍可手动启动。",
+      "manualLaunchHint": "关闭自动启动不代表本次手动启动成功。仅保存设置会取消本次启动尝试。",
+      "saveAndRetry": "保存并重试",
+      "saveWithoutLaunch": "保存并继续切换",
+      "saveOnly": "仅保存设置",
+      "validationBusy": "上一条路径仍在检查，请稍后重试。"
     }
   },
   "codebuddy": {

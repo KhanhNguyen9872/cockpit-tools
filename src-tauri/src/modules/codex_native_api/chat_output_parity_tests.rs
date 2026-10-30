@@ -154,3 +154,32 @@ fn go_terminal_usage_remains_available_without_stream_options() {
     let chunks = values(stream.push(&json!({"type":"response.completed","response":{"status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}})).unwrap());
     assert_eq!(chunks.last().unwrap()["usage"]["total_tokens"], 5);
 }
+
+#[test]
+fn go_limits_chat_stream_accepts_more_than_32_mib_and_4096_items() {
+    let mut stream = ChatStreamAdapter::new(context());
+    let delta = "x".repeat(4 * 1024 * 1024);
+    for _ in 0..9 {
+        stream.push(&json!({"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":delta})).unwrap();
+    }
+    for index in 1..=4096 {
+        stream.push(&json!({"type":"response.output_text.delta","output_index":index,"content_index":0,"item_id":format!("item-{index}"),"delta":"x"})).unwrap();
+    }
+    let terminal = stream.push(&json!({"type":"response.completed","response":{"id":"large-chat","status":"completed","output":[]}})).unwrap();
+    assert!(!terminal.is_empty());
+    assert!(stream.is_finished());
+}
+
+#[test]
+fn go_limits_chat_upstream_stream_accepts_large_aggregate_and_tool_indexes() {
+    let mut stream = crate::modules::codex_native_api::chat_upstream::ResponsesStreamAdapter::new("m".into());
+    let delta = "x".repeat(3 * 1024 * 1024);
+    for _ in 0..12 {
+        stream.push(&json!({"choices":[{"index":0,"delta":{"content":delta}}]})).unwrap();
+    }
+    stream.push(&json!({"choices":[{"index":0,"delta":{"tool_calls":[{"index":5000,"id":"call-large-index","type":"function","function":{"name":"tool","arguments":"{}"}}]}}]})).unwrap();
+    stream.push(&json!({"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]})).unwrap();
+    let events = stream.finish().unwrap();
+    assert!(events.iter().any(|event| event["type"] == "response.completed"));
+    assert!(stream.finish().unwrap().is_empty());
+}

@@ -82,6 +82,22 @@ fn stable_sidecar_manifest_for_fingerprint(manifest_content: &str) -> String {
         for account in accounts {
             if let Some(account) = account.as_object_mut() {
                 account.remove("remainingQuota");
+                if let Some(reserve) = account
+                    .get_mut("quotaReserve")
+                    .and_then(Value::as_object_mut)
+                {
+                    for key in [
+                        "snapshotUpdatedAtUnixSeconds",
+                        "hourlyRemainingPercent",
+                        "weeklyRemainingPercent",
+                        "hourlyWindowPresent",
+                        "weeklyWindowPresent",
+                        "hourlyReserveState",
+                        "weeklyReserveState",
+                    ] {
+                        reserve.remove(key);
+                    }
+                }
             }
         }
     }
@@ -101,6 +117,7 @@ fn stable_sidecar_manifest_for_fingerprint(manifest_content: &str) -> String {
 struct SidecarLaunchConfig {
     config_path: PathBuf,
     manifest_path: PathBuf,
+    quota_reserve_path: PathBuf,
     quota_pool_path: PathBuf,
     fingerprint: String,
     proxy_signature: UpstreamHttpClientSignature,
@@ -242,6 +259,8 @@ struct SidecarAuthResultEvent {
     unavailable_auths: usize,
     #[serde(default)]
     model_excluded_auths: usize,
+    #[serde(default)]
+    quota_reserved_auths: usize,
     #[serde(default)]
     image_policy_blocked_auths: usize,
     #[serde(default)]
@@ -1221,6 +1240,7 @@ fn remove_account_refs_from_collection(
         .unwrap_or(false)
     {
         collection.bound_oauth_account_id = None;
+        collection.bound_oauth_quota_reserve = None;
         changed = true;
     }
 
@@ -1754,6 +1774,9 @@ fn sidecar_account_manifest_value_with_proxy(
         // The Go direct-provider path has no SDK Auth to inherit a proxy from.
         // Project the already prepared route; it must not start another router.
         value["upstreamProxyUrl"] = json!(proxy_url);
+    }
+    if let Some(quota_reserve) = sidecar_quota_reserve_manifest_value(collection, account) {
+        value["quotaReserve"] = quota_reserve;
     }
     if !account.api_model_context_windows.is_empty() {
         value["modelContextWindows"] = json!(account.api_model_context_windows);
@@ -2777,6 +2800,7 @@ fn prepare_sidecar_launch_config_in_dir_sync(
             "bound_account_not_candidate": sidecar_localized_messages("codex.localAccess.accountPoolHealth.dialog.boundAccountNotCandidateDetail"),
             "model_not_available": sidecar_localized_messages("codex.localAccess.gatewayErrors.modelNotAvailable"),
             "account_concurrency_exceeded": sidecar_localized_messages("codex.localAccess.gatewayErrors.accountConcurrencyExceeded"),
+            "quota_reserved": sidecar_localized_messages("codex.localAccess.gatewayErrors.quotaReserved"),
             "provider_retry_after": sidecar_localized_messages("codex.localAccess.gatewayErrors.providerRetryAfter"),
             "audio_invalid_request": sidecar_localized_messages("codex.localAccess.gatewayErrors.audioInvalidRequest"),
             "audio_too_large": sidecar_localized_messages("codex.localAccess.gatewayErrors.audioTooLarge"),
@@ -2826,8 +2850,12 @@ fn prepare_sidecar_launch_config_in_dir_sync(
         .as_array()
         .ok_or("Continuity callers are unavailable")?;
     if sidecar_manifest_needs_continuity(continuity_accounts, continuity_callers) {
-        manifest["continuity"] =
-            sidecar_continuity_manifest(&base_dir, continuity_accounts, continuity_callers)?;
+        manifest["continuity"] = sidecar_continuity_manifest(
+            &base_dir,
+            continuity_accounts,
+            continuity_callers,
+            collection.session_identity_mapping_enabled,
+        )?;
     }
 
     let mut config = Map::new();
@@ -2944,6 +2972,7 @@ fn prepare_sidecar_launch_config_in_dir_sync(
 
     let config_path = sidecar_config_path(&base_dir);
     let manifest_path = sidecar_manifest_path(&base_dir);
+    let quota_reserve_path = sidecar_quota_reserve_path(&base_dir);
     let quota_pool_path = sidecar_quota_pool_path(&base_dir);
     let config_content = serde_json::to_string_pretty(&Value::Object(config))
         .map_err(|e| format!("序列化 sidecar 配置失败: {}", e))?;
@@ -2957,11 +2986,13 @@ fn prepare_sidecar_launch_config_in_dir_sync(
     write_string_atomic_if_changed(&config_path, &config_content)?;
     write_secret_string_atomic_if_changed(&manifest_path, &manifest_content)?;
     write_sidecar_api_key_priority_state_in_dir(collection, &base_dir)?;
+    write_sidecar_quota_reserve_state_in_dir(collection, &base_dir)?;
     write_sidecar_quota_pool_state_in_dir(collection, &base_dir)?;
 
     Ok(SidecarLaunchConfig {
         config_path,
         manifest_path,
+        quota_reserve_path,
         quota_pool_path,
         fingerprint,
         proxy_signature,
@@ -2971,4 +3002,85 @@ fn prepare_sidecar_launch_config_in_dir_sync(
             .collect(),
         pending_public_accounts,
     })
+}
+
+fn sidecar_quota_reserve_path(base_dir: &Path) -> PathBuf {
+    base_dir.join(CODEX_LOCAL_ACCESS_SIDECAR_QUOTA_RESERVE_FILE)
+}
+
+fn sidecar_quota_reserve_manifest_value(
+    collection: &CodexLocalAccessCollection,
+    account: &CodexAccount,
+) -> Option<Value> {
+    let reserve = collection.bound_oauth_quota_reserve.as_ref()?;
+    let bound_account_id =
+        normalize_optional_account_ref(collection.bound_oauth_account_id.as_deref())?;
+    if account.id != bound_account_id {
+        return None;
+    }
+
+    Some(json!({
+        "hourlyThresholdPercent": quota_reserve_cutoff(reserve, reserve.hourly_percent) as i32,
+        "weeklyThresholdPercent": quota_reserve_cutoff(reserve, reserve.weekly_percent) as i32,
+    }))
+}
+
+fn sidecar_quota_reserve_snapshot_value(
+    collection: &CodexLocalAccessCollection,
+    account: &CodexAccount,
+) -> Option<Value> {
+    let reserve = collection.bound_oauth_quota_reserve.as_ref()?;
+    let bound_account_id =
+        normalize_optional_account_ref(collection.bound_oauth_account_id.as_deref())?;
+    if account.id != bound_account_id {
+        return None;
+    }
+
+    let quota = fresh_quota_for_bound_oauth_reserve(account);
+    Some(json!({
+        "snapshotUpdatedAtUnixSeconds": account.usage_updated_at,
+        "snapshotVerifiedQueryStartedAtUnixMillis": sidecar_quota_reserve_verified_query_started_ms(&account.id),
+        "hourlyRemainingPercent": quota
+            .and_then(|quota| valid_quota_remaining_percent(quota.hourly_percentage)),
+        "weeklyRemainingPercent": quota
+            .and_then(|quota| valid_quota_remaining_percent(quota.weekly_percentage)),
+        "hourlyWindowPresent": quota.and_then(|quota| quota.hourly_window_present),
+        "weeklyWindowPresent": quota.and_then(|quota| quota.weekly_window_present),
+        "hourlyThresholdPercent": quota_reserve_cutoff(reserve, reserve.hourly_percent) as i32,
+        "weeklyThresholdPercent": quota_reserve_cutoff(reserve, reserve.weekly_percent) as i32,
+    }))
+}
+
+fn sidecar_quota_reserve_state_value(collection: &CodexLocalAccessCollection) -> Value {
+    let mut accounts = Map::new();
+    if let Some(account_id) =
+        normalize_optional_account_ref(collection.bound_oauth_account_id.as_deref())
+    {
+        if let Some(account) = codex_account::load_account(&account_id) {
+            if let Some(snapshot) = sidecar_quota_reserve_snapshot_value(collection, &account) {
+                accounts.insert(account_id, snapshot);
+            }
+        }
+    }
+    json!({ "accounts": accounts })
+}
+
+fn write_sidecar_quota_reserve_state(
+    collection: &CodexLocalAccessCollection,
+) -> Result<PathBuf, String> {
+    let base_dir = local_access_sidecar_dir()?;
+    write_sidecar_quota_reserve_state_in_dir(collection, &base_dir)
+}
+
+fn write_sidecar_quota_reserve_state_in_dir(
+    collection: &CodexLocalAccessCollection,
+    base_dir: &Path,
+) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(&base_dir)
+        .map_err(|error| format!("创建 API 服务 sidecar 目录失败: {}", error))?;
+    let path = sidecar_quota_reserve_path(&base_dir);
+    let content = serde_json::to_string_pretty(&sidecar_quota_reserve_state_value(collection))
+        .map_err(|error| format!("序列化 OAuth 保留额度快照失败: {}", error))?;
+    write_string_atomic_if_changed(&path, &content)?;
+    Ok(path)
 }

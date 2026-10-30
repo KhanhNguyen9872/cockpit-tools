@@ -32,6 +32,7 @@ fn query(scope: &str, view: &str) -> DialogQuery {
         period: "today".into(),
         cursor: None,
         view: view.into(),
+        binding: None,
     }
 }
 
@@ -119,13 +120,17 @@ fn session_identity_requires_exact_key_instance_thread_and_explicit_installation
     let result = data(&conn, &scope(), &query("chat", "logs"));
     assert_eq!(result["requests"]["rows"].as_array().unwrap().len(), 1);
     assert_eq!(result["requests"]["rows"][0]["requestId"], "correct");
-    assert_eq!(result["session"]["threadId"], THREAD);
+    assert!(result["session"].is_null());
+    assert_eq!(
+        data(&conn, &scope(), &query("chat", "overview"))["session"]["threadId"],
+        THREAD
+    );
     conn.execute(
         "UPDATE request_diagnostics SET client_identity_captured=0 WHERE request_id='correct'",
         [],
     )
     .unwrap();
-    assert!(data(&conn, &scope(), &query("chat", "logs"))["session"].is_null());
+    assert!(data(&conn, &scope(), &query("chat", "overview"))["session"].is_null());
 }
 
 #[test]
@@ -190,8 +195,10 @@ fn service_spans_keys_but_session_metadata_stays_with_current_chat() {
     conn.execute("UPDATE request_logs SET model_id='other-model',first_response_ms=900 WHERE request_id='other'", []).unwrap();
     let result = data(&conn, &scope(), &query("service", "logs"));
     assert_eq!(result["requests"]["rows"].as_array().unwrap().len(), 2);
-    assert_eq!(result["session"]["model"], "model-a");
-    assert_eq!(result["session"]["firstResponseMs"], 500);
+    assert!(result["session"].is_null());
+    let overview = data(&conn, &scope(), &query("service", "overview"));
+    assert_eq!(overview["session"]["model"], "model-a");
+    assert_eq!(overview["session"]["firstResponseMs"], 500);
 }
 
 #[test]
@@ -496,11 +503,15 @@ fn local_service_binding_checks_configured_port_and_enabled_key() {
     std::fs::create_dir_all(&dir).unwrap();
     let conn = Connection::open(dir.join("logs.sqlite")).unwrap();
     std::fs::write(dir.join("config.toml"),
-        "model_provider='cockpit'\n[model_providers.cockpit]\nbase_url='http://localhost:58554/v1'\n").unwrap();
-    let mut config = json!({"port":58554,"apiKeys":[{"id":"key-a","enabled":true}]});
+        "model_provider='cockpit'\n[model_providers.cockpit]\nbase_url='http://localhost:58554/v1'\nexperimental_bearer_token='synthetic-binding-token'\n").unwrap();
+    let mut config = json!({"port":58554,"apiKeys":[{"id":"key-a","key":"synthetic-binding-token","enabled":true}]});
     std::fs::write(dir.join("codex_local_access.json"), config.to_string()).unwrap();
     assert!(matches_local_service(&dir, &conn, &scope()).unwrap());
     let identity = cache_identity(&dir, &conn, &scope()).unwrap();
+    config["apiKeys"][0]["tokenUsed"] = json!(99999);
+    config["updatedAt"] = json!(99999);
+    std::fs::write(dir.join("codex_local_access.json"), config.to_string()).unwrap();
+    assert_eq!(identity, cache_identity(&dir, &conn, &scope()).unwrap());
     config["apiKeys"][0]["enabled"] = json!(false);
     std::fs::write(dir.join("codex_local_access.json"), config.to_string()).unwrap();
     assert!(!matches_local_service(&dir, &conn, &scope()).unwrap());
@@ -768,8 +779,9 @@ fn recorded_request_and_upstream_model_pair_preserves_aliases_and_unknown_histor
         result["requests"]["rows"][0]["upstreamModel"],
         "deepseek-v4"
     );
-    assert_eq!(result["session"]["requestedModel"], "gpt-client-shell");
-    assert_eq!(result["session"]["upstreamModel"], "deepseek-v4");
+    let overview = data(&conn, &scope(), &query("chat", "overview"));
+    assert_eq!(overview["session"]["requestedModel"], "gpt-client-shell");
+    assert_eq!(overview["session"]["upstreamModel"], "deepseek-v4");
     conn.execute(
         "UPDATE request_logs SET upstream_model='gpt-client-shell'",
         [],
@@ -889,7 +901,10 @@ fn recorded_zero_latency_is_kept_while_missing_or_invalid_timing_stays_unknown()
     let result = data(&conn, &scope(), &query("chat", "logs"));
     assert_eq!(result["requests"]["rows"][0]["firstResponseMs"], 0);
     assert_eq!(result["requests"]["rows"][0]["latencyMs"], 0);
-    assert_eq!(result["session"]["firstResponseMs"], 0);
+    assert_eq!(
+        data(&conn, &scope(), &query("chat", "overview"))["session"]["firstResponseMs"],
+        0
+    );
     assert!(result["requests"]["rows"][0]["outputGenerationMs"].is_null());
     conn.execute(
         "UPDATE request_logs SET first_response_ms=-1,latency_ms=-1",
@@ -899,4 +914,67 @@ fn recorded_zero_latency_is_kept_while_missing_or_invalid_timing_stays_unknown()
     let invalid = data(&conn, &scope(), &query("chat", "logs"));
     assert!(invalid["requests"]["rows"][0]["firstResponseMs"].is_null());
     assert!(invalid["requests"]["rows"][0]["latencyMs"].is_null());
+}
+
+#[test]
+fn future_summaries_keep_indexed_chat_pages_without_diagnostic_reads_or_history_backfill() {
+    let conn = database();
+    conn.execute_batch("CREATE INDEX idx_codex_local_access_logs_request_id ON request_logs(request_id,timestamp DESC)").unwrap();
+    append(&conn, "historical", "key-a", THREAD, 500);
+    crate::modules::codex_request_summary::ensure_schema(&conn).unwrap();
+    assert_eq!(
+        data(&conn, &scope(), &query("chat", "logs"))["requests"]["rows"],
+        json!([])
+    );
+    for n in 0..15 {
+        let request = format!("new-{n:02}");
+        append(&conn, &request, "key-a", THREAD, 1000);
+        crate::modules::codex_request_summary::refresh_request(&conn, &request).unwrap();
+    }
+    for (request, key, thread) in [
+        ("wrong-key", "key-b", THREAD),
+        ("wrong-chat", "key-a", OTHER_THREAD),
+    ] {
+        append(&conn, request, key, thread, 2000);
+        crate::modules::codex_request_summary::refresh_request(&conn, request).unwrap();
+    }
+    // The complete new projection remains queryable after diagnostic retention
+    // expires. The UI never opens large bodies/attempts to reconstruct it.
+    conn.execute_batch("DROP TABLE request_diagnostics")
+        .unwrap();
+    let mut q = query("chat", "logs");
+    let first = data(&conn, &scope(), &q);
+    assert_eq!(first["requests"]["rows"].as_array().unwrap().len(), 10);
+    assert_eq!(first["requests"]["rows"][0]["requestId"], "new-14");
+    assert!(first["session"].is_null());
+    q.cursor = first["requests"]["nextCursor"].as_str().map(str::to_string);
+    assert!(q.cursor.is_some());
+    let second = data(&conn, &scope(), &q);
+    assert_eq!(second["requests"]["rows"].as_array().unwrap().len(), 5);
+    assert_eq!(second["requests"]["rows"][0]["requestId"], "new-04");
+    assert!(second["requests"]["nextCursor"].is_null());
+    q.thread_id = Some(OTHER_THREAD.into());
+    assert!(read_data(&conn, &scope(), &q, Instant::now(), None).is_err());
+    let plan = conn.query_row("EXPLAIN QUERY PLAN SELECT log_id FROM request_display_summaries INDEXED BY idx_request_display_chat WHERE api_key_id='key-a' AND client_instance_id='instance-a' AND client_thread_id=?1 ORDER BY timestamp DESC,log_id DESC LIMIT 11",[THREAD],|row|row.get::<_,String>(3)).unwrap();
+    assert!(
+        plan.contains("SEARCH") && plan.contains("idx_request_display_chat"),
+        "{plan}"
+    );
+    assert!(!serde_json::to_string(&first).unwrap().contains("SECRET"));
+    let service = data(&conn, &scope(), &query("service", "logs"));
+    assert_eq!(service["requests"]["rows"][0]["requestId"], "wrong-chat");
+}
+
+#[test]
+fn binding_fences_are_validated_and_part_of_pagination_identity() {
+    let mut q = query("chat", "logs");
+    q.binding = Some("a".repeat(64));
+    assert!(parse_query(&serde_json::to_value(&q).unwrap()).is_some());
+    let before = cursor_binding(&scope(), &q);
+    q.binding = Some("b".repeat(64));
+    assert_ne!(before, cursor_binding(&scope(), &q));
+    for bad in ["a".repeat(63), "x".repeat(64), "../auth.json".into()] {
+        q.binding = Some(bad);
+        assert!(parse_query(&serde_json::to_value(&q).unwrap()).is_none());
+    }
 }

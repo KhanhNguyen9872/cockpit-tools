@@ -72,6 +72,7 @@ pub async fn codex_local_access_save_accounts(
         HashMap<String, CodexLocalAccessImageGenerationPolicy>,
     >,
     official_account_bindings: Option<HashMap<String, String>>,
+    session_identity_mapping_enabled: Option<bool>,
 ) -> Result<CodexLocalAccessState, String> {
     codex_local_access::save_local_access_accounts_with_official_bindings(
         account_ids,
@@ -82,6 +83,7 @@ pub async fn codex_local_access_save_accounts(
         session_affinity_ttl_ms,
         image_generation_account_policies,
         official_account_bindings,
+        session_identity_mapping_enabled,
     )
     .await
 }
@@ -123,10 +125,11 @@ pub async fn codex_local_access_rotate_api_key() -> Result<CodexLocalAccessState
 #[tauri::command]
 pub async fn codex_local_access_update_bound_oauth_account(
     bound_oauth_account_id: Option<String>,
+    bound_oauth_quota_reserve: Option<CodexLocalAccessQuotaReserve>,
 ) -> Result<CodexLocalAccessState, String> {
     codex_local_access::update_local_access_bound_oauth_account(
         bound_oauth_account_id,
-
+        bound_oauth_quota_reserve,
     )
     .await
 }
@@ -266,6 +269,7 @@ pub async fn codex_local_access_update_routing_options(
     max_concurrent_image_requests: u16,
     max_account_concurrency: u16,
     account_concurrency_wait_ms: u64,
+    session_identity_mapping_enabled: Option<bool>,
 ) -> Result<CodexLocalAccessState, String> {
     codex_local_access::update_local_access_routing_options(
         session_affinity,
@@ -278,6 +282,7 @@ pub async fn codex_local_access_update_routing_options(
         max_concurrent_image_requests,
         max_account_concurrency,
         account_concurrency_wait_ms,
+        session_identity_mapping_enabled,
     )
     .await
 }
@@ -455,11 +460,11 @@ pub async fn codex_local_access_set_enabled(
     codex_local_access::set_local_access_enabled(enabled).await
 }
 
-#[tauri::command]
-pub async fn codex_local_access_activate(
+async fn codex_local_access_activate_internal(
     app: AppHandle,
     auto_repair_mode: Option<codex_session_visibility::CodexSessionVisibilityAutoRepairMode>,
     instance_id: Option<String>,
+    launch_after_switch: Option<bool>,
 ) -> Result<CodexLocalAccessState, String> {
     let flow_started = Instant::now();
     let target_instance_id = instance_id
@@ -576,7 +581,7 @@ pub async fn codex_local_access_activate(
 
     logger::log_info("API 服务启动模式下跳过 OpenCode / OpenClaw OAuth 同步");
 
-    if user_config.codex_launch_on_switch {
+    if launch_after_switch.unwrap_or(user_config.codex_launch_on_switch) {
         let launch_started = Instant::now();
         #[cfg(target_os = "macos")]
         if launch_target.is_default && process::is_codex_running() {
@@ -606,20 +611,7 @@ pub async fn codex_local_access_activate(
             Ok(_) => None,
             Err(e) => {
                 logger::log_warn(&format!("Codex 启动失败: {}", e));
-                if e.starts_with("APP_PATH_NOT_FOUND:") {
-                    let retry = if launch_target.is_default {
-                        serde_json::json!({ "kind": "default" })
-                    } else {
-                        serde_json::json!({
-                            "kind": "instance",
-                            "instanceId": target_instance_id,
-                        })
-                    };
-                    let _ = app.emit(
-                        "app:path_missing",
-                        serde_json::json!({ "app": "codex", "retry": retry }),
-                    );
-                }
+
                 Some(e)
             }
         };
@@ -639,7 +631,7 @@ pub async fn codex_local_access_activate(
             ));
         }
     } else {
-        logger::log_info("已关闭切换 Codex 时自动启动 Codex App");
+        logger::log_info("本次 API 服务切换不启动 Codex App");
     }
 
     let tray_started = Instant::now();

@@ -1,4 +1,5 @@
 //! Continue recovery after exposing only bounded Responses control metadata.
+use crate::modules::codex_native_api::deadline::Deadline;
 use super::*;
 
 #[allow(clippy::too_many_arguments)]
@@ -10,7 +11,7 @@ pub(super) async fn recover(
     frame: &SseFrame,
     previous_wait: Option<std::time::Duration>,
     policy: &ExecutionPolicy,
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
     streaming: bool,
 ) -> Result<Option<HttpResponseStream>, ServiceError> {
     let original = frame.identity_event.as_ref().or(frame.value.as_ref());

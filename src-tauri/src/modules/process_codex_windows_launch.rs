@@ -288,47 +288,6 @@ fn parse_codex_registered_launch(output: &str) -> Result<Option<CodexRegisteredL
     Ok(registered)
 }
 
-/// Resolve the selected StartApps entry to its registered GUI executable before
-/// activation. A shell alias cannot carry a per-launch environment block.
-#[cfg(any(test, target_os = "windows"))]
-fn build_codex_default_registered_launch_probe(app_user_model_id: &str) -> Result<String, String> {
-    let (family, app_id) = app_user_model_id
-        .trim()
-        .split_once('!')
-        .filter(|(family, app_id)| {
-            !family.is_empty() && !app_id.is_empty() && !app_id.contains('!')
-        })
-        .ok_or_else(|| "Invalid Codex AppUserModelId".to_string())?;
-    Ok(format!(
-        r#"$ErrorActionPreference = 'Stop'
-$family = '{family}'
-$appId = '{app_id}'
-$pkg = Get-AppxPackage -Name '{package_name}' -ErrorAction Stop | Where-Object {{ $_.PackageFamilyName -ieq $family }} | Sort-Object Version -Descending | Select-Object -First 1
-if (-not $pkg) {{ throw 'Codex package is not registered' }}
-$root = [IO.Path]::GetFullPath($pkg.InstallLocation).TrimEnd('\')
-$matches = @()
-foreach ($application in (Get-AppxPackageManifest -Package $pkg -ErrorAction Stop).Package.Applications.Application) {{
-  if ($application.Id -ne $appId) {{ continue }}
-  $relative = [string]$application.Executable
-  if (-not $relative -or [IO.Path]::IsPathRooted($relative)) {{ continue }}
-  $exe = [IO.Path]::GetFullPath((Join-Path $root $relative))
-  if ($exe.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($exe) -ieq 'ChatGPT.exe' -and (Test-Path -LiteralPath $exe -PathType Leaf)) {{
-    $matches += [PSCustomObject]@{{ family_name = [string]$pkg.PackageFamilyName; app_id = [string]$application.Id; executable = $exe }}
-  }}
-}}
-if ($matches.Count -ne 1) {{ throw 'No unique registered Codex GUI application' }}
-$matches[0] | ConvertTo-Json -Compress"#,
-        family = escape_powershell_single_quoted(family),
-        package_name = escape_powershell_single_quoted(
-            family
-                .rsplit_once('_')
-                .map(|(name, _)| name)
-                .unwrap_or(family)
-        ),
-        app_id = escape_powershell_single_quoted(app_id),
-    ))
-}
-
 #[cfg(any(test, target_os = "windows"))]
 #[derive(Debug, PartialEq)]
 enum CodexManagedLaunchRoute {
@@ -445,7 +404,7 @@ fn launch_codex_via_package_identity(
     app_user_data_dir: &Path,
     extra_args: &[String],
     extra_env: &[(String, String)],
-) -> Result<(), String> {
+) -> Result<u32, String> {
     let mut env: Vec<(String, String)> = managed_proxy_env_pairs()
         .into_iter()
         .map(|(key, value)| (key.to_string(), value))
@@ -467,7 +426,7 @@ fn run_codex_package_activation(
     app_user_data_dir: Option<&Path>,
     extra_args: &[String],
     env: &[(String, String)],
-) -> Result<(), String> {
+) -> Result<u32, String> {
     use codex_package_launcher::{LaunchReply, PendingReceipt};
     let receipt = PendingReceipt::new().map_err(|error| error.to_string())?;
     let request = codex_package_launch_request(
@@ -509,13 +468,15 @@ fn run_codex_package_activation(
     let result = match receipt.wait(wait) {
         Some(LaunchReply::Spawned { pid, validation_us, helper_has_console }) => {
             crate::modules::logger::log_info(&format!("[Codex Start] native package validation_us={validation_us} helper_has_console={helper_has_console} spawned_pid={pid}"));
-            Ok(())
+            Ok(pid)
         }
         Some(LaunchReply::EntryStale) => Err("CODEX_PACKAGE_REGISTRATION_CHANGED: native package entry validation failed before client creation".into()),
         Some(LaunchReply::Failed { message }) => Err(message),
         Some(LaunchReply::Validated { .. }) => Err("Unexpected validation-only helper reply".into()),
         None => match activation {
-            Err(error) => Err(error),
+            Err(error) if error.starts_with("CODEX_PACKAGE_REGISTRATION_CHANGED")
+                || error.starts_with("CODEX_ACTIVATION_UNCERTAIN:") => Err(error),
+            Err(error) => Err(format!("CODEX_ACTIVATION_UNCERTAIN: {error}")),
             Ok(_) => Err("CODEX_ACTIVATION_UNCERTAIN: no helper receipt; client creation may already have occurred".into()),
         }
     };
@@ -635,6 +596,7 @@ fn launch_windows_codex_managed_instance(
             .into_iter()
             .map(|(pid, _)| pid)
             .collect();
+    let mut receipt_pid = None;
     let mut child = if route == CodexManagedLaunchRoute::PackageIdentity {
         let registered = package.as_ref().expect("registered package route");
         crate::modules::logger::log_info(&format!(
@@ -652,7 +614,7 @@ fn launch_windows_codex_managed_instance(
                     app_user_data_dir,
                     extra_args,
                     extra_env,
-                )
+                ).map(|pid| { receipt_pid = Some(pid); })
             },
             || {
                 query_codex_registered_launch(configured)?
@@ -680,6 +642,9 @@ fn launch_windows_codex_managed_instance(
     };
     let expected = launch_path.to_string_lossy();
     let target = normalize_path_for_compare(&app_user_data_dir.to_string_lossy());
+    if receipt_pid.is_none() {
+        receipt_pid = child.as_ref().map(|child| child.id());
+    }
     let started = Instant::now();
     let mut stable_pid = None;
     let mut stable_since = Instant::now();
@@ -688,13 +653,16 @@ fn launch_windows_codex_managed_instance(
     while started.elapsed() < Duration::from_secs(15) {
         if let Some(child) = child.as_mut() {
             if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-                return Err(format!(
-                    "Codex exited before startup confirmation: {status}"
-                ));
+                // A successful launcher exit can hand off to the real client.
+                if !status.success() {
+                    return Err(format!("Codex exited before startup confirmation: {status}"));
+                }
             }
         }
         let entries = collect_codex_process_entries_from_sysinfo_fallback(&expected);
-        let candidate = codex_managed_launch_candidate(&entries, &target, &before);
+        let candidate = codex_receipt_candidate(receipt_pid, &before, |pid| {
+            verify_codex_launch_receipt_pid(pid, &expected, package.as_ref().map(|p| p.family_name.as_str()))
+        }).or_else(|| codex_managed_launch_candidate(&entries, &target, &before));
         let candidate = candidate.filter(|pid| is_pid_running(*pid));
         if candidate.is_some() && first_candidate_ms.is_none() {
             first_candidate_ms = Some(started.elapsed().as_millis());
@@ -730,11 +698,9 @@ fn launch_windows_codex_managed_instance(
         "[Codex Start] confirmation failed launch_path={} error={last_error}",
         launch_path.display()
     ));
-    if package.is_some() {
-        Err(fail(&launch_path, "confirmation", &last_error))
-    } else {
-        Err(format!("Codex startup confirmation failed: {last_error}"))
-    }
+    Err(format!("CODEX_START_CONFIRMATION_UNCERTAIN:{}", serde_json::json!({
+        "beforePids": before, "reason": last_error
+    })))
 }
 
 #[cfg(test)]

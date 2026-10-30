@@ -14,6 +14,9 @@ use serde_json::{json, Value};
 
 use super::recent_account::{open_gateway_logs, read_small_file, RequestScope};
 
+#[path = "codex_app_injection_dialog_summary.rs"]
+mod summaries;
+
 const PAGE_SIZE: usize = 10;
 const QUERY_BUDGET: Duration = Duration::from_millis(900);
 const CACHE_TTL: Duration = Duration::from_secs(30);
@@ -31,6 +34,8 @@ pub(super) struct DialogQuery {
     pub period: String,
     pub cursor: Option<String>,
     pub view: String,
+    #[serde(default)]
+    pub binding: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -53,6 +58,9 @@ pub(super) fn parse_query(value: &Value) -> Option<DialogQuery> {
         || !matches!(query.scope.as_str(), "chat" | "service")
         || !matches!(query.period.as_str(), "today" | "week")
         || !matches!(query.view.as_str(), "overview" | "logs")
+        || query.binding.as_ref().is_some_and(|binding| {
+            binding.len() != 64 || !binding.bytes().all(|b| b.is_ascii_hexdigit())
+        })
     {
         return None;
     }
@@ -81,7 +89,7 @@ fn response(query: &DialogQuery, available: bool) -> Value {
     json!({
         "requestToken": query.request_token, "threadId": query.thread_id,
         "scope": query.scope, "period": query.period, "cursor": query.cursor,
-        "view": query.view, "available": available,
+        "view": query.view, "binding": query.binding, "available": available,
         "requests": {"rows": [], "nextCursor": null},
         "summary": null, "session": null
     })
@@ -94,11 +102,15 @@ pub(super) fn read_dialog_data(profile: &Path, query: &DialogQuery) -> Result<Va
     {
         return Err("invalid dialog query".into());
     }
+    let before = super::output_speed::binding_snapshot(profile)?;
+    if query.binding.is_some() && before != query.binding {
+        return Ok(unavailable(query, "binding_changed"));
+    }
     let Some((conn, scope)) = open_gateway_logs(profile)? else {
-        return Ok(response(query, false));
+        return Ok(unavailable(query, "service_unavailable"));
     };
     if !matches_local_service(profile, &conn, &scope)? {
-        return Ok(response(query, false));
+        return Ok(unavailable(query, "service_unavailable"));
     }
     let cache_identity = cache_identity(profile, &conn, &scope)?;
     let mut output = with_budget(&conn, QUERY_BUDGET, |started| {
@@ -110,10 +122,19 @@ pub(super) fn read_dialog_data(profile: &Path, query: &DialogQuery) -> Result<Va
         enrich_account_display_names(data_dir, &mut output);
         enrich_gpt_api_key_count(data_dir, &scope, query, &cache_identity, &mut output);
     }
+    if super::output_speed::binding_snapshot(profile)? != before {
+        return Ok(unavailable(query, "binding_changed"));
+    }
     Ok(output)
 }
 
-fn matches_local_service(
+fn unavailable(query: &DialogQuery, reason: &str) -> Value {
+    let mut output = response(query, false);
+    output["unavailableReason"] = json!(reason);
+    output
+}
+
+pub(super) fn matches_local_service(
     profile: &Path,
     conn: &Connection,
     scope: &RequestScope,
@@ -138,19 +159,10 @@ fn matches_local_service(
     else {
         return Ok(false);
     };
-    let Some(profile_config) = read_small_file(&profile.join("config.toml"))? else {
+    let Some((base_url, _, _)) = super::recent_account::profile_gateway(profile)? else {
         return Ok(false);
     };
-    let document = profile_config
-        .parse::<toml_edit::Document>()
-        .map_err(|e| e.to_string())?;
-    let url = document
-        .get("model_provider")
-        .and_then(toml_edit::Item::as_str)
-        .and_then(|id| document.get("model_providers")?.get(id))
-        .and_then(|provider| provider.get("base_url"))
-        .and_then(toml_edit::Item::as_str)
-        .and_then(|url| reqwest::Url::parse(url).ok());
+    let url = reqwest::Url::parse(&base_url).ok();
     Ok(url
         .and_then(|url| url.port_or_known_default())
         .map(u64::from)
@@ -318,12 +330,14 @@ fn read_data(
     started: Instant,
     cache_identity: Option<&str>,
 ) -> Result<Value, String> {
-    let Some(schema) = schema(conn)? else {
-        return Ok(response(query, false));
-    };
+    let fast = summaries::available(conn)?;
+    let schema = if fast { None } else { schema(conn)? };
+    if !fast && schema.is_none() {
+        return Ok(unavailable(query, "schema_unavailable"));
+    }
     let chat_valid = chat_available(scope, query.thread_id.as_deref());
     if query.view == "logs" && query.scope == "chat" && !chat_valid {
-        return Ok(response(query, false));
+        return Ok(unavailable(query, "unlinked_session"));
     }
     let mut output = response(query, true);
     // One read transaction keeps page rows, latest session and aggregate consistent.
@@ -334,14 +348,37 @@ fn read_data(
         })
         .map_err(|e| e.to_string())?;
     if query.view == "logs" {
-        output["requests"] =
-            read_page(&tx, &schema, scope, query, snapshot_id, PAGE_SIZE, started)?;
+        output["requests"] = if fast {
+            summaries::read_page(&tx, scope, query, snapshot_id, PAGE_SIZE, started)?
+        } else {
+            read_page(
+                &tx,
+                schema.as_ref().unwrap(),
+                scope,
+                query,
+                snapshot_id,
+                PAGE_SIZE,
+                started,
+            )?
+        };
     }
-    if chat_valid {
+    if chat_valid && query.view == "overview" {
         let mut session_query = query.clone();
         session_query.scope = "chat".into();
         session_query.cursor = None;
-        let session_page = read_page(&tx, &schema, scope, &session_query, snapshot_id, 1, started)?;
+        let session_page = if fast {
+            summaries::read_page(&tx, scope, &session_query, snapshot_id, 1, started)?
+        } else {
+            read_page(
+                &tx,
+                schema.as_ref().unwrap(),
+                scope,
+                &session_query,
+                snapshot_id,
+                1,
+                started,
+            )?
+        };
         if let Some(latest) = session_page["rows"]
             .as_array()
             .and_then(|rows| rows.first())
@@ -383,6 +420,7 @@ fn cursor_binding(scope: &RequestScope, query: &DialogQuery) -> String {
     query.thread_id.hash(&mut hash);
     query.scope.hash(&mut hash);
     query.period.hash(&mut hash);
+    query.binding.hash(&mut hash);
     format!("{:016x}", hash.finish())
 }
 
@@ -448,6 +486,9 @@ fn read_page(
         "reasoning_effort",
         "error_category",
         "authorization_route",
+        "service_tier",
+        "requested_service_tier",
+        "response_service_tier",
     ]
     .iter()
     .map(|name| projection(schema, name, 256))
@@ -508,133 +549,14 @@ fn read_page(
     Ok(json!({"rows": values, "nextCursor": next_cursor}))
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Attempt {
-    #[serde(default)]
-    sequence: u32,
-    #[serde(default)]
-    started_at_ms: i64,
-    #[serde(default)]
-    account_id: String,
-    account_email: Option<String>,
-    authorization_route: Option<String>,
-    authorization_fallback: Option<AuthorizationFallback>,
-    #[serde(default)]
-    transport: String,
-    status: Option<u16>,
-    failure_phase: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AuthorizationFallback {
-    #[serde(default)]
-    from_route: String,
-    #[serde(default)]
-    to_route: String,
-    #[serde(default)]
-    from_account_id: String,
-    #[serde(default)]
-    to_account_id: String,
-    #[serde(default)]
-    reason: String,
-}
-
-impl AuthorizationFallback {
-    fn is_recorded_same_account_fallback(&self) -> bool {
-        self.from_route == "official"
-            && self.to_route == "local_gateway"
-            && !self.from_account_id.trim().is_empty()
-            && self.from_account_id == self.to_account_id
-            && !self.reason.trim().is_empty()
-    }
-}
-
-fn authorization_route(value: Option<String>) -> Option<String> {
-    value.filter(|value| matches!(value.as_str(), "official" | "local_gateway"))
-}
-
-fn actual_attempts(raw: &str) -> Vec<Attempt> {
-    let mut attempts = serde_json::from_str::<Vec<Attempt>>(raw).unwrap_or_default();
-    attempts.retain(|a| {
-        !a.account_id.is_empty()
-            && !a.transport.is_empty()
-            && a.transport != "preflight"
-            && a.status.is_some_and(|status| (100..=599).contains(&status))
-            && !matches!(
-                a.failure_phase.as_deref(),
-                Some("routing" | "identity" | "validation" | "preparation")
-            )
-    });
-    attempts.sort_by_key(|a| (a.sequence, a.started_at_ms));
-    attempts
-}
-
 fn text(value: Option<String>) -> Option<String> {
     value.filter(|value| {
         !value.trim().is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
     })
 }
 
-fn numeric(row: &rusqlite::Row<'_>, name: &str, positive: bool) -> rusqlite::Result<Option<i64>> {
-    Ok(row
-        .get::<_, Option<i64>>(name)?
-        .filter(|value| (if positive { 1 } else { 0 }..=MAX_SAFE_INTEGER).contains(value)))
-}
-
 fn read_row(row: &rusqlite::Row<'_>) -> Result<Value, String> {
-    let read = || -> rusqlite::Result<Value> {
-        let attempts = actual_attempts(&row.get::<_, String>("attempts")?);
-        let actual = attempts.last();
-        let logged_account = row.get::<_, Option<String>>("account_id")?;
-        let account = actual
-            .and_then(|a| text(Some(a.account_id.clone())))
-            .or_else(|| text(logged_account.clone()));
-        let email = actual
-            .and_then(|a| text(a.account_email.clone()))
-            .or_else(|| {
-                (logged_account == account)
-                    .then(|| row.get::<_, Option<String>>("email").ok().flatten())
-                    .flatten()
-                    .and_then(|v| text(Some(v)))
-            });
-        let success = row.get::<_, i64>("success")? == 1;
-        let authorization_route = actual
-            .and_then(|a| authorization_route(a.authorization_route.clone()))
-            .or(authorization_route(row.get("authorization_route")?));
-        let transport = actual.and_then(|a| text(Some(a.transport.clone())));
-        Ok(json!({
-            "id": row.get::<_, i64>("id")?.to_string(),
-            "requestId": text(row.get("request_id")?),
-            "timestamp": numeric(row,"timestamp",false)?,
-            "accountDisplayName": safe_display_name(email.clone()),
-            "accountId": account, "accountEmail": email,
-            // A current local plan is not evidence of the plan used historically.
-            "plan": null,
-            "model": text(row.get("model_id")?),
-            "requestedModel": text(row.get("requested_model")?),
-            "upstreamModel": text(row.get("upstream_model")?),
-            "reasoningEffort": text(row.get("reasoning_effort")?),
-            "transport": transport, "authorizationRoute": authorization_route,
-            "success": success,
-            "httpStatus": numeric(row,"http_status",true)?,
-            "errorCategory": text(row.get("error_category")?),
-            // Raw upstream error strings can contain echoed input or credentials.
-            "errorMessage": null,
-            "inputTokens": numeric(row,"input_tokens",false)?,
-            "outputTokens": numeric(row,"output_tokens",false)?,
-            "cachedTokens": numeric(row,"cached_tokens",false)?,
-            "totalTokens": numeric(row,"total_tokens",false)?,
-            "firstResponseMs": numeric(row,"first_response_ms",false)?,
-            "latencyMs": numeric(row,"latency_ms",false)?,
-            "outputGenerationMs": numeric(row,"output_generation_ms",true)?,
-            "recovered": success && attempts.iter().any(|attempt| attempt
-                .authorization_fallback.as_ref()
-                .is_some_and(AuthorizationFallback::is_recorded_same_account_fallback))
-        }))
-    };
-    read().map_err(|e| e.to_string())
+    crate::modules::codex_request_summary::display_row(row)
 }
 
 fn period_start(period: &str, until: i64) -> Result<i64, String> {
@@ -661,8 +583,10 @@ fn read_summary(
     until: i64,
     started: Instant,
 ) -> Result<Value, String> {
+    // Each aggregate uses dispatched. Materialize the bounded time window so
+    // SQLite evaluates dispatch evidence once per row instead of per metric.
     let sql = format!(
-        "WITH evidence AS (SELECT l.success,l.input_tokens,l.output_tokens,l.total_tokens,\
+        "WITH evidence AS MATERIALIZED (SELECT l.success,l.input_tokens,l.output_tokens,l.total_tokens,\
          l.cached_tokens,l.reasoning_tokens,l.estimated_cost_usd,l.latency_ms,\
          ({}) AS dispatched,({}) AS unsent \
          FROM request_logs AS l INDEXED BY idx_codex_local_access_logs_timestamp \
@@ -749,9 +673,9 @@ fn cache_identity(
     scope.key_id.hash(&mut hash);
     scope.instance_id.hash(&mut hash);
     scope.installation_id.hash(&mut hash);
-    for path in [profile.join("config.toml"), profile.join("auth.json")] {
-        read_small_file(&path)?.hash(&mut hash);
-    }
+    let (_, bearer, _) = super::recent_account::profile_gateway(profile)?
+        .ok_or("dialog profile binding unavailable")?;
+    bearer.hash(&mut hash);
     let path = conn.path().ok_or("dialog database path unavailable")?;
     path.hash(&mut hash);
     let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
@@ -763,9 +687,13 @@ fn cache_identity(
     }
     metadata.created().ok().hash(&mut hash);
     if let Some(parent) = Path::new(path).parent() {
-        // Account-pool/key/engine changes invalidate aggregate cache even when
-        // the database path and selected client key stay the same.
-        read_small_file(&parent.join("codex_local_access.json"))?.hash(&mut hash);
+        let raw = read_small_file(&parent.join("codex_local_access.json"))?
+            .ok_or("dialog service binding unavailable")?;
+        let service: Value = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
+        super::output_speed::service_binding_fields(&service, &bearer)
+            .ok_or("dialog service key unavailable")?
+            .to_string()
+            .hash(&mut hash);
     }
     Ok(format!("{:016x}", hash.finish()))
 }

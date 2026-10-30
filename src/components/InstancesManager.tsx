@@ -1,3 +1,4 @@
+import { isCodexLaunchCancelled } from '../utils/codexLaunchCancellation';
 import {
   useCallback,
   useEffect,
@@ -1720,6 +1721,7 @@ export function InstancesManager<TAccount extends AccountLike>({
   );
 
   const handleMissingPathError = (error: unknown, instanceId?: string) => {
+    if (isCodexApp && isCodexLaunchCancelled(error)) return true;
     const message = String(error ?? "");
     const missingPathPrefix = "APP_PATH_NOT_FOUND:";
     const multiInstanceExePrefix = "CLAUDE_MULTI_INSTANCE_REQUIRES_EXE:";
@@ -1830,6 +1832,7 @@ export function InstancesManager<TAccount extends AccountLike>({
         }
         return "started";
       } catch (e) {
+        if (isCodexApp && isCodexLaunchCancelled(e)) return "failed";
         if (isCodexApp && isCodexInstanceAccountConflict(e)) {
           return "failed";
         }

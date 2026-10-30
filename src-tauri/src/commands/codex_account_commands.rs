@@ -1094,8 +1094,7 @@ async fn disable_default_model_routing_for_non_oauth_switch() {
     }
 }
 
-#[tauri::command]
-pub async fn switch_codex_account(
+async fn switch_codex_account_internal(
     app: AppHandle,
     account_id: String,
     auto_repair_mode: Option<codex_session_visibility::CodexSessionVisibilityAutoRepairMode>,
@@ -1484,16 +1483,9 @@ pub async fn switch_codex_account(
             {
                 Ok(_) => None,
                 Err(e) => {
-                    let app_path_missing = e.starts_with("APP_PATH_NOT_FOUND:");
                     let formatted_error =
                         codex_account::format_account_switch_error(&account_id, e);
                     logger::log_warn(&format!("Codex 启动失败: {}", formatted_error));
-                    if app_path_missing {
-                        let _ = app.emit(
-                            "app:path_missing",
-                            serde_json::json!({ "app": "codex", "retry": { "kind": "default" } }),
-                        );
-                    }
                     Some(formatted_error)
                 }
             };
@@ -1606,6 +1598,7 @@ async fn run_codex_post_refresh_checks(app: &AppHandle) {
             match Box::pin(switch_codex_account(
                 app.clone(),
                 target_id.clone(),
+                None,
                 None,
                 None,
                 None,

@@ -158,6 +158,15 @@
     "providerClear": "Borrar selección"
   },
   "common": {
+    "networkErrors": {
+      "upstream": "el servicio de destino",
+      "proxyConnection": "No se pudo conectar con {{target}} mediante el proxy «{{proxy}}». Puede ser un problema del proxy o de la red. Revise el proxy o pruebe otro nodo.",
+      "proxyTimeout": "Se agotó el tiempo de conexión con {{target}} mediante el proxy «{{proxy}}». Puede ser un problema del proxy o de la red. Revise el proxy o pruebe otro nodo.",
+      "proxyAuth": "Falló la autenticación del proxy «{{proxy}}». Revise el usuario o la contraseña del proxy.",
+      "localProxyUnavailable": "No se puede conectar con el proxy local «{{proxy}}». Compruebe que el servicio del proxy esté activo.",
+      "directConnection": "No se pudo conectar con {{target}}. Revise la red y vuelva a intentarlo.",
+      "directTimeout": "Se agotó el tiempo de conexión con {{target}}. Revise la red y vuelva a intentarlo."
+    },
     "codexUsage": {
       "title": "Cuota y uso",
       "session": "Chat actual",
@@ -167,8 +176,8 @@
       "speed": "Velocidad de salida",
       "cache": "Aciertos de caché",
       "cacheShort": "Caché",
-      "speedHint": "Velocidad de salida ponderada de las solicitudes API válidas recientes de esta conversación, sin la espera de la primera respuesta. Se muestra — si no se pueden asociar las solicitudes o faltan datos de tiempo.",
-      "cacheHint": "Proporción de tokens de entrada recientes servidos desde la caché, ponderada por el volumen de entrada.",
+      "speedHint": "Velocidad media de salida de las solicitudes válidas de este chat, sin la espera de la primera respuesta. Sin mediciones: —.",
+      "cacheHint": "Tasa media de aciertos de caché de las solicitudes válidas de este chat, ponderada por tokens de entrada. Se conserva al detener la generación; sin contadores: —.",
       "aggregateHint": "Suma de porcentajes restantes, sin ponderar por capacidad del plan. Colores como en la vista de cuentas: ≥80 % verde, ≥40 % amarillo, ≥10 % naranja y menos del 10 % rojo. Los valores desconocidos no reciben color de cuota.",
       "waiting": "Esperando registros de uso del chat",
       "refreshFailed": "No se pudo actualizar la cuota. Se conservan los resultados anteriores. Inténtalo de nuevo.",
@@ -225,7 +234,11 @@
       "avgLatency": "Latencia media",
       "successRate": "Tasa de éxito",
       "verifiedStatistics": "Datos verificados",
-      "excludedHistory": "Se excluyen {{count}} registros históricos sin constancia de envío."
+      "excludedHistory": "Se excluyen {{count}} registros históricos sin constancia de envío.",
+      "averageSpeed": "Velocidad media",
+      "serviceUnavailable": "Servicio API no disponible. Vuelve a intentarlo.",
+      "tierAdjusted": "Ajustado a estándar",
+      "averageCache": "Aciertos medios de caché"
     },
     "apiKeyAccount": "Cuenta API Key",
     "status": "Estado",
@@ -1625,6 +1638,35 @@
       "refreshed": "Uso actualizado",
       "usage": "Uso",
       "tierOther": "Otro"
+    },
+    "background": {
+      "title": "Fondo",
+      "description": "Cambia solo el fondo de la aplicación. Las tarjetas de cuenta y los controles conservan su aspecto.",
+      "presets": "Fondos predefinidos",
+      "default": "Predeterminado",
+      "mist": "Niebla",
+      "forest": "Bosque",
+      "dusk": "Ocaso",
+      "sand": "Arena",
+      "custom": "Personal",
+      "chooseImage": "Elegir imagen",
+      "replaceImage": "Cambiar imagen",
+      "imageHint": "JPG, PNG o WebP, hasta 10 MB. Las imágenes grandes se reducen localmente.",
+      "preview": "Vista previa",
+      "strength": "Intensidad",
+      "blur": "Desenfoque",
+      "pixels": "{{count}} píxeles",
+      "position": "Posición",
+      "center": "Centro",
+      "top": "Arriba",
+      "bottom": "Abajo",
+      "localHint": "Los cambios se aplican al instante y se guardan automáticamente en este dispositivo. Las imágenes no se suben. Restaurar elimina la imagen guardada.",
+      "restore": "Restaurar",
+      "imageType": "Elige una imagen JPG, PNG o WebP.",
+      "imageSize": "Elige una imagen de menos de 10 MB.",
+      "imageRead": "No se pudo leer la imagen. Prueba otro archivo.",
+      "storage": "No se pudo cargar o guardar el fondo. Reinténtalo; el fondo anterior se conserva.",
+      "saveFailed": "El fondo se muestra, pero no se pudo guardar. Reinténtalo; se conserva el fondo guardado anteriormente."
     }
   },
   "appPath": {
@@ -2350,7 +2392,18 @@
       "windowHint": "Los umbrales siguen la duración real: una semana o más usa el semanal. Las cuentas con solo cuota semanal comprueban únicamente esa cuota. Sin duración se conserva la asignación de ventana principal y secundaria.",
       "rule": "Restante corto <= {{shortCycle}}% o semanal <= {{weekly}}%"
     },
+    "launchConfirmation": {
+      "title": "Inicio sin confirmar",
+      "description": "Se solicitó el inicio, pero el estado del cliente aún no está confirmado. Puede que ya esté abierto. Evita iniciarlo de nuevo.",
+      "check": "Verificar estado",
+      "notRunning": "Aún no se ha detectado la instancia de destino. Comprueba más tarde o cierra este diálogo antes de volver a iniciarla.",
+      "checkFailed": "No se pudo consultar el estado de ejecución. Vuelve a comprobarlo más tarde.",
+      "maintenanceDeferred": "La comprobación de sesiones no está disponible temporalmente. Se conservó el historial y se omitió este paso de mantenimiento."
+    },
     "launchErrors": {
+      "sessionRestoreFailed": "Falló la reparación de sesiones y la restauración está incompleta. Inicio detenido; revisa los registros y las copias de seguridad antes de reintentar.",
+      "sessionCheckTimeout": "La comprobación de sesiones agotó el tiempo. Inicio detenido; reintenta o revisa los registros.",
+      "sessionFileTooLarge": "La cabecera de un archivo de sesión es demasiado grande. Inicio detenido; revisa los registros.",
       "bindingFailed": "No se pudo confirmar la cuenta vinculada. Se detuvo el inicio; vuelve a cambiar de cuenta.",
       "processScanFailed": "No se pudieron comprobar los procesos anteriores en segundo plano. Se detuvo el inicio; vuelve a intentarlo.",
       "proxyEntryFailed": "No se pudo iniciar el proxy configurado. No se utilizó otra ruta; vuelve a intentarlo."
@@ -2753,7 +2806,8 @@
         "audioNotSupported": "Esta cuenta OAuth solo admite transcripción. Usa un proveedor con API Key para otras operaciones de audio.",
         "audioUnavailable": "El reenvío de audio no está disponible.",
         "audioUpstreamFailed": "La solicitud de audio al proveedor falló.",
-        "modelNotAvailable": "El modelo {{model}} no está disponible para esta API Key."
+        "modelNotAvailable": "El modelo {{model}} no está disponible para esta API Key.",
+        "quotaReserved": "La cuota está reservada o pendiente de confirmación. Reinténtalo en breve."
       },
       "testRateLimited": "El servicio responde, pero el ascendente tiene límite de velocidad o cuota agotada: {{detail}}.",
       "testHttpFailed": "El servicio responde, pero la solicitud devolvió HTTP {{status}}: {{detail}}.",
@@ -2906,7 +2960,23 @@
         "imageGenerationConfirm": {
           "title": "Desactivar image_generation",
           "message": "Al activarlo, el servicio API eliminará la declaración de herramienta image_generation en la puerta de enlace local antes de reenviar los chats de texto, evitando errores como \"Image generation is not enabled\". No se eliminan gpt-image ni otros modelos de imagen. ¿Continuar?"
-        }
+        },
+        "quotaReserveToggle": "Reservar cuota OAuth",
+        "quotaReserveDesc": "El servicio API usa esta cuenta OAuth solo mientras las cuotas restantes de 5 horas y semanal sean superiores a los valores reservados.",
+        "quotaReserveHourlyLabel": "Reserva de 5 h",
+        "quotaReserveWeeklyLabel": "Reserva semanal",
+        "quotaReserveInvalid": "Introduce un entero del 1 al 100.",
+        "strictReserve": "Protección estricta",
+        "strictReserveDesc": "La cuota reservada se protege automáticamente con un margen de seguridad. Cerca del límite se permite una solicitud por cuenta y se confirma la cuota actual al terminar. El uso de otros clientes no se limita.",
+        "strictNativeOnly": "La protección estricta requiere el motor Rust. Desactívala antes de cambiar a Go.",
+        "safetyMargin": "Margen de seguridad",
+        "safetyMarginUnit": "puntos porcentuales",
+        "safetyMarginInvalid": "Introduce un entero del 1 al 20.",
+        "quotaInFlight": "En curso: {{count}}",
+        "quotaWaiting": "Esperando confirmar la cuota",
+        "quotaStale": "Cuota no disponible",
+        "quotaProtected": "Reservado",
+        "quotaUpdated": "Actualizado: {{time}}"
       },
       "customRoutingEdit": "Editar enrutamiento personalizado",
       "customRoutingTitle": "Enrutamiento personalizado",
@@ -3028,7 +3098,7 @@
           "poolUnavailable": "No hay cuentas disponibles en el grupo",
           "poolUnavailableDetail": "No se seleccionó una cuenta disponible para el modelo {{model}}",
           "poolUnattributedDetail": "No se recibieron diagnósticos por cuenta, por lo que este fallo no puede atribuirse a una cuenta. Revise el alcance de cuentas y la configuración de modelos de esta clave API.",
-          "poolDiagnosticDetail": "Modelo {{model}}: {{candidate}} candidatas, {{scoped}} en el ámbito, {{available}} disponibles, {{unavailable}} no disponibles, {{modelExcluded}} excluidas por modelo, {{imageBlocked}} bloqueadas por la política de imágenes",
+          "poolDiagnosticDetail": "Modelo {{model}}: {{candidate}} candidatas, {{scoped}} en el ámbito, {{available}} disponibles, {{unavailable}} no disponibles, {{modelExcluded}} excluidas por modelo, {{quotaReserved}} reservadas por cuota, {{imageBlocked}} bloqueadas por la política de imágenes",
           "poolNoCandidatesDetail": "No hay cuentas candidatas para esta solicitud. Revisa el modelo solicitado y la carga de cuentas.",
           "poolScopeMismatchDetail": "Ninguna candidata coincide con el ámbito de esta clave API, o no se reconoce su asociación con la cuenta. Revisa las cuentas seleccionadas y la configuración del modelo.",
           "inspectBinding": "Ver vínculo",
@@ -3040,7 +3110,7 @@
           "boundAccountNotLoadedDetail": "Esta cuenta vinculada no está cargada en el servicio actual. Comprueba la carga de cuentas y la sincronización del grupo.",
           "boundAccountNotCandidateDetail": "Esta cuenta vinculada está cargada, pero no es candidata para esta solicitud. Comprueba el modelo, el proveedor y el tipo de solicitud.",
           "scopeUnknownDetail": "El diagnóstico de ámbito no indica una causa concreta. Comprueba los vínculos y los registros del servicio.",
-          "poolBlockedDetail": "Filtro del ámbito: {{unavailable}} no disponibles (por desactivación, espera o fallo de autenticación, por ejemplo), {{modelExcluded}} excluidas por modelo, {{imageBlocked}} bloqueadas por política de imagen. Revisa los motivos por cuenta y los ajustes.",
+          "poolBlockedDetail": "Filtro del ámbito: {{unavailable}} no disponibles (por desactivación, espera o fallo de autenticación, por ejemplo), {{modelExcluded}} excluidas por modelo, {{quotaReserved}} bloqueadas por reserva de cuota, {{imageBlocked}} bloqueadas por política de imagen. Revisa los motivos por cuenta y los ajustes.",
           "poolUnknownDetail": "El diagnóstico no identifica una causa concreta. Revisa el ámbito de la clave API, la configuración del modelo y los registros del servicio.",
           "clearHint": "Solo se borra este diagnóstico. No se reparan ajustes, tokens ni cuotas; otra solicitud fallida puede generar un nuevo registro.",
           "clearSuccess": "Diagnóstico borrado. Esto no significa que el grupo de cuentas se haya recuperado.",
@@ -3155,7 +3225,7 @@
       "resetCreditStatusRedeemed": "Usado",
       "resetCreditStatusExpired": "Vencido",
       "resetCreditStatusUnknown": "Desconocido",
-      "resetCreditNextExpiry": "Próximo vencimiento: {{time}}",
+      "resetCreditNextExpiry": "Próximo vencimiento del restablecimiento {{time}}",
       "resetCreditDetailsTitle": "Detalles de reinicios",
       "resetCreditNoRecords": "Sin registros de reinicio",
       "resetCreditRecordsLoadFailed": "No se pudieron cargar los registros de reinicio: {{error}}",
@@ -3171,7 +3241,12 @@
       "codeReview": "Revisión de código",
       "codeReviewShort": "Revisión",
       "monthlyCreditsHint": "Créditos mensuales restantes",
-      "monthlyCreditsInline": "Créditos: {{value}}"
+      "monthlyCreditsInline": "Créditos: {{value}}",
+      "resetCreditExpiryHours": "{{hours}} h {{minutes}} min",
+      "resetCreditExpiryMinutes": "{{minutes}} min",
+      "resetCreditExpiryExpired": "Caducado · ver detalles",
+      "resetCreditExpiryUrgent": "Caduca pronto: {{time}} · {{duration}}",
+      "resetCreditExpiryNormal": "Caduca {{time}} · {{duration}}"
     },
     "quotaError": {
       "badge": "Error de cuota",
@@ -3448,6 +3523,7 @@
         "expand": "Expandir",
         "collapse": "Contraer",
         "repairVisibility": "Reparar visibilidad",
+        "repairIndex": "Reparar índice de chats",
         "restoreSessions": "Restaurar sesiones",
         "exportSessions": "Exportar sesiones",
         "importSessions": "Importar sesiones",
@@ -3480,6 +3556,10 @@
         "clear": "Limpiar"
       },
       "messages": {
+        "deleteNotConfirmed": "El cliente no confirmó la eliminación. Se detuvo la limpieza local y se conservaron las copias de seguridad: {{error}}",
+        "historyReadFailed": "No se pudo leer el historial del chat de forma segura: {{error}}",
+        "restoreIndexRetry": "El archivo del chat se conservó, pero no se pudo actualizar la lista. El original sigue en la papelera. Resuelve el problema y vuelve a intentarlo: {{error}}",
+        "importIndexRetry": "Los archivos se importaron, pero no se pudo actualizar la lista de chats. Los archivos y el paquete de importación se conservaron. Resuelve el problema y vuelve a intentarlo: {{error}}",
         "pickOne": "Selecciona al menos una sesión",
         "syncNeedTwo": "Se requieren al menos dos instancias para sincronizar sesiones",
         "pickRestoreOne": "Selecciona al menos una sesión para restaurar",
@@ -3590,7 +3670,18 @@
         "title": "Reparar historial",
         "description": "Normaliza los proveedores en los índices SQLite, el catálogo de sesiones y los espacios de trabajo. Los archivos rollout conservan todos sus bytes; solo se corrigen las fechas. Primero se crea una copia de seguridad local.",
         "stopInstanceHint": "Cierra por completo la instancia seleccionada de Codex App/ChatGPT antes de la reparación completa. Aún puedes previsualizar los cambios.",
-        "encryptedContentWarning": "Se detectó historial cifrado por otro proveedor o cuenta. Los metadatos se pueden migrar, pero continuar o compactar esas sesiones puede fallar; vuelve al proveedor/cuenta original o inicia una sesión nueva."
+        "encryptedContentWarning": "Se detectó historial cifrado por otro proveedor o cuenta. Los metadatos se pueden migrar, pero continuar o compactar esas sesiones puede fallar; vuelve al proveedor/cuenta original o inicia una sesión nueva.",
+        "modeHistory": "Edición/ramas",
+        "modeHistoryDesc": "Corrige fallos al editar mensajes y ramificar chats causados por índices no válidos.",
+        "historyLiveHint": "Puedes reparar con el cliente abierto. Después, reinicia el cliente y vuelve a abrir los chats.",
+        "historyDescription": "Comprueba los chats seleccionados y su historial de origen y restablece solo los índices de paginación no válidos. Los mensajes, cuentas y ajustes de Provider no cambian. Puedes reparar con el cliente abierto; reinícialo después para recargar los índices.",
+        "historyPreview": "Se encontraron {{count}} índices de historial incorrectos que pueden reconstruirse. Los mensajes no cambian.",
+        "historySuccess": "Se restablecieron {{count}} índices de historial no válidos. Reinicia el cliente y vuelve a abrir los chats para reconstruirlos. Se conservaron las copias de seguridad.",
+        "historyNoChanges": "No se encontraron índices de historial incorrectos que puedan reconstruirse de forma segura.",
+        "historyFailed": "La reparación de los índices de historial no se completó: {{error}}",
+        "historyChanged": "Los datos del chat cambiaron durante la reparación. Esta reparación no se aplicó. Vuelve a intentarlo en unos instantes.",
+        "historyScan": "Revisando índices de historial ({{current}}/{{total}})…",
+        "historyReset": "Guardando copias y restableciendo índices incorrectos…"
       },
       "importModal": {
         "title": "Importar sesiones",
@@ -4576,6 +4667,11 @@
       },
       "routing": {
         "optionsTitle": "Opciones de ruta",
+        "sessionIdentityMapping": "Mapeo de ID de sesión",
+        "sessionIdentityMappingEnableHint": "Al activar la asignación, cada cuenta del proveedor usa valores propios de Session-Id y Thread-Id al cambiar de cuenta. Esto mejora el aislamiento de identificadores, pero puede reducir la reutilización de caché entre cuentas. En la misma cuenta se reutilizan las asignaciones existentes.",
+        "sessionIdentityMappingDisableHint": "Al desactivarla, se conservan los valores originales de Session-Id y Thread-Id del cliente. Distintas cuentas del proveedor pueden compartir esos identificadores, lo que reduce el aislamiento, pero puede aumentar la reutilización de caché entre cuentas.",
+        "sessionIdentityMappingCacheNote": "La tasa de aciertos de caché también depende de las reglas del proveedor, el ámbito de las cuentas y el contenido de las solicitudes. Este ajuste no garantiza que aumente o disminuya.",
+        "sessionIdentityMappingSaveNote": "Tras confirmar, guarda los ajustes para aplicar el cambio.",
         "sessionAffinity": "Afinidad de sesión",
         "sessionAffinityTtl": "Caducidad (segundos)",
         "responsesWebsockets": "Responses por WebSocket",
@@ -5844,6 +5940,22 @@
       "label": "Sincronizar cuota activa",
       "description": "Sin iniciar el servicio API. Las cuentas locales activas se actualizan cada 5–30 segundos; los cambios en archivos de sesión activan comprobaciones. Solo se revisan metadatos recientes, sin leer conversaciones. Se mantienen las exclusiones, los filtros de plan y las reglas de grupo. Desactivado por defecto.",
       "error": "No se pudo cargar o guardar el ajuste. Inténtalo de nuevo."
+    },
+    "pathRecovery": {
+      "title": "Configurar ruta de Codex",
+      "description": "No se encontró una ruta válida al cliente Codex. Selecciona la aplicación o abre Codex manualmente y detéctalo.",
+      "reload": "Volver a cargar",
+      "timeout": "La operación agotó el tiempo de espera. Reinténtalo; el inicio no continuará automáticamente.",
+      "noCandidates": "No se detectó Codex. Abre el cliente manualmente y vuelve a detectarlo, o selecciona su ruta.",
+      "pathRequired": "Selecciona o introduce la ruta del cliente Codex.",
+      "invalidPath": "Esta ruta no corresponde a un cliente de escritorio Codex válido. Selecciona de nuevo la aplicación.",
+      "candidates": "Aplicaciones detectadas",
+      "autoLaunchHint": "Desactiva esta opción para cambiar de cuenta sin iniciar la aplicación de escritorio. Podrás seguir abriéndola manualmente.",
+      "manualLaunchHint": "Desactivar el inicio automático no completa este inicio manual. Guardar solo los ajustes cancela este intento de inicio.",
+      "saveAndRetry": "Guardar y reintentar",
+      "saveWithoutLaunch": "Guardar y continuar",
+      "saveOnly": "Solo guardar",
+      "validationBusy": "La comprobación de la ruta anterior sigue en curso. Inténtalo de nuevo en unos instantes."
     }
   },
   "githubCopilot": {

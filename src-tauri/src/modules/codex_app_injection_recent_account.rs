@@ -221,7 +221,9 @@ fn key_id_for_bearer(keys: &StoredKeys, bearer: &str) -> Option<String> {
     None
 }
 
-fn profile_gateway(profile: &Path) -> Result<Option<(String, String, RequestScope)>, String> {
+pub(super) fn profile_gateway(
+    profile: &Path,
+) -> Result<Option<(String, String, RequestScope)>, String> {
     let mut scope = RequestScope::default();
     let Some(content) = read_small_file(&profile.join("config.toml"))? else {
         return Ok(None);
@@ -229,8 +231,13 @@ fn profile_gateway(profile: &Path) -> Result<Option<(String, String, RequestScop
     let document = content
         .parse::<toml_edit::Document>()
         .map_err(|error| format!("recent-account profile metadata unavailable: {error}"))?;
-    let provider = document
-        .get("model_provider")
+    let selected_profile = document
+        .get("profile")
+        .and_then(toml_edit::Item::as_str)
+        .and_then(|name| document.get("profiles")?.get(name));
+    let provider = selected_profile
+        .and_then(|profile| profile.get("model_provider"))
+        .or_else(|| document.get("model_provider"))
         .and_then(toml_edit::Item::as_str)
         .and_then(|id| document.get("model_providers")?.get(id));
     let Some(provider) = provider else {

@@ -148,6 +148,7 @@ function isRecoverableReason(reason: string | null | undefined): boolean {
     "state_refreshing",
     "disabled",
     "missing",
+    "quota_reserved",
     "model_excluded",
     "model_disabled",
     "model_not_supported",
@@ -694,6 +695,7 @@ export function CodexAccountPoolHealthModal({
                         available: health.availableAuths,
                         unavailable: health.unavailableAuths,
                         modelExcluded: health.modelExcludedAuths,
+                        quotaReserved: health.quotaReservedAuths,
                         imageBlocked: health.imagePolicyBlockedAuths,
                       })}
                     </p>

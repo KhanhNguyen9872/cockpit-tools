@@ -96,7 +96,7 @@ async fn handle_tracked(
     .into();
     let policy = super::retry::execution_policy(&state).await?;
     let execution = super::execution::Execution::new(tracker, &policy);
-    let audio_deadline = audio_deadline.map(|deadline| deadline.min(execution.total_deadline));
+    let audio_deadline = audio_deadline.map(|deadline| execution.total_deadline.cap(deadline));
     execution
         .run(handle_prepared(
             state,
@@ -196,7 +196,7 @@ async fn handle_prepared(
         let status = response.status();
         let response_headers = response.headers().clone();
         if route.chatgpt && !audio.native {
-            let bytes = read_until(&state, response, audio_deadline).await?;
+            let bytes = read_until_limited(&state, response, audio_deadline, if status.is_success() { 4 * 1024 * 1024 } else { usize::MAX }).await?;
             if !status.is_success() {
                 capture_auxiliary_error(tracker, status.as_u16(), &response_headers, &bytes);
                 tracker
@@ -244,6 +244,7 @@ async fn handle_prepared(
                 .expect("HTTP request tracker is present"),
             route,
             audio_deadline,
+            usize::MAX,
         );
     }
     if path.ends_with("/alpha/search") {
@@ -906,6 +907,7 @@ async fn send_until(
             }
             tracker.begin_attempt("http");
             tracker.upstream_headers(request.headers());
+            tracker.check_quota_before_send()?;
             client.execute(request).await.map_err(|error| {
                 ServiceError::new(502,"upstream_unavailable","Unable to connect to upstream")
                     .with_upstream_not_sent(error.is_connect() || error.is_builder())
@@ -931,6 +933,14 @@ async fn read_until(
     response: reqwest::Response,
     deadline: Option<Instant>,
 ) -> Result<Vec<u8>, ServiceError> {
+    read_until_limited(state, response, deadline, 32 * 1024 * 1024).await
+}
+async fn read_until_limited(
+    state: &AppState,
+    response: reqwest::Response,
+    deadline: Option<Instant>,
+    limit: usize,
+) -> Result<Vec<u8>, ServiceError> {
     let deadline = scoped_deadline(deadline, false);
     let mut source = response.bytes_stream();
     let mut bytes = Vec::new();
@@ -939,7 +949,7 @@ async fn read_until(
         let next = tokio::select! {_=stop.wait()=>return Err(stopping_error()),v=timed_read(deadline,state.options.idle_timeout,source.next())=>v?};
         match next {
             Some(Ok(chunk)) => {
-                if bytes.len() + chunk.len() > state.options.max_response_bytes {
+                if bytes.len().saturating_add(chunk.len()) > state.options.max_response_bytes.min(limit) {
                     return Err(ServiceError::new(
                         502,
                         "upstream_response_too_large",
@@ -974,11 +984,11 @@ async fn timed_read<T>(
 }
 
 fn scoped_deadline(deadline: Option<Instant>, opening: bool) -> Option<Instant> {
-    let configured = super::execution::current().map(|scope| {
+    let configured = super::execution::current().and_then(|scope| {
         if opening {
-            scope.prepare_deadline()
+            Some(scope.prepare_deadline())
         } else {
-            scope.total_deadline
+            scope.total_deadline.instant()
         }
     });
     match (deadline, configured) {
@@ -1057,7 +1067,7 @@ fn stream_response(
     tracker: RequestTracker,
     route: Route,
 ) -> Result<Response, ServiceError> {
-    stream_response_until(state, response, tracker, route, None)
+    stream_response_until(state, response, tracker, route, None, 32 * 1024 * 1024)
 }
 fn stream_response_until(
     state: Arc<AppState>,
@@ -1065,6 +1075,7 @@ fn stream_response_until(
     tracker: RequestTracker,
     route: Route,
     deadline: Option<Instant>,
+    limit: usize,
 ) -> Result<Response, ServiceError> {
     // The downstream body is polled after the preparation task-local scope ends.
     // Capture its absolute total budget now, including time spent selecting an account.
@@ -1105,7 +1116,7 @@ fn stream_response_until(
             match next {
                 Ok(Some(Ok(bytes))) => {
                     received = received.saturating_add(bytes.len());
-                    if received > state.options.max_response_bytes {
+                    if received > state.options.max_response_bytes.min(limit) {
                         let error = ServiceError::new(
                             502,
                             "upstream_response_too_large",
