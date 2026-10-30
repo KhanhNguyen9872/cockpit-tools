@@ -6,7 +6,7 @@ function nodes(tree: any): any[] {
   if (Array.isArray(tree)) return tree.flatMap(nodes);
   return tree && typeof tree === 'object' ? [tree, ...nodes(tree.props?.children)] : [];
 }
-function harness(mode: string, options: { actions?: any[]; loaded?: boolean; account?: any; save?: () => Promise<any>; refresh?: () => Promise<any>; latestAccount?: any; accounts?: any[]; imageLoaded?: boolean; imageModel?: string; execute?: (launchAfterSwitch: boolean, options?: any) => Promise<boolean> } = {}) {
+function harness(mode: string, options: { actions?: any[]; instances?: any[]; loaded?: boolean; account?: any; save?: () => Promise<any>; refresh?: () => Promise<any>; latestAccount?: any; accounts?: any[]; imageLoaded?: boolean; imageModel?: string; execute?: (launchAfterSwitch: boolean, options?: any) => Promise<boolean> } = {}) {
   let traps: any[] = [];
   let escapes: any[] = [];
   let closed = 0;
@@ -17,7 +17,7 @@ function harness(mode: string, options: { actions?: any[]; loaded?: boolean; acc
   const config = { experimental_model_catalog_available: true, experimental_model_catalog_enabled: false, experimental_model_catalog_models: [],
     experimental_model_catalog_default_model_id: null };
   const emptyAccounts: any[] = options.accounts ?? [];
-  const emptyInstances: any[] = [];
+  let emptyInstances: any[] = options.instances ?? [];
   const instanceStore: any = (selector: any) => selector({ instances: emptyInstances });
   instanceStore.getState = () => ({ instances: emptyInstances });
   instanceStore.setState = () => {};
@@ -60,7 +60,7 @@ function harness(mode: string, options: { actions?: any[]; loaded?: boolean; acc
     return h.exports.CodexLaunchPreviewModal({ mode, account: options.account, accountLabel: 'Synthetic account', summary: {}, actions: options.actions ?? [],
       onClose: () => { closed++; }, onExecute: options.execute ?? (async () => false) });
   });
-  return { h, remembered, get tree() { return h.flush(); }, get trap() { const active = traps.filter((entry) => entry.open && entry.active); assert.equal(active.length, 1); return active[0]; }, get traps() { return traps; }, async ready() { await settlePromises(); h.flush(); }, get escapes() { for (const entry of escapes.filter((item) => item.open)) assert.equal(entry.ref, traps.find((trap) => trap.open && trap.active)?.ref); return escapes; }, get closed() { return closed; } };
+  return { h, remembered, setInstances(instances: any[]) { emptyInstances = instances; }, get tree() { return h.flush(); }, get trap() { const active = traps.filter((entry) => entry.open && entry.active); assert.equal(active.length, 1); return active[0]; }, get traps() { return traps; }, async ready() { await settlePromises(); h.flush(); }, get escapes() { for (const entry of escapes.filter((item) => item.open)) assert.equal(entry.ref, traps.find((trap) => trap.open && trap.active)?.ref); return escapes; }, get closed() { return closed; } };
 }
 
 for (const mode of ['account', 'instance', 'apiService']) {
@@ -395,3 +395,21 @@ test('rendered CLI action is disabled while preview configuration is loading', (
   assert.equal(button.props.disabled, true);
   h.h.unmount();
 });
+
+
+for (const mode of ['account', 'instance', 'apiService']) {
+  test(`${mode} keeps restart available after an instance binding refresh`, async () => {
+    const instances = [{ id: '__default__', isDefault: true, bindAccountId: 'old-account' }];
+    let launches = 0;
+    const h = harness(mode, { loaded: true, instances, execute: async () => { launches++; return true; } });
+    await h.ready();
+    h.setInstances([{ ...instances[0], bindAccountId: 'current-account' }]);
+    const tree = h.tree;
+    assert.equal(nodes(tree).some((node) => node.type === 'error' && node.props.message === 'codex.launchPreview.configChanged'), false);
+    const button = nodes(tree).find((node) => node.type === 'button' && node.props.className === 'btn btn-primary');
+    assert.equal(button.props.disabled, false);
+    await button.props.onClick(); await h.ready();
+    assert.equal(launches, 1);
+    h.h.unmount();
+  });
+}

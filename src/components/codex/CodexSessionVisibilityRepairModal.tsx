@@ -30,6 +30,7 @@ const SESSION_VISIBILITY_REPAIR_PROGRESS_EVENT =
 interface CodexSessionVisibilityRepairModalProps {
   open: boolean;
   repairKind?: "visibility" | "history";
+  initialInstanceId?: string;
   description?: ReactNode;
   selectedSessionIds?: string[];
   totalSessionCount?: number;
@@ -158,6 +159,10 @@ export function CodexSessionVisibilityRepairProgressView({
           return t("codex.sessionManager.repairModal.historyScan", values);
         case "reset_history_index":
           return t("codex.sessionManager.repairModal.historyReset");
+        case "scan_local_projects":
+          return t("codex.sessionManager.repairModal.progress.scanInstance", values);
+        case "write_local_projects":
+          return t("codex.sessionManager.repairModal.progress.writeInstance", values);
         case "prune_backups":
           return t(
             "codex.sessionManager.repairModal.progress.pruneBackups",
@@ -209,6 +214,7 @@ export function CodexSessionVisibilityRepairProgressView({
 export function CodexSessionVisibilityRepairModal({
   open,
   repairKind = "visibility",
+  initialInstanceId,
   description,
   selectedSessionIds = [],
   totalSessionCount = 0,
@@ -229,7 +235,7 @@ export function CodexSessionVisibilityRepairModal({
     (state) => state.listSessionVisibilityRepairProviders,
   );
   const runIdRef = useRef<string | null>(null);
-  const contextRef = useRef({ open: false, repairKind });
+  const contextRef = useRef({ open: false, repairKind, initialInstanceId });
   const [status, setStatus] = useState<RepairStatus>("idle");
   const [visibilityMode, setSelectedMode] = useState<"quick" | "deep">("quick");
   const selectedMode: CodexSessionVisibilityRepairMode =
@@ -330,8 +336,9 @@ export function CodexSessionVisibilityRepairModal({
   const hasPreview = previewSummary !== null;
 
   useEffect(() => {
-    const changed = contextRef.current.open !== open || contextRef.current.repairKind !== repairKind;
-    contextRef.current = { open, repairKind };
+    const changed = contextRef.current.open !== open || contextRef.current.repairKind !== repairKind
+      || contextRef.current.initialInstanceId !== initialInstanceId;
+    contextRef.current = { open, repairKind, initialInstanceId };
     if (changed) {
       setStatus("idle");
       setSelectedMode("quick");
@@ -351,7 +358,7 @@ export function CodexSessionVisibilityRepairModal({
       runIdRef.current = null;
       onRunningChange?.(false);
     }
-  }, [onRunningChange, open, repairKind, setError, uniqueSelectedSessionIds.length]);
+  }, [initialInstanceId, onRunningChange, open, repairKind, setError, uniqueSelectedSessionIds.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -368,7 +375,9 @@ export function CodexSessionVisibilityRepairModal({
         if (cancelled) return;
         setInstanceList(nextInstanceList);
         const instances = nextInstanceList.instances ?? [];
-        const preferred =
+        const preferred = initialInstanceId
+          ? instances.find((instance) => instance.id === initialInstanceId)?.id ?? ""
+          :
           instances.find(
             (instance) => instance.id === nextInstanceList.defaultInstanceId,
           )?.id ||
@@ -399,7 +408,7 @@ export function CodexSessionVisibilityRepairModal({
     return () => {
       cancelled = true;
     };
-  }, [listSessionVisibilityRepairInstances, open, repairKind, setError, t]);
+  }, [initialInstanceId, listSessionVisibilityRepairInstances, open, repairKind, setError, t]);
 
   useEffect(() => {
     if (!open || isHistoryRepair) {
@@ -693,10 +702,7 @@ export function CodexSessionVisibilityRepairModal({
                   {t("codex.sessionManager.repairModal.modeHistoryDesc")}{" "}
                   {t("codex.sessionManager.repairModal.historyDescription")}
                 </>
-              : description ?? t(
-                  "codex.sessionManager.repairModal.description",
-                  "将历史会话的 Provider 归一到目标实例当前状态（仅修正 SQLite 索引、会话目录和工作区状态；会话日志文件保持原样，只校正文件时间）。执行前会创建本地备份。",
-                )}
+              : description ?? t("codex.sessionManager.repairModal.description")}
           </p>
           <div className="codex-visibility-repair-options">
             {!isHistoryRepair && <div className="codex-visibility-repair-scope">
@@ -724,10 +730,7 @@ export function CodexSessionVisibilityRepairModal({
                     )}
                   </strong>
                   <small>
-                    {t(
-                      "codex.sessionManager.repairModal.modeQuickDesc",
-                      "只校正官方 state DB 和会话索引的 Provider，会话日志文件保持原样，适合日常切号后恢复。",
-                    )}
+                    {t("codex.sessionManager.repairModal.modeQuickDesc")}
                   </small>
                 </button>
                 <button
@@ -747,10 +750,7 @@ export function CodexSessionVisibilityRepairModal({
                     {t("codex.sessionManager.repairModal.modeDeep", "完整修复")}
                   </strong>
                   <small>
-                    {t(
-                      "codex.sessionManager.repairModal.modeDeepDesc",
-                      "全量归一历史 Provider，并修复目录、工作区和子 Agent 索引；会话日志文件保持原样，执行前需退出目标实例。",
-                    )}
+                    {t("codex.sessionManager.repairModal.modeDeepDesc")}
                   </small>
                 </button>
               </div>

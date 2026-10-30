@@ -98,7 +98,7 @@ fn load_collection_for_runtime_from_path(
         return Ok(None);
     };
     if !parsed.native_gateway_default_migrated
-        || parsed.gateway_mode == CodexLocalAccessGatewayMode::Legacy
+        || parsed.gateway_mode != CodexLocalAccessGatewayMode::Native
     {
         // Only cold runtime initialization may migrate. Catalog and import reads
         // must not modify the configuration underlying their revision snapshots.
@@ -116,7 +116,7 @@ fn migrate_native_gateway_default_on_disk(
         let collection: CodexLocalAccessCollection =
             serde_json::from_str(current).map_err(|error| error.to_string())?;
         let content = if !collection.native_gateway_default_migrated
-            || collection.gateway_mode == CodexLocalAccessGatewayMode::Legacy
+            || collection.gateway_mode != CodexLocalAccessGatewayMode::Native
         {
             native_patch_mode(current, CodexLocalAccessGatewayMode::Native)?
         } else {
@@ -139,6 +139,8 @@ fn save_collection_to_path(
 ) -> Result<(), String> {
     update_string_atomic(path, |current| {
         let mut next = collection.clone();
+        next.gateway_mode = CodexLocalAccessGatewayMode::Native;
+        next.native_gateway_default_migrated = true;
         next.image_generation_main_model =
             normalize_image_generation_main_model(next.image_generation_main_model.clone())
                 .unwrap_or(None);
@@ -188,18 +190,9 @@ fn save_collection_to_path(
                         .get("nativeGatewayDefaultMigrated")
                         .and_then(Value::as_bool)
                         .unwrap_or(false);
-                    // Only the engine-switch transaction owns this field. An older stats or
-                    // settings snapshot must never silently switch the service back.
-                    if let Some(mode) = current
-                        .get("gatewayMode")
-                        .cloned()
-                        .and_then(|value| {
-                            serde_json::from_value::<CodexLocalAccessGatewayMode>(value).ok()
-                        })
-                        .filter(|mode| *mode != CodexLocalAccessGatewayMode::Legacy)
-                    {
-                        next.gateway_mode = mode;
-                    }
+                    // Stale settings and statistics must never restore the retired engine.
+                    next.gateway_mode = CodexLocalAccessGatewayMode::Native;
+                    next.native_gateway_default_migrated = true;
                     // Ordinary full-snapshot writers do not own the image model directory.
                     // The dedicated field transaction alone can add/delete/restore a model.
                     if current.get("imageGenerationModels").is_some() {

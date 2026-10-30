@@ -314,12 +314,6 @@ pub async fn codex_local_access_update_upstream_proxy_config(
     codex_local_access::update_local_access_upstream_proxy_config(upstream_proxy_url).await
 }
 
-#[tauri::command]
-pub async fn codex_local_access_update_gateway_mode(
-    gateway_mode: CodexLocalAccessGatewayMode,
-) -> Result<CodexLocalAccessState, String> {
-    codex_local_access::update_local_access_gateway_mode(gateway_mode).await
-}
 
 #[tauri::command]
 pub async fn codex_local_access_update_debug_logs(
@@ -778,7 +772,7 @@ mod tests {
                 Some("chat_completions"),
                 "https://api.deepseek.com/v1",
             ),
-            "chat_completions"
+            "responses"
         );
         assert_eq!(
             normalize_model_provider_wire_api(Some("responses"), "https://api.deepseek.com/v1"),

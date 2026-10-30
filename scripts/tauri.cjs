@@ -4,12 +4,11 @@ const os = require('node:os');
 const path = require('node:path');
 
 const repoRoot = path.resolve(__dirname, '..');
-const goBinPath = 'C:\\Program Files\\Go\\bin';
 const cargoBinPath = path.join(os.homedir(), '.cargo', 'bin');
 
 function withToolchainPaths(options = {}) {
   const currentPath = process.env.PATH || '';
-  const extraPaths = [cargoBinPath, goBinPath].filter((dir) => fs.existsSync(dir));
+  const extraPaths = [cargoBinPath].filter((dir) => fs.existsSync(dir));
   const pathValue = extraPaths.length > 0
     ? `${extraPaths.join(path.delimiter)}${path.delimiter}${currentPath}`
     : currentPath;
@@ -108,7 +107,7 @@ const quotedArgs = tauriArgs.map((arg) => {
 });
 const scriptBody = [
   '@echo off',
-  `set "PATH=${cargoBinPath};${goBinPath};%PATH%"`,
+  `set "PATH=${cargoBinPath};%PATH%"`,
   `call "${vcvars64Path}"`,
   'if errorlevel 1 exit /b %errorlevel%',
   `set "PATH=${cargoBinPath};${goBinPath};%PATH%"`,

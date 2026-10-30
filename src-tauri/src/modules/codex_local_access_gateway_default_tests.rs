@@ -40,6 +40,7 @@ fn native_gateway_default_first_runtime_load_migrates_every_old_mode_and_preserv
         let path = root.path().join("collection.json");
         let mut original = old_collection(mode);
         original["enabled"] = json!(mode != Some("sidecar"));
+        original["nativeGatewayDefaultMigrated"] = json!(mode.is_some());
         std::fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
         let loaded = load_collection_for_runtime_from_path(&path)
             .unwrap()
@@ -71,7 +72,7 @@ fn native_gateway_default_first_runtime_load_migrates_every_old_mode_and_preserv
 }
 
 #[test]
-fn native_gateway_default_keeps_later_go_choice_after_stale_save_and_restart() {
+fn native_gateway_default_migrates_explicit_go_choice_after_stale_save_and_restart() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("collection.json");
     std::fs::write(&path, old_collection(Some("sidecar")).to_string()).unwrap();
@@ -91,7 +92,7 @@ fn native_gateway_default_keeps_later_go_choice_after_stale_save_and_restart() {
     let loaded = load_collection_for_runtime_from_path(&path)
         .unwrap()
         .unwrap();
-    assert_eq!(loaded.gateway_mode, CodexLocalAccessGatewayMode::Sidecar);
+    assert_eq!(loaded.gateway_mode, CodexLocalAccessGatewayMode::Native);
     assert!(loaded.native_gateway_default_migrated);
     assert_eq!(loaded.debug_logs, stale.debug_logs);
     assert_eq!(loaded.port, 18555);
@@ -100,7 +101,7 @@ fn native_gateway_default_keeps_later_go_choice_after_stale_save_and_restart() {
 }
 
 #[test]
-fn native_gateway_default_migration_and_explicit_go_choice_are_serialized() {
+fn native_gateway_default_migration_serializes_with_legacy_writer() {
     for _ in 0..8 {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("collection.json");
@@ -124,7 +125,7 @@ fn native_gateway_default_migration_and_explicit_go_choice_are_serialized() {
         let loaded = load_collection_for_runtime_from_path(&path)
             .unwrap()
             .unwrap();
-        assert_eq!(loaded.gateway_mode, CodexLocalAccessGatewayMode::Sidecar);
+        assert_eq!(loaded.gateway_mode, CodexLocalAccessGatewayMode::Native);
         assert!(loaded.native_gateway_default_migrated);
     }
 }

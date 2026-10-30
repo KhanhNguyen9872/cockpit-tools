@@ -609,7 +609,7 @@ fn normalize_api_model_catalog(models: Vec<String>) -> Vec<String> {
 fn normalize_api_wire_api(value: Option<String>) -> Option<String> {
     value
         .map(|item| item.trim().to_ascii_lowercase())
-        .filter(|item| item == "responses" || item == "chat_completions")
+        .filter(|item| item == "responses" || item == "chat_completions" || item == "anthropic")
 }
 
 fn is_apikey_fun_base_url(raw: Option<&str>) -> bool {
@@ -756,28 +756,9 @@ fn normalize_deepseek_account(account: &mut CodexAccount) -> bool {
         changed = true;
     }
 
-    let wire = account
-        .api_wire_api
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_ascii_lowercase());
-    match wire.as_deref() {
-        None => {
-            account.api_wire_api = Some(CODEX_PROVIDER_WIRE_API.to_string());
-            changed = true;
-        }
-        Some("chat_completions") => {
-            // Keep Chat Completions when the user explicitly chose it.
-        }
-        Some("responses") => {}
-        Some(other) => {
-            // Unknown values fall back to official Responses.
-            if other != CODEX_PROVIDER_WIRE_API {
-                account.api_wire_api = Some(CODEX_PROVIDER_WIRE_API.to_string());
-                changed = true;
-            }
-        }
+    if account.api_wire_api.as_deref() != Some(CODEX_PROVIDER_WIRE_API) {
+        account.api_wire_api = Some(CODEX_PROVIDER_WIRE_API.to_string());
+        changed = true;
     }
 
     if is_deepseek_responses_account(account) {
@@ -1458,12 +1439,21 @@ fn apply_deepseek_official_catalog_to_doc(
     apply_deepseek_config_overrides(doc, base_dir);
 }
 
-/// 保留用户在 Codex 里选定的合法思考强度，只在缺失或非法时回落到官方默认 high。
+/// 保留用户选择，按 DeepSeek 官方映射兼容档位；缺失或未知值回落到 high。
 pub(crate) fn apply_deepseek_reasoning_effort(doc: &mut Document) {
     let current = doc
         .get("model_reasoning_effort")
         .and_then(|item| item.as_str())
         .map(|value| value.trim().to_ascii_lowercase());
+    if current.as_deref() == Some("ultra") {
+        doc["model_reasoning_effort"] = value("max");
+        return;
+    }
+    if current.as_deref() == Some("none") { return; }
+    if current.as_deref() == Some("minimal") {
+        doc["model_reasoning_effort"] = value("low");
+        return;
+    }
     if current
         .as_deref()
         .is_some_and(|value| DEEPSEEK_REASONING_EFFORTS.contains(&value))
@@ -1604,6 +1594,14 @@ fn restore_deepseek_top_level_backup(
 /// - 禁用内置联网搜索。
 /// - 移除与官方 models.json 声明冲突的顶层键。
 pub(crate) fn apply_deepseek_config_overrides(doc: &mut Document, base_dir: &Path) {
+    if doc.get("desktop").is_none() { doc["desktop"] = toml_edit::table(); }
+    if let Some(desktop) = doc["desktop"].as_table_mut() {
+        if !desktop.contains_key("enabled-reasoning-efforts") {
+            desktop["enabled-reasoning-efforts"] = toml_edit::value(toml_edit::Array::from_iter(["low", "medium", "high", "xhigh", "ultra", "persistent", "max"]));
+        } else if let Some(efforts) = desktop["enabled-reasoning-efforts"].as_array_mut() {
+            if !efforts.iter().any(|value| value.as_str().is_some_and(|s| s.eq_ignore_ascii_case("max"))) { efforts.push("max"); }
+        }
+    }
     let backup_path = deepseek_compaction_backup_path(base_dir);
     if !backup_path.exists() {
         let mut original = serde_json::Map::new();
@@ -1909,6 +1907,7 @@ fn deepseek_official_catalog_models_for_account(
                     .is_some_and(|slug| slug.eq_ignore_ascii_case(template_slug))
             })
             .cloned()
+            .or_else(|| crate::modules::codex_protocol::deepseek_model_template(&model))
             .or_else(|| flash_template.clone())
             .ok_or_else(|| "官方 DeepSeek 模型目录缺少 Flash 模板".to_string())?;
         // 自定义模型从 Flash 模板派生：能力格式保留，但默认不开启识图。
@@ -2259,6 +2258,7 @@ fn apply_api_key_fields(
     api_model_vision_support: std::collections::HashMap<String, bool>,
     api_vision_routing_model: Option<String>,
     api_model_context_windows: Option<HashMap<String, i64>>,
+    api_auth_scheme: Option<String>,
 ) {
     let is_cockpit_api = provider_config
         .provider_id
@@ -2287,6 +2287,7 @@ fn apply_api_key_fields(
     );
     account.api_sync_model_catalog_to_codex = api_sync_model_catalog_to_codex;
     account.api_wire_api = normalize_api_wire_api(api_wire_api);
+    if let Some(scheme) = api_auth_scheme { account.api_auth_scheme = Some(if scheme == "bearer" { "bearer" } else { "x-api-key" }.into()); }
     account.api_supports_websockets = api_supports_websockets;
     let _ = normalize_api_key_websocket_capability(account);
     account.api_supports_vision = api_supports_vision;

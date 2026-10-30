@@ -51,7 +51,7 @@ pub(super) fn prepare(prepared: &mut Prepared, body: &mut Value) -> Result<(), S
             &prepared.source_headers, body, policy.options,
         )?;
     }
-    if prepared.route.wire_api == super::contract::WireApi::Chat
+    if prepared.route.wire_api != super::contract::WireApi::Responses
         || super::grok_errors::applies(&prepared.route)
     {
         // CPA applies this independent Codex-UA helper to every non-Codex

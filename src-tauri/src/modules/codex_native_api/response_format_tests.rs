@@ -133,9 +133,9 @@ async fn fixture(
 
 fn response_events() -> String {
     let events = [
-        json!({"type":"response.created","response":{"id":"format-response","status":"in_progress"}}),
+        json!({"type":"response.created","sequence_number":0,"response":{"id":"format-response","created_at":123,"status":"in_progress"}}),
         json!({"type":"response.output_item.done","item":{"type":"reasoning","encrypted_content":"format-cipher"}}),
-        json!({"type":"response.completed","response":{"id":"format-response","status":"completed","output":[{"type":"reasoning","encrypted_content":"format-cipher"}],"usage":{"input_tokens":2,"output_tokens":3,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}}),
+        json!({"type":"response.completed","sequence_number":1,"response":{"id":"format-response","created_at":123,"status":"completed","output":[{"type":"reasoning","encrypted_content":"format-cipher"}],"usage":{"input_tokens":2,"output_tokens":3,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}}),
     ];
     events
         .iter()
@@ -276,7 +276,10 @@ async fn json_response_keeps_json_and_invalid_success_body_is_not_counted_as_suc
             let mut expected_body:Value = serde_json::from_str(&payload).unwrap();
             expected_body["usage"]["input_tokens_details"] = json!({"cached_tokens":0});
             expected_body["usage"]["output_tokens_details"] = json!({"reasoning_tokens":0});
-            assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), expected_body);
+            let mut actual:Value=serde_json::from_str(&text).unwrap();
+            assert!(actual["created_at"].as_i64().is_some());
+            actual.as_object_mut().unwrap().remove("created_at");
+            assert_eq!(actual, expected_body);
         } else {
             assert!(text.contains("invalid_upstream_response"));
         }

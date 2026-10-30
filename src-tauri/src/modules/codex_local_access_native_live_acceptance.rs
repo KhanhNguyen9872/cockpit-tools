@@ -100,6 +100,9 @@ impl Host for AcceptanceHost {
     fn websockets_enabled(&self) -> BoxFuture<'_, Result<bool, ServiceError>> {
         self.inner.websockets_enabled()
     }
+    fn invalidate_http2_transport(&self, identity: &str) -> bool {
+        self.inner.invalidate_http2_transport(identity)
+    }
     fn invalidate_transport(&self, identity: &str) -> bool {
         self.inner.invalidate_transport(identity)
     }

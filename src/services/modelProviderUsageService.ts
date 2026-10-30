@@ -4,7 +4,8 @@ export type ModelProviderUsageIntegrationType = 'sub2api' | 'new_api';
 export type ModelProviderUsageMode =
   | ModelProviderUsageIntegrationType
   | 'deepseek'
-  | 'token_plan';
+  | 'token_plan'
+  | 'openai_official';
 
 export interface ModelProviderModel {
   id: string;
@@ -137,10 +138,14 @@ export async function queryModelProviderUsage(input: {
 export async function listModelProviderModels(input: {
   baseUrl: string;
   apiKey: string;
+  wireApi?: string;
+  authScheme?: "x-api-key" | "bearer";
 }): Promise<ModelProviderModelsResult> {
   return await invoke('codex_list_model_provider_models', {
     baseUrl: input.baseUrl,
     apiKey: input.apiKey,
+    wireApi: input.wireApi ?? null,
+    authScheme: input.authScheme ?? null,
   });
 }
 
@@ -161,7 +166,8 @@ export function resolveModelProviderUsageMode(
     summary.mode === 'new_api' ||
     summary.mode === 'sub2api' ||
     summary.mode === 'deepseek' ||
-    summary.mode === 'token_plan'
+    summary.mode === 'token_plan' ||
+    summary.mode === 'openai_official'
   ) {
     return summary.mode;
   }

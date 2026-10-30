@@ -69,6 +69,7 @@ pub(super) struct AppState {
     pub identity: Arc<IdentityStore>,
     pub options: Options,
     pub stop: StopSignal,
+    pub anthropic_search: Arc<super::anthropic_search_cache::Cache>,
     activity: Arc<Activity>,
     capacity: Arc<Semaphore>,
 }
@@ -248,6 +249,7 @@ pub async fn start(
     identity.set_session_identity_mapping_enabled(options.session_identity_mapping_enabled);
     let identity = Arc::new(identity);
     let state = Arc::new(AppState {
+        anthropic_search: Default::default(),
         host: host.clone(),
         identity: identity.clone(),
         capacity: Arc::new(Semaphore::new(options.max_in_flight)),
@@ -379,6 +381,7 @@ pub async fn start(
                 .max_body_bytes
                 .max(state.options.max_upload_bytes),
         ))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), super::http_compression::response))
         .layer(axum::middleware::from_fn(cors))
         .with_state(state);
     let task = tokio::spawn(async move {
@@ -652,6 +655,7 @@ mod shutdown_handoff_tests {
             let temp = tempfile::tempdir().unwrap();
             let (_, stopped) = watch::channel(false);
             let state = AppState {
+                anthropic_search: Default::default(),
                 host: Arc::new(UnusedHost),
                 identity: Arc::new(
                     IdentityStore::open(temp.path().join("identity.sqlite")).unwrap(),
@@ -687,6 +691,7 @@ mod shutdown_handoff_tests {
             let (stop, stopped) = watch::channel(false);
             let activity = Arc::new(Activity::default());
             let state = Arc::new(AppState {
+                anthropic_search: Default::default(),
                 host: Arc::new(UnusedHost),
                 identity: Arc::new(
                     IdentityStore::open(temp.path().join("identity.sqlite")).unwrap(),

@@ -65,7 +65,7 @@ export function isCodexChatCompletionsApiKeyAccount(account: CodexAccount): bool
     return false;
   }
   const wireApi = (account.api_wire_api || "").trim();
-  if (wireApi === "chat_completions") {
+  if (wireApi === "chat_completions" || wireApi === "anthropic") {
     return true;
   }
   if (wireApi === "responses") {

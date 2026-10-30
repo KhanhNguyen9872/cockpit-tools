@@ -10,6 +10,13 @@ pub(super) fn normalize_create(
     previous: Option<&Value>,
     last_response_id: Option<&str>,
 ) -> Result<Value, ServiceError> {
+    let originally_shorthand = body["type"] == "response.append" || body.get("model").is_none();
+    if body.get("model").is_none() {
+        if let Some(model) = previous.and_then(|previous| previous.get("model")) {
+            body.as_object_mut().map(|object| object.insert("model".into(), model.clone()));
+        }
+    }
+    body = super::super::request_compat::ingress(body)?;
     let object = body.as_object_mut().ok_or_else(|| {
         invalid(
             "invalid_websocket_message",
@@ -40,7 +47,7 @@ pub(super) fn normalize_create(
             ));
         }
     };
-    let shorthand = append || !object.contains_key("model");
+    let shorthand = originally_shorthand;
     if !object.contains_key("model") {
         if let Some(model) = previous.and_then(|previous| previous.get("model")) {
             object.insert("model".to_owned(), model.clone());
@@ -58,13 +65,17 @@ pub(super) fn normalize_create(
     }
     match object.get("input") {
         Some(Value::Array(_)) => {}
-        None if previous.is_none() && !append => {
+        Some(Value::String(text)) => {
+            let input = serde_json::json!([{"type":"message","role":"user","content":[{"type":"input_text","text":text}]}]);
+            object.insert("input".to_owned(), input);
+        }
+        None | Some(Value::Null) if !append && (previous.is_none() || !shorthand) => {
             object.insert("input".to_owned(), Value::Array(Vec::new()));
         }
         _ => {
             return Err(invalid(
                 "invalid_websocket_input",
-                "WebSocket response input must be an array",
+                "WebSocket response input must be text or an array",
             ));
         }
     }
@@ -151,6 +162,7 @@ pub(super) fn is_interrupt_rejection(event: &Value) -> bool {
     matches!(
         code.as_str(),
         "interrupt_not_supported"
+            | "unsupported_native_inflight_message"
             | "unsupported_interrupt"
             | "invalid_interrupt"
             | "interrupt_failed"
@@ -252,7 +264,7 @@ mod tests {
     fn invalid_input_and_explicit_invalid_fields_are_not_hidden_by_defaults() {
         let previous = json!({"model":"model","instructions":"rules"});
         for request in [
-            json!({"type":"response.create","input":"text"}),
+            json!({"type":"response.create","input":{"invalid":"shape"}}),
             json!({"type":"response.create"}),
             json!({"type":"response.create","model":null,"input":[]}),
             json!({"type":"response.append","input":[],"previous_response_id":5}),
@@ -273,6 +285,7 @@ mod tests {
         for event in [
             json!({"type":"response.interrupt.failed","response_id":"r"}),
             json!({"type":"error","error":{"code":"interrupt_not_supported"}}),
+            json!({"type":"error","error":{"code":"unsupported_native_inflight_message"}}),
             json!({"type":"error","error":{"code":"unsupported_event","param":"response.interrupt"}}),
             json!({"type":"error","error":{"code":"invalid_value","param":"type","message":"Unsupported event type: response.interrupt"}}),
         ] {

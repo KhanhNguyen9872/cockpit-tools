@@ -92,6 +92,7 @@ fn report(
     message: Option<&str>,
 ) -> native_contract::RequestReport {
     native_contract::RequestReport {
+        transient_rate_limit: false,
         official_access_fingerprint: None,
         official_authorization_revision: None,
         official_registration_id: None,

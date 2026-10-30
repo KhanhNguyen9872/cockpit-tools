@@ -24,6 +24,8 @@ type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
 #[path = "chat_tool_integrity_http_tests.rs"]
 mod tool_integrity_tests;
+#[path = "anthropic_http_tests.rs"]
+mod anthropic_tests;
 
 struct BridgeHost {
     base: String,

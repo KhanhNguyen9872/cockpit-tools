@@ -206,6 +206,7 @@ pub fn upsert_api_key_account(
     api_vision_routing_model: Option<String>,
     account_name: Option<String>,
     api_model_context_windows: Option<HashMap<String, i64>>,
+    api_auth_scheme: Option<String>,
 ) -> Result<CodexAccount, String> {
     let (api_key, api_base_url) = validate_api_key_credentials(&api_key, api_base_url.as_deref())?;
     let provider_config = resolve_api_provider_config(
@@ -233,6 +234,7 @@ pub fn upsert_api_key_account(
             api_model_vision_support.clone(),
             api_vision_routing_model.clone(),
             api_model_context_windows.clone(),
+            api_auth_scheme.clone(),
         );
         if acc.email.trim().is_empty() {
             acc.email = build_api_key_email(&api_key);
@@ -257,6 +259,7 @@ pub fn upsert_api_key_account(
         acc.account_name = account_name;
         acc.api_sync_model_catalog_to_codex = api_sync_model_catalog_to_codex.unwrap_or(false);
         acc.api_wire_api = normalize_api_wire_api(api_wire_api.clone());
+        acc.api_auth_scheme = api_auth_scheme.clone();
         acc.api_supports_websockets = api_supports_websockets;
         let _ = normalize_api_key_websocket_capability(&mut acc);
         acc.api_supports_vision = api_supports_vision;

@@ -1784,10 +1784,9 @@ fn sync_runtime_collection(
     if let Some(current) = runtime.collection.as_ref() {
         preserve_runtime_collection_fields(&mut collection, current);
         collection.native_gateway_default_migrated |= current.native_gateway_default_migrated;
-        if current.gateway_mode != CodexLocalAccessGatewayMode::Legacy {
-            collection.gateway_mode = current.gateway_mode;
-        }
     }
+    collection.gateway_mode = CodexLocalAccessGatewayMode::Native;
+    collection.native_gateway_default_migrated = true;
     sync_quota_reserve_policy(&collection);
     REQUEST_PAYLOAD_LOGGING_ENABLED.store(collection.request_payload_logging, Ordering::SeqCst);
     if let Some(handle) = runtime.native_handle.as_ref() {

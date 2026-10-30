@@ -255,6 +255,22 @@ fn independent_data_scanner_visits_large_fragmented_lines_once() {
 }
 
 #[test]
+fn large_event_tail_scanning_is_incremental_and_ignores_braces_inside_strings() {
+    let event = json!({"type":"response.output_text.delta","delta":"text } \\\" [ ".repeat(32*1024)});
+    let wire = format!("event: response.output_text.delta\ndata: {event}  ").into_bytes();
+    let mut scanner = tail::Tail::default();
+    for end in (31..wire.len()).step_by(31) {
+        if end < wire.len()-3 { assert!(!scanner.complete(&wire[..end])); }
+    }
+    assert!(scanner.complete(&wire));
+    assert_eq!(scanner.visited,wire.len());
+    let mut decoder = SseDecoder::new(2*1024*1024);
+    let mut values = Vec::new();
+    for chunk in wire.chunks(31) { values.extend(decoder.push(chunk).unwrap()); }
+    assert_eq!(values,vec![event]);
+}
+
+#[test]
 fn independent_data_events_keep_individual_limits_with_bounded_lookahead() {
     let values = [
         json!({"type":"response.output_text.delta","delta":"a".repeat(200)}),

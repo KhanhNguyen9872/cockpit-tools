@@ -850,6 +850,7 @@ multi_agent = true
             None,
             None,
             None,
+            None,
         )
         .expect("update API key account");
 
@@ -1379,6 +1380,7 @@ supports_websockets = false
             true,
             false,
             Default::default(),
+            None,
             None,
             None,
         )
@@ -2079,6 +2081,7 @@ supports_websockets = false
             None,
             Some("Relay Key".to_string()),
             None,
+            None,
         )
         .expect("create API key account");
         assert!(created.api_sync_model_catalog_to_codex);
@@ -2095,6 +2098,7 @@ supports_websockets = false
             false,
             false,
             std::collections::HashMap::new(),
+            None,
             None,
             None,
             None,

@@ -327,7 +327,7 @@ fn native_mode_patch_preserves_latest_unrelated_fields_and_rejects_nonobjects() 
 }
 
 #[test]
-fn native_engine_selection_survives_stale_stats_writes_in_both_directions() {
+fn native_engine_selection_cannot_be_reverted_by_stale_stats() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("collection.json");
     let mut stale_sidecar = native_test_collection();
@@ -358,7 +358,7 @@ fn native_engine_selection_survives_stale_stats_writes_in_both_directions() {
     save_collection_to_path(&path, &stale_native).unwrap();
     let latest: CodexLocalAccessCollection =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(latest.gateway_mode, CodexLocalAccessGatewayMode::Sidecar);
+    assert_eq!(latest.gateway_mode, CodexLocalAccessGatewayMode::Native);
     assert_eq!(latest.port, 16666);
 }
 
@@ -556,6 +556,42 @@ fn native_test_routing_host() -> NativeHostBridge {
         host.account_overrides.insert(id.into(), account);
     }
     host
+}
+
+#[tokio::test]
+async fn native_grok_control_rechecks_current_source_owner_and_revokes_changed_team() {
+    use native_contract::Host;
+    let _env = crate::modules::test_support::env_lock().lock().unwrap_or_else(|error| error.into_inner());
+    let _data = super::native_capability_integration_tests::NativeInstallationTestData::new();
+    let save_source = |team: &str, token: &str| {
+        crate::modules::grok_account::import_from_json(&json!({
+            "id":"control-source","email":"control@example.invalid","auth_mode":"oauth",
+            "access_token":token,"principal_id":"current-principal","team_id":team,
+            "expires_at":4102444800_i64,"created_at":1,"last_used":1
+        }).to_string()).unwrap().remove(0)
+    };
+    let source = save_source("current-team", "fixture-token");
+    let mut host = native_test_routing_host();
+    host.collection_override.as_mut().unwrap().account_ids = vec!["pool-a".into()];
+    host.collection_override.as_mut().unwrap().responses_websockets_enabled = true;
+    let account = host.account_overrides.get_mut("pool-a").unwrap();
+    account.upstream_grok_account_id = Some(source.id.clone());
+    account.api_base_url = Some(codex_account::GROK_CLI_CHAT_PROXY_BASE_URL.into());
+    account.api_model_catalog = vec!["grok-4.7".into()];
+    account.api_supports_websockets = true;
+    account.openai_api_key = None;
+    account.user_id = Some("stale-principal".into());
+    account.account_id = Some("stale-team".into());
+    let caller = native_test_caller(NATIVE_PRIMARY_CALLER);
+    let mut request = native_test_route_request("grok-control");
+    request.model = "grok-4.7".into();
+    let route = native_select_route(&host, &caller, request.clone()).await.unwrap();
+    assert_ne!(native_account_owner(&host.account_overrides["pool-a"], &route.base_url), route.owner_id);
+    host.validate_websocket_control(&caller, &route, &request).await.unwrap();
+    save_source("current-team", "rotated-fixture-token");
+    host.validate_websocket_control(&caller, &route, &request).await.unwrap();
+    save_source("changed-team", "rotated-fixture-token");
+    assert_eq!(host.validate_websocket_control(&caller, &route, &request).await.unwrap_err().code, "websocket_control_denied");
 }
 
 #[tokio::test]
@@ -1056,7 +1092,7 @@ async fn native_context_rebuild_stale_false_does_not_survive_collection_save() {
         let persisted: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert!(persisted.get("nativeAccountSwitchRebuild").is_none());
         let restored: CodexLocalAccessCollection = serde_json::from_value(persisted).unwrap();
-        assert_eq!(restored.gateway_mode, mode, "No automatic engine switch");
+        assert_eq!(restored.gateway_mode, CodexLocalAccessGatewayMode::Native, "Retired engines must migrate to Rust");
         assert_eq!(restored.port, 16666);
         assert_eq!(restored.account_ids, stale.account_ids);
         assert_eq!(restored.api_key, stale.api_key);

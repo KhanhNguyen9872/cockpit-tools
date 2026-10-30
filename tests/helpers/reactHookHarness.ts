@@ -46,8 +46,8 @@ export function loadHookModule(file: URL, imports: Record<string, unknown>, glob
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX,
   } }).outputText;
   vm.runInNewContext(compiled, { exports, crypto: globalThis.crypto, setTimeout, clearTimeout, ...globals, require(name: string) {
-    if (name === 'react') return { ...hooks, createContext };
     if (name in imports) return imports[name];
+    if (name === 'react') return { ...hooks, createContext };
     if (name.endsWith('.css')) return {};
     return require(name);
   } });
@@ -62,7 +62,7 @@ export function loadHookModule(file: URL, imports: Record<string, unknown>, glob
     } while (dirty);
     return output;
   }
-  return { exports, flush, render(callback: () => any) { renderCurrent = callback; return flush(); },
+  return { exports, hooks, flush, render(callback: () => any) { renderCurrent = callback; return flush(); },
     unmount() { cleanups.forEach((cleanup) => cleanup?.()); },
   };
 }

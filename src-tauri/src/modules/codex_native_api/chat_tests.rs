@@ -1,4 +1,12 @@
 use super::*;
+
+#[test]
+fn deepseek_chat_can_disable_thinking() {
+    let request = json!({"model":"vendor/deepseek-v5-pro", "input":"hello", "reasoning":{"effort":"none"}});
+    let wire = chat_upstream::responses_to_chat(&request).unwrap();
+    assert_eq!(wire["thinking"]["type"], "disabled");
+    assert!(wire.get("reasoning_effort").is_none());
+}
 use crate::modules::codex_native_api::chat_upstream::{self, ResponsesStreamAdapter};
 use serde_json::json;
 fn ctx() -> ChatContext {

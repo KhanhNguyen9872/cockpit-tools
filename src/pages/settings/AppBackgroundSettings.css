@@ -3,9 +3,10 @@
 .background-settings-heading p, .background-settings-hint { margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
 .background-settings-fields { margin: 0; padding: 0; border: 0; min-width: 0; display: grid; gap: 16px; }
 .background-settings .btn { font-family: inherit; line-height: 1.4; }
-.background-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 20px; align-items: stretch; }
-.background-settings-options { min-width: 0; display: grid; gap: 12px; justify-items: start; }
-.background-presets { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.background-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 20px; align-items: start; }
+.background-settings-options { min-width: 0; width: 100%; display: grid; gap: 12px; justify-items: start; }
+.background-settings-options h4 { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.background-presets { width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-items: start; }
 .background-preset { appearance: none; -webkit-appearance: none; font: inherit; font-size: 12px; line-height: 1.4; background: var(--bg-card); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 10px; padding: 5px 5px 7px; min-width: 0; cursor: pointer; display: grid; gap: 5px; text-align: center; overflow-wrap: anywhere; }
 .background-preset:hover:not(:disabled) { border-color: var(--primary); color: var(--text-primary); background: var(--bg-hover); }
 .background-preset.selected { border-color: var(--primary); color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
@@ -15,6 +16,19 @@
 .background-preset-upload:not(.selected) { border-style: dashed; }
 .background-preset-add { position: absolute; inset: 0; margin: auto; color: var(--text-secondary); pointer-events: none; }
 .background-preset-upload:hover:not(:disabled) .background-preset-add { color: var(--primary); }
+.background-skin-library { width: 100%; min-width: 0; display: grid; gap: 10px; }
+.background-skin-card { position: relative; min-width: 0; }
+.background-skin-card > .background-preset { width: 100%; }
+.background-skin-library .background-preset-swatch { height: 56px; }
+.background-skin-card .background-skin-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-inline-end: 22px; text-align: start; }
+.background-skin-check { position: absolute; inset-inline-start: 4px; top: 4px; padding: 2px; border-radius: 50%; background: var(--primary); color: var(--bg-card); box-sizing: content-box; }
+.background-skin-menu-trigger.btn { position: absolute; inset-inline-end: 4px; bottom: 6px; padding: 0; min-width: 20px; height: 20px; border-radius: 5px; }
+.background-skin-menu { position: absolute; z-index: 10; inset-inline-end: 0; top: calc(100% + 4px); display: grid; gap: 4px; width: max-content; max-width: min(180px, calc(100vw - 48px)); padding: 5px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); box-shadow: 0 6px 20px rgb(0 0 0 / 15%); }
+.background-skin-card:nth-child(3n + 1) .background-skin-menu { inset-inline-start: 0; inset-inline-end: auto; }
+.background-skin-menu .btn { justify-content: flex-start; font-size: 12px; white-space: normal; text-align: start; }
+.background-skin-name-input { appearance: none; -webkit-appearance: none; font: inherit; width: 100%; min-width: 0; box-sizing: border-box; padding: 6px; background: var(--bg-input, var(--bg-card)); color: var(--text-primary); border: 1px solid var(--border); border-radius: 5px; }
+.background-skin-name-input:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.background-skin-name-input:disabled { opacity: 0.45; cursor: not-allowed; }
 .background-preview { position: relative; min-height: 190px; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; }
 .background-preview > span { position: absolute; bottom: 10px; inset-inline-end: 10px; padding: 3px 8px; border-radius: 6px; background: var(--bg-card); color: var(--text-secondary); font-size: 11px; }
 .background-preview-chrome { position: absolute; inset: 24px 24px 44px; display: flex; gap: 14px; }
@@ -40,3 +54,9 @@
   .background-adjustments { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .background-position { grid-column: 1 / -1; }
 }
+
+.background-skin-dialog-overlay { z-index: 10001; }
+.modal.background-skin-dialog { max-width: 440px; width: calc(100% - 32px); max-height: calc(100vh - 32px); }
+.background-skin-dialog-body { display: grid; gap: 8px; min-height: 0; overflow-y: auto; overflow-wrap: anywhere; }
+.background-skin-dialog-body p { margin: 0; line-height: 1.5; }
+.background-skin-dialog .modal-footer { flex-shrink: 0; flex-wrap: wrap; }

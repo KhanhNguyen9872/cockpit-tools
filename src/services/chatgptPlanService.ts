@@ -173,7 +173,7 @@ const errors: Record<string, string> = {
   INVALID_ID_TOKEN: 'identity', IDENTITY_MISMATCH: 'mismatch', REGISTRATION_CHANGED: 'mismatch',
   LOGIN_EXPIRED: 'expired', LOGIN_CANCELLED: 'cancelled', NO_MODELS: 'noModels',
   MODEL_UNAVAILABLE: 'model', VERIFY_FAILED: 'verify', STREAM_INCOMPLETE: 'verify',
-  USAGE_LIMIT: 'usage', USAGE_UNAVAILABLE: 'usageUnavailable', NATIVE_REQUIRED: 'native',
+  USAGE_LIMIT: 'usage', USAGE_UNAVAILABLE: 'usageUnavailable',
   OPEN_BROWSER: 'browser',
   BINDING_REQUIRED: 'bindingRequired', BINDING_CONFLICT: 'bindingConflict',
   BINDING_MISMATCH: 'bindingRequired', ACCOUNT_NOT_FOUND: 'missing',

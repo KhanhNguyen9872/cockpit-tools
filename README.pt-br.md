@@ -303,11 +303,7 @@ brew tap jlcodes99/cockpit-tools https://github.com/jlcodes99/cockpit-tools
 brew install --cask cockpit-tools
 ```
 
-Se você se deparar com o aviso "O aplicativo está danificado" do macOS, também poderá instalar com a opção `--no-quarantine`:
-
-```bash
-brew install --cask --no-quarantine cockpit-tools
-```
+O fluxo de publicação para macOS exige assinatura Developer ID e notarização da Apple; a instalação normal não precisa de `--no-quarantine`. Versões antigas sem assinatura não passam a ser assinadas retroativamente.
 
 Se o Homebrew disser que o aplicativo já existe (por exemplo, `já existe um aplicativo em '/Applications/Cockpit Tools.app'`), remova o aplicativo antigo e instale-o novamente:
 
@@ -325,16 +321,10 @@ brew install --cask --force cockpit-tools
 ### 🛠️ Solução de problemas
 
 #### O macOS exibe a mensagem "O app está danificado e não pode ser aberto"?
-Devido aos mecanismos de segurança do macOS, apps que não foram baixados da App Store podem exibir este aviso. O fluxo de distribuição de código aberto atual ainda não utiliza a assinatura ou autenticação do ID de desenvolvedor da Apple, portanto, algumas versões do macOS podem exibir avisos mais rigorosos do Gatekeeper. Você pode corrigir isso rapidamente seguindo estas etapas:
 
-1.  **Correção via linha de comando** (Recomendado):
-    Abra o Terminal e execute o seguinte comando:
-    ```bash
-    sudo xattr -rd com.apple.quarantine "/Applications/Cockpit Tools.app"
-    ```
-    > **Observação**: Se você alterou o nome do aplicativo, ajuste o caminho no comando de acordo.
+O novo fluxo de publicação para macOS verifica a assinatura Developer ID, a notarização da Apple e os comprovantes anexados ao aplicativo, ao pacote de atualização e à imagem DMG final. Na primeira abertura, ainda pode aparecer a confirmação normal de que o aplicativo foi baixado da Internet.
 
-2.  **Ou**: Acesse "Configurações do Sistema" -> "Privacidade e Segurança" e clique em "Abrir mesmo assim".
+Se o aviso persistir, baixe uma versão explicitamente identificada como assinada e notarizada nas [versões oficiais](https://github.com/jlcodes99/cockpit-tools/releases), confira o arquivo `SHA256SUMS.txt` e reinstale. Pacotes antigos sem assinatura, compilações locais de desenvolvimento e aplicativos modificados ainda podem ser bloqueados. Não presuma que um aviso de segurança seja um falso positivo; a instalação normal não exige desativar o Gatekeeper nem remover atributos de quarentena. Ao relatar um problema persistente, informe a versão, a arquitetura do processador e a mensagem completa.
 
 ---
 

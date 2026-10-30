@@ -5,6 +5,14 @@ import type { CodexModelProvider } from "../services/codexModelProviderService.t
 import type { CodexAccount } from "../types/codex.ts";
 import { buildCodexModelProviderAccountSnapshot, findCodexAccountsReferencingModelProvider } from "./codexModelProviderAccountSync.ts";
 
+test('official providers keep built-in account behavior and match implicit/default endpoint aliases', () => {
+  const provider: CodexModelProvider = { id: 'official', name: 'OpenAI Official', baseUrl: 'https://api.openai.com/',
+    wireApi: 'responses', supportsWebsockets: false, apiKeys: [], createdAt: 1, updatedAt: 1 };
+  assert.equal(buildCodexModelProviderAccountSnapshot(provider).apiProviderMode, 'openai_builtin');
+  const account = { id: 'default', auth_mode: 'apikey', api_provider_mode: 'openai_builtin', openai_api_key: 'synthetic' } as CodexAccount;
+  assert.deepEqual(findCodexAccountsReferencingModelProvider(provider, [account]), ['default']);
+});
+
 test("Responses provider account snapshots retain vision defaults, overrides and routing", () => {
   const snapshot = buildCodexModelProviderAccountSnapshot({
     id: "cmp_custom",

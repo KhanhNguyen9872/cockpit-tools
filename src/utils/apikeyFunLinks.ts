@@ -77,7 +77,7 @@ export function normalizeApiKeyFunProviderBaseUrl(value?: string | null): string
 
 export function resolveApiKeyFunWireApi(
   baseUrl?: string | null,
-  wireApi?: 'responses' | 'chat_completions' | null,
-): 'responses' | 'chat_completions' | null {
+  wireApi?: 'responses' | 'chat_completions' | 'anthropic' | null,
+): 'responses' | 'chat_completions' | 'anthropic' | null {
   return isApiKeyFunProviderBaseUrl(baseUrl) ? 'responses' : wireApi ?? null;
 }

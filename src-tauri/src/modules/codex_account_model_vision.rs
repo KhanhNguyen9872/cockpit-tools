@@ -29,7 +29,7 @@ pub(crate) fn model_defaults_to_vision_input(model_id: &str) -> bool {
     let catalog = CATALOG.get_or_init(|| {
         serde_json::from_str(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../sidecars/cockpit-cliproxy/third_party/CLIProxyAPI/internal/registry/models/models.json"
+            "/../resources/codex/models.json"
         )))
         .expect("Embedded models.json should be valid")
     });

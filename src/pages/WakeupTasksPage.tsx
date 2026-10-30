@@ -11,6 +11,8 @@ import {
   collectAntigravityQuotaModelKeys,
   filterAntigravityModelOptions,
   getAntigravityModelDisplayName,
+  getPreferredAntigravityWakeupModelId,
+  DEFAULT_ANTIGRAVITY_WAKEUP_MODEL_ID,
   type AntigravityModelOption,
 } from '../utils/antigravityModels';
 import {
@@ -208,7 +210,7 @@ const DEFAULT_SCHEDULE: ScheduleConfig = {
   intervalHours: 4,
   intervalStartTime: '07:00',
   intervalEndTime: '22:00',
-  selectedModels: ['gemini-3-flash'],
+  selectedModels: [DEFAULT_ANTIGRAVITY_WAKEUP_MODEL_ID],
   selectedAccounts: [],
   maxOutputTokens: 0,
 };
@@ -1207,7 +1209,7 @@ export function WakeupTasksPage({ onNavigate }: WakeupPageProps) {
       if (modelIds.length > 0) {
         const nextModels = nextSchedule.selectedModels.filter((id) => modelIds.includes(id));
         if (nextModels.length === 0) {
-          nextModels.push(modelIds[0]);
+          nextModels.push(getPreferredAntigravityWakeupModelId(filteredModels));
         }
         if (nextModels.join('|') !== nextSchedule.selectedModels.join('|')) {
           nextSchedule = { ...nextSchedule, selectedModels: nextModels };
@@ -1234,7 +1236,7 @@ export function WakeupTasksPage({ onNavigate }: WakeupPageProps) {
     setTestSelectedModels((prev) => {
       const next = prev.filter((id) => filteredModels.some((model) => model.id === id));
       if (next.length === 0) {
-        return [filteredModels[0].id];
+        return [getPreferredAntigravityWakeupModelId(filteredModels)];
       }
       return next;
     });
@@ -1636,7 +1638,7 @@ export function WakeupTasksPage({ onNavigate }: WakeupPageProps) {
     setFormIntervalHours(4);
     setFormIntervalStart('07:00');
     setFormIntervalEnd('22:00');
-    setFormSelectedModels(filteredModels.length ? [filteredModels[0].id] : []);
+    setFormSelectedModels(filteredModels.length ? [getPreferredAntigravityWakeupModelId(filteredModels)] : []);
     setFormSelectedAccounts(accountEmails.length ? [accountEmails[0]] : []);
     setFormAccountSearchQuery('');
     setFormTypeFilter([]);

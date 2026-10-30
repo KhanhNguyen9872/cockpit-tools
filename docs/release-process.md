@@ -86,7 +86,28 @@ Tauri release build 使用仓库配置的 updater signing secrets：
 - `TAURI_SIGNING_PRIVATE_KEY`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 
-这里的 signing 指 Tauri updater artifact 签名；不要把它描述成已经完成 Apple notarization 或 Windows Authenticode，除非 workflow 另外明确实现了这些步骤。
+这两个密钥仅用于 Tauri updater artifact 签名，与 Apple Developer ID 签名不同，必须继续保留。Windows Authenticode 不在本次流程范围内。
+
+### macOS Developer ID 与 Apple 公证
+
+三个 macOS 正式 release job 均要求以下 GitHub Actions repository secrets（缺失即失败，不降级为未签名包）：
+
+| Secret | 内容 |
+| --- | --- |
+| `APPLE_CERTIFICATE` | 包含私钥的 Developer ID Application `.p12` 文件的 Base64 |
+| `APPLE_CERTIFICATE_PASSWORD` | `.p12` 导出密码 |
+| `APPLE_SIGNING_IDENTITY` | 完整 `Developer ID Application: … (TEAMID)` 证书名 |
+| `APPLE_ID` | 公证用 Apple 账号邮箱 |
+| `APPLE_PASSWORD` | Apple App 专用密码，不是账号登录密码 |
+| `APPLE_TEAM_ID` | 与签名证书一致的 10 位团队 ID |
+
+`macos-signing.cjs prepare` 在 runner 临时目录创建独立钥匙串、导入证书并验证公证凭据。构建步骤通过 Tauri 完成应用签名、公证和票据附加，开启 hardened runtime；不默认放宽 entitlement。自动更新包继续由 Tauri 生成与签名。
+
+随后重建包含安装说明的 DMG，再由 `macos-signing.cjs finalize` 签名并提交最终 DMG 公证，等待上限 30 分钟。校验覆盖原应用、解压后的自动更新应用和最终 DMG 内的应用，要求正确 Developer ID 团队、hardened runtime、有效公证票据及 Gatekeeper 认可；最终 DMG 本身也需通过签名、票据和 Gatekeeper 检查。全部通过后才进入资产暂存、上传与校验和生成。Universal 合并后仍由 Tauri 重新签名，不能复用合并前的签名。
+
+每个 macOS job 上限 120 分钟，结束时 `if: always()` 恢复钥匙串搜索列表并删除本轮临时钥匙串；导入后的 `.p12` 临时文件立即删除。Apple 返回拒绝、超时或凭据错误时停止发布，不移除隔离属性绕过校验。首次公证可能等待较久，超时应检查 Apple submission 状态后重试，不能当作已通过。
+
+本流程不会补签已经发布的历史安装包。只有实际完成签名与公证的产物才能标注为已验证。证书、私钥、专用密码均不得提交到仓库或写入日志。
 
 ## 4. Release assets 与 updater manifests
 

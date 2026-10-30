@@ -130,3 +130,6 @@ mod tests;
 #[cfg(test)]
 #[path = "compat_output_parity_tests.rs"]
 mod output_parity_tests;
+
+#[path = "compat_commentary.rs"]
+mod commentary;

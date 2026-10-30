@@ -395,6 +395,9 @@ async fn native_ensure_provider_profile(
                 }
                 codex_account::reapply_experimental_model_policy_if_enabled(profile)?;
                 reapply_deepseek_profile_config_overrides(profile, account)?;
+                if slots.iter().any(|slot| codex_protocol::deepseek_model_template(&slot.upstream_model).is_some()) {
+                    ensure_profile_max_reasoning_effort(profile)?;
+                }
                 runtime.block_on(native_sync_profile_catalog_tool_capabilities(
                     profile,
                     &published,

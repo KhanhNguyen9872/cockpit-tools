@@ -35,7 +35,6 @@ docs/plugin-architecture-design.md
 # Runtime caches
 src-tauri/arms_cache/
 arms.biz.trace.*
-sidecars/cockpit-cliproxy/bin/
 sidecars/sing-box/bin/
 sidecars/cockpit-cliproxy/cockpit-cliproxy
 src-tauri/resources/electron/*

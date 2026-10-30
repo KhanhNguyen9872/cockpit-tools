@@ -51,7 +51,8 @@ fn claude_signature_and_hosted_search_roundtrip_preserves_opaque_payload() {
             Some("cipher-1")
         );
     }
-    for signature in ["claude#cipher-1", "gemini#cipher-1", "gpt#"] {
+    assert_eq!(super::signature::input(Some(&json!("claude#cipher-1"))).unwrap().as_deref(), Some("claude#cipher-1"));
+    for signature in ["gemini#cipher-1", "gpt#"] {
         assert!(super::signature::input(Some(&json!(signature))).is_err());
     }
 }

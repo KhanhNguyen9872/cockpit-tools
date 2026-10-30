@@ -15,6 +15,7 @@ import {
   collectAntigravityQuotaModelKeys,
   filterAntigravityModelOptions,
   getAntigravityModelDisplayName,
+  getPreferredAntigravityWakeupModelId,
   type AntigravityModelOption,
 } from '../utils/antigravityModels';
 import {
@@ -380,22 +381,10 @@ export function WakeupVerificationPage({ onNavigate }: WakeupVerificationPagePro
     [availableModels, quotaModelKeys],
   );
 
-  const preferredDefaultModelId = useMemo(() => {
-    if (filteredModels.length === 0) {
-      return '';
-    }
-    const flashModel = filteredModels.find((model) => {
-      const displayName = (
-        model.displayName ||
-        getAntigravityModelDisplayName(model.id) ||
-        model.id
-      )
-        .trim()
-        .toLowerCase();
-      return displayName.includes('flash');
-    });
-    return flashModel?.id || filteredModels[0].id;
-  }, [filteredModels]);
+  const preferredDefaultModelId = useMemo(
+    () => getPreferredAntigravityWakeupModelId(filteredModels),
+    [filteredModels],
+  );
 
   const modelNameById = useMemo(() => {
     const map = new Map<string, string>();

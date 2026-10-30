@@ -1880,13 +1880,20 @@
       "center": "居中",
       "top": "顶部",
       "bottom": "底部",
-      "localHint": "修改立即生效并在当前设备自动保存，图片不会上传。恢复默认会移除已保存的图片。",
+      "localHint": "修改立即生效，每张皮肤的图片和参数在本机单独保存，图片不会上传。恢复默认不会删除我的皮肤。",
       "restore": "恢复默认",
       "imageType": "请选择 JPG、PNG 或 WebP 图片。",
       "imageSize": "请选择小于 10 MB 的图片。",
       "imageRead": "无法读取这张图片，请换一张重试。",
       "storage": "背景读取或保存失败，请重试；原有背景仍会保留。",
-      "saveFailed": "当前背景已显示，但保存失败。请重试；上次保存的背景仍会保留。"
+      "saveFailed": "修改已显示，但保存失败。请重试；上次保存的皮肤仍会保留。",
+      "builtInSkins": "内置皮肤",
+      "mySkins": "我的皮肤",
+      "addSkin": "添加皮肤",
+      "rename": "重命名",
+      "skinName": "皮肤名称",
+      "manageSkin": "管理皮肤：{{name}}",
+      "deleteSkinConfirm": "删除“{{name}}”？删除当前皮肤后将恢复默认背景。"
     }
   },
   "appPath": {
@@ -2618,7 +2625,7 @@
       "check": "检查状态",
       "notRunning": "暂未检测到目标实例。请稍后检查，或关闭此窗口后重试启动。",
       "checkFailed": "暂时无法读取运行状态，请稍后重试检查。",
-      "maintenanceDeferred": "暂时无法检查会话，已保留历史并跳过本次维护。"
+      "maintenanceDeferred": "部分会话维护暂未完成，已保留历史，稍后可在会话管理中重试。"
     },
     "launchErrors": {
       "sessionRestoreFailed": "会话修复失败，备份恢复未完成，已停止启动。请先检查日志和备份，再重试。",
@@ -3419,7 +3426,6 @@
         "quotaReserveInvalid": "请输入 1 到 100 的整数",
         "strictReserve": "严格保护",
         "strictReserveDesc": "设置保留额度后自动启用安全垫保护；接近保留值时，每个账号仅发出一个请求，结束后确认最新额度。其他客户端用量不受此设置约束。",
-        "strictNativeOnly": "严格保护需要 Rust 原生引擎；切换 Go 前请先关闭严格保护。",
         "safetyMargin": "安全垫",
         "safetyMarginUnit": "个百分点",
         "safetyMarginInvalid": "请输入 1 到 20 的整数",
@@ -3461,17 +3467,7 @@
       "gatewayModeNewLabel": "API 服务-新",
       "gatewayModeOldLabel": "API 服务-旧",
       "gatewayModeSaveSuccess": "API 服务网关模式已更新",
-      "gatewayEngineNative": "Rust 原生",
-      "gatewayEngineSidecar": "Go 现有",
-      "gatewayEngineHint": "默认使用 Rust，首次升级自动切换，之后保留你的选择。切换会重启 API 服务，可能中断活动请求；Codex 窗口保持打开。",
-      "gatewayEngineSwitching": "正在切换引擎…",
-      "gatewayEngineSwitchFailed": "切换引擎失败：{{error}}",
-      "gatewayEngineReadbackFailed": "未能确认当前引擎，请先刷新再重试：{{error}}",
-      "gatewayEngineReadbackTimeout": "刷新状态超时",
       "gatewayEngineRequestsBusy": "仍有请求进行中，请在完成后重试。",
-      "gatewayEngineOperationBusy": "服务正在执行其他操作，请稍后重试。",
-      "gatewayEngineSwitchRestored": "切换失败，已恢复原引擎。",
-      "gatewayEngineRestoreFailed": "切换失败，且未能恢复原引擎。请检查服务状态后重试。",
       "gatewayEngineStopped": "API 服务已停止，请重启后重试。",
       "gatewayGuideTitle": "这里可以切换网关",
       "gatewayGuideDesc": "默认使用新网关。如果遇到兼容性问题或客户端请求异常，可以在这里切换到旧网关。",
@@ -3774,7 +3770,9 @@
         "chatCompletions": "Chat Completions 协议",
         "deepseekResponsesHint": "启动 DeepSeek 时选择网关或直连，并确认 Flash / Pro。网关可在 Codex 内切模型；直连不走网关。",
         "deepseekChatHint": "DeepSeek Chat Completions 走本地网关协议转换，适合兼容旧链路；需要官方 Codex 工具形态时请选 Responses。",
-        "deepseekThirdPartyHint": "该地址不是官方 DeepSeek 端点，将按第三方兼容地址处理；模型目录请填上游真实模型 ID，不要套用官方模型名。"
+        "deepseekThirdPartyHint": "该地址不是官方 DeepSeek 端点，将按第三方兼容地址处理；模型目录请填上游真实模型 ID，不要套用官方模型名。",
+        "anthropic": "Anthropic 协议",
+        "gatewayRequired": "此协议需通过本地网关使用，并在此选择启动模型。"
       },
       "selectSavedProvider": "已保存供应商",
       "selectSavedApiKey": "已保存 API Key",
@@ -4007,7 +4005,22 @@
       "importConfigPlaceholder": "在供应商卡片上点「复制配置」后，把内容粘贴到这里",
       "importConfigAction": "导入配置",
       "importConfigFromClipboard": "一键读取剪贴板",
-      "settingsRestartHint": "供应商配置已更新。若关联的 Codex 或 API 服务正在运行，请重启后生效。"
+      "settingsRestartHint": "供应商配置已更新。若关联的 Codex 或 API 服务正在运行，请重启后生效。",
+      "anthropic": {
+        "auth": "鉴权方式",
+        "hint": "通过网关调用 Anthropic Messages；模型可获取或手动填写。",
+        "fetch": "获取模型",
+        "fetching": "正在获取…",
+        "fetchFailed": "获取失败，可重试或手动填写模型。",
+        "import": "导入配置",
+        "importFailed": "未找到有效的 Claude Code 或桌面端 Gateway 配置。"
+      },
+      "editor": {
+        "modelScope": "模型配置范围",
+        "providerDefault": "供应商默认",
+        "sharedSettings": "模型目录和能力仅作用于所选范围；协议、鉴权与地址为供应商共用设置。",
+        "saveScope": "保存会更新供应商并同步关联账号；若当前账号受影响，也会更新本地 Codex 配置和凭据，不会自动启动客户端。"
+      }
     },
     "quickSwitch": {
       "action": "快速切换供应商",
@@ -4518,7 +4531,7 @@
       },
       "repairModal": {
         "title": "修复历史会话",
-        "description": "将历史会话的 Provider 归一到目标实例当前状态（仅修正 SQLite 索引、会话目录和工作区状态；会话日志文件保持原样，只校正文件时间）。执行前会创建本地备份。",
+        "description": "快速修复校正可见性索引并补齐当前项目与归属；完整修复还会结合历史快照恢复，并修复会话索引。写入前创建本地备份，会话日志正文保持原样。",
         "stopInstanceHint": "完整修复前请先完全退出所选 Codex App/ChatGPT 实例；仍可先预览变更。",
         "encryptedContentWarning": "检测到由其他 Provider/账号加密的历史内容。元数据可以完成迁移，但继续或压缩这些会话仍可能失败；需要可靠续聊时请切回原 Provider/账号或开启新会话。",
         "running": "正在修复...",
@@ -4544,9 +4557,9 @@
         "providerLoadFailed": "读取 provider 候选失败：{{error}}",
         "modeTitle": "修复方式",
         "modeQuick": "快速修复",
-        "modeQuickDesc": "只校正官方 state DB 和会话索引的 Provider，会话日志文件保持原样，适合日常切号后恢复。",
+        "modeQuickDesc": "限时修正可见性索引、补齐当前项目与归属；项目元数据写入需退出目标实例。",
         "modeDeep": "完整修复",
-        "modeDeepDesc": "全量归一历史 Provider，并修复目录、工作区和子 Agent 索引；会话日志文件保持原样，执行前需退出目标实例。",
+        "modeDeepDesc": "包含快速修复，并结合历史快照恢复项目与归属、修复会话索引；执行前需退出目标实例。",
         "scopeTitle": "会话范围",
         "scopeAll": "全部会话",
         "scopeAllDesc": "修复当前管理列表中的 {{count}} 条会话。",
@@ -4587,7 +4600,13 @@
         "historyFailed": "历史索引修复未完成：{{error}}",
         "historyChanged": "会话数据在修复期间发生变化，本次修复未写入。请稍后重试。",
         "historyScan": "正在检查历史索引（{{current}}/{{total}}）…",
-        "historyReset": "正在备份并重置异常索引…"
+        "historyReset": "正在备份并重置异常索引…",
+        "projectsChanged": "项目数据已变化，请重新预览后重试。",
+        "projectsFailed": "本地项目恢复失败：{{error}}",
+        "projectsPreview": "预览：{{projects}} 个项目、{{assignments}} 条归属；跳过 {{skipped}} 个项目及 {{ambiguous}} 条归属不明会话。",
+        "projectsSuccess": "恢复完成：{{projects}} 个项目、{{assignments}} 条归属；跳过 {{skipped}} 个项目及 {{ambiguous}} 条归属不明会话。",
+        "projectsPending": "上次恢复未完成。请退出目标实例后执行完整修复，先恢复中断的写入。",
+        "projectsDeferred": "部分项目元数据暂未处理，请退出目标实例后重试快速修复，或使用完整修复。"
       },
       "transferModal": {
         "exportTitle": "导出会话",
@@ -5995,6 +6014,14 @@
       }
     },
     "requestDiagnostics": {
+      "requestSizeTitle": "请求体积",
+      "requestSizeHint": "按解压后的客户端 JSON 统计；各字段为紧凑 JSON 字节数，仅记录大小。",
+      "requestBytes": "请求",
+      "historyBytes": "历史",
+      "toolsBytes": "工具",
+      "instructionsBytes": "指令",
+      "overloadRetry": "满载重试",
+      "overloadRecovery": "恢复耗时",
       "recordPayloads": "记录请求正文",
       "recordPayloadsHint": "默认关闭。仅在本地保存有限长度的客户端和上游请求快照；关闭后停止新记录，已有正文可单独清除。",
       "privacyHint": "认证字段会脱敏，但对话正文中的敏感信息未必能识别。复制或分享前请检查。",
@@ -6176,6 +6203,21 @@
       "saveWithoutLaunch": "保存并继续切换",
       "saveOnly": "仅保存设置",
       "validationBusy": "上一条路径仍在检查，请稍后重试。"
+    },
+    "openaiUsage": {
+      "monthCost": "本月消费",
+      "scope": "组织消费；请求和 Token 仅含文本接口；按 UTC 统计。",
+      "loading": "正在查询官方用量…",
+      "pending": "等待查询官方用量",
+      "permissionRequired": "当前 Key 缺少组织用量读取权限（api.usage.read）。",
+      "permissionGuide": "使用管理员 Key：Admin keys → Restricted → Usage API Scope → Read。可查询消费和用量，不提供剩余余额。",
+      "openAdminKeys": "配置查询权限",
+      "invalidKey": "密钥无效或已失效，请检查当前 API Key。",
+      "networkFailed": "无法连接官方用量服务，请稍后刷新。",
+      "queryFailed": "官方用量查询失败，请稍后重试。"
+    },
+    "officialApi": {
+      "hint": "OpenAI 官方 API Key 接入，按实际地址识别。"
     }
   },
   "codebuddy": {
@@ -8028,7 +8070,7 @@
     "model": "测试模型",
     "selectModel": "选择模型",
     "verifyHint": "所选模型仅用于测试连接，不限制账号可使用的其他模型。验证会发送一次简短请求，消耗少量套餐用量。",
-    "serviceHint": "加入当前账号池不会启动 API 服务。首版仅支持原生引擎。",
+    "serviceHint": "加入当前账号池不会启动 API 服务。",
     "verify": "仅验证",
     "verifyAndJoin": "验证并加入",
     "remove": "移出服务",
@@ -8088,8 +8130,6 @@
       "verify": "模型请求未完整完成，请重试验证。",
       "usage": "当前套餐或应用用量受限，请检查 ChatGPT 用量设置。",
       "usageUnavailable": "官方暂时无法确认用量，请稍后重试；这不代表套餐额度已耗尽。",
-      "native": "套餐授权首版仅支持原生引擎，请先在 API 服务中切换引擎。",
-      "nativeSwitch": "请先将套餐账号移出 API 服务，再切换其他引擎。",
       "browser": "无法打开浏览器，请复制授权链接后手动打开。",
       "configuration": "授权注册信息不匹配，请重试授权或重新连接套餐。",
       "notVerified": "请先验证套餐授权，再加入 API 服务。",
@@ -8269,7 +8309,6 @@
     "title": "能力兜底",
     "hint": "当前账号不支持请求能力时，按所选顺序尝试备用账号；仍使用既有模型映射。",
     "consent": "切换会将本次对话发送给备用账号，并消耗其额度或产生对应费用。",
-    "nativeOnly": "当前引擎不执行能力兜底。请切到原生引擎后开启；已有设置可以关闭。",
     "backups": "备用账号",
     "addBackup": "添加备用账号",
     "backupEmpty": "启用前，请从当前 API 账号池选择备用账号。",

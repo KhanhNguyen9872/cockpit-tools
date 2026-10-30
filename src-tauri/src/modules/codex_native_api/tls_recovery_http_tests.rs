@@ -33,6 +33,9 @@ struct Generation {
 
 struct TlsHost {
     mode: Mode,
+    http2: bool,
+    retired: Arc<Notify>,
+    healthy_finished: Arc<Notify>,
     base: String,
     root: reqwest::Certificate,
     generation: Mutex<Generation>,
@@ -47,15 +50,15 @@ struct TlsHost {
     fallback_refreshes: Mutex<Vec<bool>>,
 }
 
-fn trusted_client(root: &reqwest::Certificate) -> reqwest::Client {
-    reqwest::Client::builder()
+fn trusted_client(root: &reqwest::Certificate, http2: bool) -> reqwest::Client {
+    let builder = reqwest::Client::builder()
         .no_proxy()
         .use_rustls_tls()
-        .http1_only()
         .tls_built_in_root_certs(false)
         .add_root_certificate(root.clone())
-        .timeout(DEADLINE)
-        .build()
+        .timeout(DEADLINE);
+    let builder = if http2 { builder } else { builder.http1_only() };
+    builder.build()
         .unwrap()
 }
 
@@ -76,7 +79,8 @@ impl Host for TlsHost {
         }
         self.invalidated.lock().unwrap().push(identity.to_owned());
         current.number += 1;
-        current.client = trusted_client(&self.root);
+        current.client = trusted_client(&self.root, self.http2);
+        self.retired.notify_one();
         true
     }
     fn authorize<'a>(&'a self, _: &'a str) -> BoxFuture<'a, Result<Caller, ServiceError>> {
@@ -189,6 +193,7 @@ impl Host for TlsHost {
     }
     fn record(&self, report: RequestReport) -> BoxFuture<'_, ()> {
         Box::pin(async move {
+            if report.success { self.healthy_finished.notify_one(); }
             self.reports.lock().unwrap().push(report);
             self.recorded.notify_one();
         })
@@ -278,6 +283,10 @@ impl Fixture {
     }
 
     async fn start_with_phase(mode: Mode, before_output: bool) -> Self {
+        Self::start_protocol(mode, before_output, false).await
+    }
+
+    async fn start_protocol(mode: Mode, before_output: bool, http2: bool) -> Self {
         let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
         let root = reqwest::Certificate::from_der(certificate.cert.der()).unwrap();
         let mut config = rustls::ServerConfig::builder_with_provider(Arc::new(
@@ -292,11 +301,15 @@ impl Fixture {
                 .into(),
         )
         .unwrap();
-        config.alpn_protocols = vec![b"http/1.1".to_vec()];
+        config.alpn_protocols = vec![if http2 { b"h2".to_vec() } else { b"http/1.1".to_vec() }];
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let release = Arc::new(Notify::new());
         let requests = Arc::new(AtomicUsize::new(0));
+        let retired = Arc::new(Notify::new());
+        let server_retired = retired.clone();
+        let healthy_finished = Arc::new(Notify::new());
+        let server_healthy_finished = healthy_finished.clone();
         let headers_observed = Arc::new(Notify::new());
         let server_headers_observed = headers_observed.clone();
         let server_release = release.clone();
@@ -307,6 +320,49 @@ impl Fixture {
                 for index in 0..2 {
                     let (socket,peer)=listener.accept().await.unwrap();
                     assert!(peer.ip().is_loopback());
+                    if http2 {
+                        let std_socket = socket.into_std().unwrap();
+                        let duplicate = std_socket.try_clone().unwrap();
+                        let mut injector = tokio::net::TcpStream::from_std(duplicate).unwrap();
+                        let tls = acceptor.accept(tokio::net::TcpStream::from_std(std_socket).unwrap()).await.unwrap();
+                        let mut connection = h2::server::handshake(tls).await.unwrap();
+                        let (mut request, mut send) = connection.accept().await.unwrap().unwrap();
+                        let driver = tokio::spawn(async move {
+                            while let Some(result) = connection.accept().await {
+                                if result.is_err() { break; }
+                            }
+                        });
+                        let mut body = Vec::new();
+                        while let Some(data) = request.body_mut().data().await {
+                            body.extend_from_slice(&data.unwrap());
+                        }
+                        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["model"], "fixture");
+                        server_requests.fetch_add(1, Ordering::SeqCst);
+                        let healthy = index == 1;
+                        let events = if matches!(mode,Mode::Chat) {chat_events(healthy)} else {response_events(healthy)};
+                        let response = axum::http::Response::builder().status(200)
+                            .header("content-type", "text/event-stream")
+                            .header("x-codex-primary-used-percent", "1").body(()).unwrap();
+                        let mut stream = send.send_response(response, false).unwrap();
+                        if healthy || !before_output {
+                            stream.send_data(events.into(), healthy).unwrap();
+                        }
+                        if healthy {
+                            server_healthy_finished.notified().await;
+                            driver.abort();
+                        } else {
+                            if before_output { server_headers_observed.notified().await; }
+                            else { server_release.notified().await; }
+                            let mut invalid_record = vec![0x17,0x03,0x03,0x00,0x20];
+                            invalid_record.extend_from_slice(&[0;32]);
+                            injector.write_all(&invalid_record).await.unwrap();
+                            injector.flush().await.unwrap();
+                            // Wait for the gateway to classify/retire the corrupt pool.
+                            server_retired.notified().await;
+                            driver.abort();
+                        }
+                        continue;
+                    }
                     let mut tls=acceptor.accept(socket).await.unwrap();
                     let (head,body)=read_request(&mut tls).await;
                     let endpoint=if matches!(mode,Mode::Chat) {"/v1/chat/completions"} else {"/v1/responses"};
@@ -350,10 +406,13 @@ impl Fixture {
         });
         let host = Arc::new(TlsHost {
             mode,
+            http2,
+            retired,
+            healthy_finished,
             base: format!("https://{address}/v1"),
             generation: Mutex::new(Generation {
                 number: 0,
-                client: trusted_client(&root),
+                client: trusted_client(&root, http2),
             }),
             root,
             invalidated: Mutex::new(Vec::new()),
@@ -418,8 +477,8 @@ impl Fixture {
     }
 }
 
-async fn assert_tls_recovery(mode: Mode) {
-    let fixture = Fixture::start(mode).await;
+async fn assert_tls_recovery(mode: Mode, http2: bool) {
+    let fixture = Fixture::start_protocol(mode, false, http2).await;
     let client = reqwest::Client::builder()
         .no_proxy()
         .timeout(DEADLINE)
@@ -493,7 +552,7 @@ async fn assert_tls_recovery(mode: Mode) {
         assert_eq!(attempts[0].transport_pool_retired, Some(true));
         assert_eq!(
             attempts[0].upstream_http_version.as_deref(),
-            Some("HTTP/1.1")
+            Some(if fixture.host.http2 { "HTTP/2.0" } else { "HTTP/1.1" })
         );
     }
     let healthy = client
@@ -540,21 +599,21 @@ async fn assert_tls_recovery(mode: Mode) {
 
 #[tokio::test]
 async fn tls_decrypt_after_native_tool_output_retires_only_transport_without_replaying() {
-    assert_tls_recovery(Mode::Responses).await;
+    assert_tls_recovery(Mode::Responses, false).await;
 }
 
 #[tokio::test]
 async fn tls_decrypt_survives_plan_canonical_stream_and_next_request_recovers() {
-    assert_tls_recovery(Mode::Plan).await;
+    assert_tls_recovery(Mode::Plan, false).await;
 }
 
 #[tokio::test]
 async fn tls_decrypt_survives_chat_canonical_stream_and_next_request_recovers() {
-    assert_tls_recovery(Mode::Chat).await;
+    assert_tls_recovery(Mode::Chat, false).await;
 }
 
-async fn assert_bootstrap_tls_recovery(local_fallback: bool) {
-    let fixture = Fixture::start_with_phase(Mode::Codex, true).await;
+async fn assert_bootstrap_tls_recovery(local_fallback: bool, http2: bool) {
+    let fixture = Fixture::start_protocol(Mode::Codex, true, http2).await;
     fixture.host.local_fallback.store(local_fallback, Ordering::SeqCst);
     let client = reqwest::Client::builder()
         .no_proxy()
@@ -608,7 +667,7 @@ async fn assert_bootstrap_tls_recovery(local_fallback: bool) {
         assert_eq!(attempts[0].transport_pool_retired, Some(true));
         assert_eq!(
             attempts[0].upstream_http_version.as_deref(),
-            Some("HTTP/1.1")
+            Some(if fixture.host.http2 { "HTTP/2.0" } else { "HTTP/1.1" })
         );
         assert!(!attempts[0].success);
         assert!(attempts[1].success);
@@ -625,10 +684,27 @@ async fn assert_bootstrap_tls_recovery(local_fallback: bool) {
 
 #[tokio::test]
 async fn tls_decrypt_before_first_event_refreshes_same_transport_with_single_route_permit() {
-    assert_bootstrap_tls_recovery(false).await;
+    assert_bootstrap_tls_recovery(false, false).await;
 }
 
 #[tokio::test]
 async fn official_fallback_tls_decrypt_refresh_keeps_local_namespace_when_official_recovers() {
-    assert_bootstrap_tls_recovery(true).await;
+    assert_bootstrap_tls_recovery(true, false).await;
+}
+
+#[tokio::test]
+async fn http2_tls_decrypt_before_output_recovers_same_account() {
+    assert_bootstrap_tls_recovery(false, true).await;
+}
+#[tokio::test]
+async fn http2_tls_decrypt_after_tool_output_never_replays() {
+    assert_tls_recovery(Mode::Responses, true).await;
+}
+#[tokio::test]
+async fn http2_tls_decrypt_through_plan_adapter_recovers_next_request() {
+    assert_tls_recovery(Mode::Plan, true).await;
+}
+#[tokio::test]
+async fn http2_tls_decrypt_through_chat_adapter_recovers_next_request() {
+    assert_tls_recovery(Mode::Chat, true).await;
 }

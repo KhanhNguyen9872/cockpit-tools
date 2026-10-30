@@ -91,7 +91,8 @@ fn native_health_snapshot_tracks_expiry_success_reset_and_cooling_disable() {
         .is_empty());
     runtime.running = true;
     runtime.collection.as_mut().unwrap().gateway_mode = CodexLocalAccessGatewayMode::Sidecar;
-    assert!(build_account_health_snapshot(&runtime)[0]
+    // A stale engine selection must not hide the active Rust scheduler state.
+    assert!(!build_account_health_snapshot(&runtime)[0]
         .cooldowns
         .is_empty());
 }

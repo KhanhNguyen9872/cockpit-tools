@@ -6,7 +6,6 @@ import ts from 'typescript';
 import type { DownloadEvent } from '@tauri-apps/plugin-updater';
 import { createUpdaterDownloadProgress } from '../src/utils/updaterDownloadProgress';
 import * as retry from '../src/utils/updaterRetry';
-import { parseUpdaterReleaseNotes } from '../src/utils/updaterReleaseNotes';
 import { deferred, settlePromises } from './helpers/reactHookHarness';
 
 // Exercise App's real callbacks without opening a desktop window or downloading a release.
@@ -68,7 +67,7 @@ function harness(options: {
   };
   const exports: Record<string, any> = {};
   const context: Record<string, any> = {
-    exports, ...refs, ...retry, createUpdaterDownloadProgress, parseUpdaterReleaseNotes,
+    exports, ...refs, ...retry, createUpdaterDownloadProgress,
     UPDATE_DOWNLOAD_RETRY_DELAYS_MS: [0], UPDATE_CHECK_RETRY_DELAYS_MS: [],
     updateRuntimeInfoLoaded: true, isLinuxManagedUpdate: false, performance: { now: () => 0 },
     updatePromptPolicyRef: { current: { enabled: true, revision: 0 } },
@@ -80,7 +79,7 @@ function harness(options: {
         settingsReads++;
         return options.settings ? options.settings() : { auto_install: true };
       }
-      assert.ok(['save_pending_update_notes', 'update_last_check_time'].includes(command), command);
+      assert.equal(command, 'update_last_check_time');
     },
     async runUpdaterCheck() { checks++; return options.check ? options.check() : null; },
     async closeUpdaterHandle(update?: Candidate | null) { await update?.close(); },
@@ -88,7 +87,6 @@ function harness(options: {
     async prepareUpdateNotificationInfo(update: Candidate) {
       return options.prepareInfo ? options.prepareInfo() : {
         latest_version: update.version, current_version: update.currentVersion,
-        release_notes: '', release_notes_zh: '',
       };
     },
     setUpdateAction(next: Action | ((old: Action) => Action)) {

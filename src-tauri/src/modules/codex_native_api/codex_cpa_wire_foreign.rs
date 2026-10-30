@@ -85,7 +85,7 @@ fn gemini_signature(raw: &str) -> bool {
         })
 }
 
-fn claude_signature(raw: &str) -> bool {
+pub(super) fn claude_signature(raw: &str) -> bool {
     if raw.is_empty() || raw.len() > MAX_BYTES {
         return false;
     }

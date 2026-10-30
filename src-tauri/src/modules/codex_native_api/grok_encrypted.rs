@@ -19,6 +19,10 @@ pub(super) fn known_signature_provider(raw: &str, gpt: fn(&str) -> bool) -> bool
     cpa_foreign::known_signature_provider(raw, gpt)
 }
 
+pub(super) fn claude_signature(raw: &str) -> bool {
+    cpa_foreign::claude_signature(raw)
+}
+
 const MAX_ENCODED_BYTES: usize = 8 * 1024 * 1024;
 const MIN_DECODED_BYTES: usize = 32;
 const MIN_ENTROPY_RATIO: f64 = 0.85;

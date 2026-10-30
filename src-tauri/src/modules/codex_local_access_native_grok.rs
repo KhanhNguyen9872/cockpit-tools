@@ -70,6 +70,45 @@ pub(super) fn bind_owner(account: &mut CodexAccount, current: &GrokAccount) {
     account.account_id = current.team_id.clone();
 }
 
+/// Control messages must compare the same live principal/team as route creation.
+/// Reading the source does not refresh credentials or change the active socket.
+pub(super) async fn current_account(
+    mut account: CodexAccount,
+) -> Result<CodexAccount, super::native_contract::ServiceError> {
+    let permit = super::NATIVE_ACCOUNT_IO
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|_| {
+            super::native_error(503, "account_read_failed", "Account reader is unavailable")
+        })?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let source = account
+            .upstream_grok_account_id
+            .as_deref()
+            .and_then(crate::modules::grok_account::load_account)
+            .filter(|source| !source.is_api_key_auth() && !source.access_token.is_empty())
+            .ok_or_else(|| {
+                super::native_error(
+                    403,
+                    "websocket_control_denied",
+                    "The linked Grok authorization is no longer available",
+                )
+            })?;
+        bind_owner(&mut account, &source);
+        Ok(account)
+    })
+    .await
+    .map_err(|_| {
+        super::native_error(
+            503,
+            "account_read_failed",
+            "Unable to read the linked Grok authorization",
+        )
+    })?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -229,6 +229,27 @@ fn deepseek_routing_account(vision: &[(&str, bool)]) -> CodexAccount {
     account
 }
 
+#[test]
+fn third_party_deepseek_models_keep_reasoning_levels() {
+    let account = automatic_routing_account("relay", "chat_completions", &["deepseek-v4-pro"]);
+    let template = super::account_model_template(&account, "deepseek-v4-pro").unwrap();
+    let levels: Vec<_> = template["supported_reasoning_levels"].as_array().unwrap().iter().map(|level| level["effort"].as_str().unwrap()).collect();
+    assert_eq!(levels, ["low", "high", "max"]);
+    assert!(super::account_model_template(&account, "other-model").is_none());
+    let future = super::account_model_template(&account, "vendor/deepseek-v5-pro").unwrap();
+    assert_eq!(future["supported_reasoning_levels"].as_array().unwrap().len(), 3);
+}
+
+#[test]
+fn deepseek_future_relay_models_keep_reasoning_in_mixed_catalog() {
+    let slots = super::allocate_provider_model_slots(&["vendor/deepseek-v5-pro".into(), "other-model".into()]);
+    let catalog: serde_json::Value = serde_json::from_str(&super::build_provider_model_catalog_json(&slots).unwrap()).unwrap();
+    let slot = slots.iter().find(|slot| slot.upstream_model == "vendor/deepseek-v5-pro").unwrap();
+    let model = catalog["models"].as_array().unwrap().iter().find(|model| model["slug"] == slot.client_model).unwrap();
+    let efforts: Vec<_> = model["supported_reasoning_levels"].as_array().unwrap().iter().map(|level| level["effort"].as_str().unwrap()).collect();
+    assert_eq!(efforts, ["low", "high", "max"]);
+}
+
 /// DeepSeek 账号与「DeepSeek 网关模式」保持一致：只展示账号模型列表里的模型，
 /// 并把带图片的请求自动转到识图模型。
 #[test]

@@ -6,7 +6,7 @@ pub async fn run_pelican_provider_chat(
     on_delta: impl Fn(String) + Send + Sync + 'static,
 ) -> Result<PelicanChatOutput, String> {
     let secret = request.api_key.clone();
-    // The worker owns the temporary process through cleanup, even if its caller
+    // The worker owns the temporary Rust listener through cleanup, even if its caller
     // is dropped. Cancellation closes the stream before stopping the gateway.
     let result = tokio::spawn(async move {
         if *cancel.borrow() {
@@ -49,31 +49,16 @@ pub async fn run_pelican_provider_chat(
                 )?;
                 let dir = provider_gateway_sidecars_dir()?
                     .join(format!("pelican-provider-{}", uuid::Uuid::new_v4()));
-                let config = timeout(
-                    Duration::from_secs(20),
-                    prepare_sidecar_launch_config_in_dir(
-                        &collection,
-                        dir.clone(),
-                        HashMap::new(),
-                        None,
-                        HashMap::from([(account.id.clone(), account)]),
-                    ),
-                )
-                .await
-                .map_err(|_| "PELICAN_TIMEOUT".to_string())
-                .and_then(|result| result);
-                let result = match config {
-                    Ok(config) => spawn_provider_gateway_sidecar(&collection, &config, false).await,
-                    Err(error) => Err(error),
-                };
+                let mut host = NativeHostBridge::for_collection(collection.clone());
+                host.account_overrides.insert(account.id.clone(), account);
+                let address = (std::net::Ipv4Addr::LOCALHOST, collection.port).into();
+                let result = native_api::start(
+                    address, Arc::new(host), dir.join("identity.sqlite"), native_api::Options::default(),
+                ).await;
                 match result {
-                    Ok((child, task, host)) => {
-                        Ok((collection, client_model, dir, child, task, host))
-                    }
+                    Ok(handle) => Ok((collection, client_model, dir, handle)),
                     Err(error) => {
-                        if dir.exists() {
-                            let _ = std::fs::remove_dir_all(&dir);
-                        }
+                        let _ = std::fs::remove_dir_all(&dir);
                         Err(error)
                     }
                 }
@@ -81,7 +66,7 @@ pub async fn run_pelican_provider_chat(
         })
         .await
         .map_err(|_| "pelican.error.workerFailed".to_string())??;
-        let (collection, client_model, dir, child, task, host) = prepared;
+        let (collection, client_model, dir, mut handle) = prepared;
         let result = pelican_with_cancel(cancel, PELICAN_TOTAL_TIMEOUT, async {
             let (body, headers) = build_pelican_request(
                 &client_model,
@@ -92,7 +77,7 @@ pub async fn run_pelican_provider_chat(
             let client =
                 build_localhost_http_client(PELICAN_TOTAL_TIMEOUT, "Pelican provider test")?;
             let mut builder = client
-                .post(format!("http://{}:{}/v1/responses", host, collection.port))
+                .post(format!("http://{}/v1/responses", handle.addr))
                 .bearer_auth(&collection.api_key);
             for (name, value) in headers {
                 builder = builder.header(name, value);
@@ -116,7 +101,12 @@ pub async fn run_pelican_provider_chat(
             pelican_consume_response(response, PELICAN_IDLE_TIMEOUT, &on_delta).await
         })
         .await;
-        stop_temporary_provider_gateway_sidecar(child, task, host, collection.port, dir).await;
+        let stopped = handle.shutdown(GATEWAY_SHUTDOWN_TIMEOUT).await;
+        drop(handle);
+        let _ = tokio::fs::remove_dir_all(dir).await;
+        if let Err(error) = stopped {
+            logger::log_codex_api_warn(&format!("[NativeAPI] Pelican provider shutdown: {error}"));
+        }
         result
     })
     .await

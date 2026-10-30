@@ -323,7 +323,7 @@ pub(super) fn chat_failure(value: &Value, fallback: u16) -> Option<ServiceError>
     {
         return None;
     }
-    let status = [
+    let mut status = [
         "/status",
         "/status_code",
         "/error/status",
@@ -366,6 +366,7 @@ pub(super) fn chat_failure(value: &Value, fallback: u16) -> Option<ServiceError>
             }
         }
     });
+    if super::transient_rate_limit::applies(value) { status = 429; }
     let (message, scope) = super::diagnostics::upstream_error_metadata_status(status, value);
     let extracted = super::diagnostics::error_object(value);
     let details = (!std::ptr::eq(extracted, value) && extracted.is_object())

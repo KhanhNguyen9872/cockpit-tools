@@ -2,6 +2,7 @@
 
 fn native_cooldown_report(status: u16, error: &str) -> native_contract::RequestReport {
     native_contract::RequestReport {
+        transient_rate_limit: false,
         official_access_fingerprint: None,
         official_authorization_revision: None,
         official_registration_id: None,
@@ -35,6 +36,7 @@ fn native_connection_failures_do_not_cool_accounts_or_shorten_existing_cooldown(
         (503, "account_cooling"),
         (502, "upstream_unavailable"),
         (502, "upstream_stream_error"),
+        (502, "upstream_websocket_lost"),
         (502, "incomplete_upstream_stream"),
         (504, "upstream_connect_timeout"),
         (504, "upstream_idle_timeout"),
@@ -379,4 +381,24 @@ fn model_errors_cool_only_the_model_and_parameters_do_not_cool() {
         host.cooldowns.lock().unwrap().is_empty(),
         "ambiguous text must not override the original error classification"
     );
+}
+
+#[test]
+fn transient_admission_cools_only_the_model_without_quota_or_backoff() {
+    let now=Instant::now(); let mut states=HashMap::new();
+    native_upsert_transient_rate_limit(&mut states,"a","m",Some(Duration::from_millis(200)),now);
+    let state=&states[&native_cooldown_key("a","m",false)];
+    assert_eq!(state.until,now+Duration::from_millis(200)); assert!(!state.quota); assert_eq!(state.backoff_level,0);
+    assert!(native_cooldown_wait(&states,"a","other",false,now).is_none());
+    native_upsert_transient_rate_limit(&mut states,"a","m",None,now);
+    assert_eq!(states[&native_cooldown_key("a","m",false)].until,now+Duration::from_secs(1));
+    let quota_until=now+Duration::from_secs(3600);
+    states.insert(native_cooldown_key("a","m",false),NativeCooldown{until:quota_until,quota:true,backoff_level:3,reason:"quota"});
+    native_upsert_transient_rate_limit(&mut states,"a","m",Some(Duration::from_secs(2)),now);
+    assert_eq!(states[&native_cooldown_key("a","m",false)].until,quota_until);
+    assert!(states[&native_cooldown_key("a","m",false)].quota);
+    let host=NativeHostBridge::default(); let mut report=native_cooldown_report(429,"turn_rate_limit_exceeded");
+    report.transient_rate_limit=true; report.retry_after=Some(Duration::from_millis(200));
+    host.record_failure_cooldown(&report);
+    assert!(!host.cooldowns.lock().unwrap()[&native_cooldown_key("pool-a","fixture-model",false)].quota);
 }

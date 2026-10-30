@@ -30,8 +30,8 @@ fn native_capability_support(
     {
         return Some(Unsupported);
     }
-    if native_wire_api(account).ok() == Some(native_contract::WireApi::Chat)
-        && (hosted || capability == "compact")
+    if ((native_wire_api(account).ok() == Some(native_contract::WireApi::Chat)) && (hosted || capability == "compact"))
+        || (native_wire_api(account).ok() == Some(native_contract::WireApi::Anthropic) && hosted && capability != "web_search")
     {
         return Some(Unsupported);
     }

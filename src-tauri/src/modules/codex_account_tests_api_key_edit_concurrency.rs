@@ -121,6 +121,7 @@ fn api_key_edit_parallel_credentials_preserve_all_rotated_accounts() {
                         None,
                         None,
                         None,
+                        None,
                     )
                     .unwrap()
                 })
@@ -229,6 +230,7 @@ fn api_key_edit_shared_destination_cannot_overwrite_another_account() {
                         false,
                         false,
                         HashMap::new(),
+                        None,
                         None,
                         None,
                         None,

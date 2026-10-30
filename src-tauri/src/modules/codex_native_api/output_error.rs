@@ -111,11 +111,7 @@ pub(super) fn is_codex_client(headers: &HeaderMap) -> bool {
         .get("user-agent")
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
-    if ua.starts_with("Codex Desktop/")
-        || ua.starts_with("codex-tui/")
-        || ua == "codex_cli_rs"
-        || ua.starts_with("codex_cli_rs/")
-    {
+    if super::multi_agent_compat::is_codex_client(ua) {
         return true;
     }
     let originator = headers
@@ -132,7 +128,9 @@ pub(super) fn is_codex_client(headers: &HeaderMap) -> bool {
 pub(super) fn responses_event(error: &ServiceError, codex: bool, sequence: u64) -> Value {
     let detail = details(error, true);
     let mut event = if codex {
-        json!({"type":"response.failed", "sequence_number":sequence, "response":{"status":"failed", "error":detail}})
+        json!({"type":"response.failed", "sequence_number":sequence, "response":{
+            "id":format!("resp_{}",uuid::Uuid::now_v7()), "object":"response",
+            "created_at":chrono::Utc::now().timestamp(), "status":"failed", "output":[], "error":detail}})
     } else {
         json!({"type":"error", "sequence_number":sequence, "error":detail})
     };
@@ -316,6 +314,7 @@ mod tests {
             "codex-tui/1",
             "codex_cli_rs",
             "codex_cli_rs/1",
+            "codex_exec/1",
         ] {
             let headers =
                 HeaderMap::from_iter([("user-agent".parse().unwrap(), ua.parse().unwrap())]);

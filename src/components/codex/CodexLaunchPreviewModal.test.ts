@@ -62,7 +62,9 @@ function harness(routing = false, overlay = "global-progress-overlay") {
     contextReloadRequest: { current: 0 }, contextReloadPending: { current: false },
     loading: false, contextConfigSnapshot: null,
     busy: false, checkingConfig: false, configReady: true, configBusy: false, contextConfigSaving: false,
-    loadedConfig: {}, loadedInstanceKey: null, configLoadInputs: { current: { selectedInstance: store.instances[0] } },
+    loadedConfig: {}, loadedInstanceKey: null, instanceConfigChanged: false, configLoadError: null, accounts: [],
+    normalizeCodexModelRoutingRoutes: (routes: any[]) => routes,
+    configLoadInputs: { current: { selectedInstance: store.instances[0] } },
     catalogEnabled: false, modelsError: null, models: [], defaultModelId: null,
     routingEnabled: false, routingEnabledForSave: false, routingDirty: routing,
     nextModelRouting: { enabled: false, routes: [] }, mixedRoutingBindAccountId: undefined,
@@ -86,7 +88,7 @@ function harness(routing = false, overlay = "global-progress-overlay") {
   };
   for (const name of ["setCheckingConfig", "setNotice", "setError", "setSaving", "setExecuting",
     "setChangingInstance", "setContextConfigError", "setContextConfigSaving", "setConfigLoadError",
-    "setLoadedInstanceKey", "setRoutingRoutes", "applyLoadedConfig", "setContextConfigSnapshot", "setContextConfigOpen",
+    "setLoadedInstanceKey", "setRoutingRoutes", "setModels", "applyLoadedConfig", "setContextConfigSnapshot", "setContextConfigOpen",
     "setContextConfigReloading", "setLoadedTarget", "setRoutingEnabled", "setLoading"]) {
     c[name] = () => { if (closed) lateUpdates.push(name); else events.push(name); };
   }
@@ -409,4 +411,86 @@ test('canceling per-model edits restores the mixed-routing selection as well as 
   assert.equal(await pending, true);
   assert.deepEqual(savedPayload.modelRouting, initialRouting);
   assert.equal(savedPayload.experimentalModelCatalogModels[0].context_window, 200000);
+});
+
+
+for (const mode of ['account', 'instance', 'apiService']) {
+  for (const conflict of ['quick-config', 'instance', 'previous-save']) {
+    test(`${mode} starts with current ${conflict} configuration without overwriting it`, async () => {
+      const h = harness();
+      const latest = { experimental_model_catalog_models: [], detected_model_context_window: 800000 };
+      let applied: unknown;
+      let error: unknown = null;
+      let key: unknown;
+      Object.assign(h.c, {
+        mode,
+        // Even an invalid stale draft must not prevent use of the current config.
+        catalogEnabled: true, modelsError: 'stale model error', models: [{}],
+        contextOverrideEnabled: true, contextWindowInput: 'invalid',
+        instanceConfigChanged: conflict === 'instance',
+        loadedInstanceKey: conflict === 'instance' ? 'outdated' : null,
+        configLoadError: conflict === 'previous-save' ? 'CODEX_LAUNCH_PREVIEW_CONFIG_CHANGED' : null,
+        codexLaunchPreviewQuickConfigKey: conflict === 'quick-config' ? JSON.stringify : () => 'same',
+        applyLoadedConfig: (value: unknown) => { applied = value; },
+        setConfigLoadError: (value: unknown) => { error = value; },
+        setLoadedInstanceKey: (value: unknown) => { key = value; },
+      });
+      const pending = h.c.handlers.handleExecute(mode !== 'instance');
+      assert.equal(h.events.includes('launch'), false);
+      h.read.resolve(latest); await pending;
+      assert.equal(h.events.includes('launch'), true);
+      assert.equal(h.events.some((event) => event.endsWith('-write')), false);
+      assert.equal(applied, latest);
+      assert.equal(key, 'synthetic');
+      assert.equal(error, null);
+      assert.deepEqual(h.cached, [latest]);
+      assert.equal(h.c.configWritePending.current, false);
+    });
+  }
+}
+
+test('a changed instance can restart without unsaved edits', async () => {
+  const h = harness();
+  Object.assign(h.c, { dirty: false, instanceConfigChanged: true, loadedInstanceKey: 'outdated' });
+  const pending = h.c.handlers.handleExecute(false);
+  h.read.resolve({}); await pending;
+  assert.equal(h.events.includes('launch'), true);
+  assert.equal(h.events.some((event) => event.endsWith('-write')), false);
+});
+
+test('explicit Save still preserves external changes and a subsequent start uses current config', async () => {
+  const h = harness();
+  let error: unknown = null;
+  h.c.codexLaunchPreviewQuickConfigKey = JSON.stringify;
+  h.c.setConfigLoadError = (value: unknown) => { error = h.c.configLoadError = value; };
+  const pending = h.c.handlers.persistDraft();
+  h.read.resolve({ changed: true });
+  assert.equal(await pending, false);
+  assert.equal(error, 'CODEX_LAUNCH_PREVIEW_CONFIG_CHANGED');
+  assert.equal(h.events.some((event) => event.endsWith('-write')), false);
+  await h.c.handlers.handleExecute(true);
+  assert.equal(h.events.includes('launch'), true);
+  assert.equal(error, null);
+  assert.equal(h.events.some((event) => event.endsWith('-write')), false);
+});
+
+test('closing during a current-config reload cancels the restart and preserves external config', async () => {
+  const h = harness();
+  h.c.instanceConfigChanged = true; h.c.loadedInstanceKey = 'outdated';
+  const pending = h.c.handlers.handleExecute(true);
+  h.c.handlers.requestClose();
+  h.read.resolve({}); await pending;
+  assert.equal(h.events.includes('launch'), false);
+  assert.equal(h.events.some((event) => event.endsWith('-write')), false);
+  assert.deepEqual(h.lateUpdates, []);
+});
+
+test('current-config read failure stays visible and does not dispatch a restart', async () => {
+  const h = harness();
+  h.c.instanceConfigChanged = true;
+  const pending = h.c.handlers.handleExecute(true);
+  h.read.reject(new Error('disk read failed')); await pending;
+  assert.equal(h.events.includes('launch'), false);
+  assert.equal(h.events.includes('setError'), true);
+  assert.equal(h.c.configWritePending.current, false);
 });

@@ -1660,13 +1660,20 @@
       "center": "Mitte",
       "top": "Oben",
       "bottom": "Unten",
-      "localHint": "Änderungen werden sofort angewendet und automatisch auf diesem Gerät gespeichert. Bilder werden nicht hochgeladen. Zurücksetzen entfernt das gespeicherte Bild.",
+      "localHint": "Änderungen gelten sofort. Bild und Einstellungen jedes Designs werden separat auf diesem Gerät gespeichert; Bilder werden nicht hochgeladen. Beim Zurücksetzen bleiben Ihre Designs erhalten.",
       "restore": "Zurücksetzen",
       "imageType": "Bitte ein JPG-, PNG- oder WebP-Bild wählen.",
       "imageSize": "Bitte ein Bild unter 10 MB wählen.",
       "imageRead": "Bild nicht lesbar. Bitte eine andere Datei versuchen.",
       "storage": "Hintergrund konnte nicht geladen oder gespeichert werden. Erneut versuchen; der bisherige Hintergrund bleibt erhalten.",
-      "saveFailed": "Der Hintergrund wird angezeigt, konnte aber nicht gespeichert werden. Erneut versuchen; der zuvor gespeicherte Hintergrund bleibt erhalten."
+      "saveFailed": "Änderungen sind sichtbar, konnten aber nicht gespeichert werden. Bitte erneut versuchen; zuvor gespeicherte Designs bleiben erhalten.",
+      "builtInSkins": "Integrierte Designs",
+      "mySkins": "Meine Designs",
+      "addSkin": "Hinzufügen",
+      "rename": "Umbenennen",
+      "skinName": "Designname",
+      "manageSkin": "Design verwalten: {{name}}",
+      "deleteSkinConfirm": "„{{name}}“ löschen? Beim Löschen des aktiven Designs wird der Standardhintergrund wiederhergestellt."
     }
   },
   "appPath": {
@@ -2398,7 +2405,7 @@
       "check": "Status prüfen",
       "notRunning": "Die Zielinstanz wurde noch nicht erkannt. Prüfen Sie später erneut oder schließen Sie diesen Dialog vor einem neuen Startversuch.",
       "checkFailed": "Der Betriebsstatus konnte nicht gelesen werden. Bitte später erneut prüfen.",
-      "maintenanceDeferred": "Die Sitzungsprüfung ist vorübergehend nicht verfügbar. Der Verlauf bleibt erhalten; dieser Wartungsschritt wurde übersprungen."
+      "maintenanceDeferred": "Ein Teil der Sitzungswartung ist noch offen. Der Verlauf bleibt erhalten; später in der Sitzungsverwaltung erneut versuchen."
     },
     "launchErrors": {
       "sessionRestoreFailed": "Die Sitzungsreparatur ist fehlgeschlagen, die Sicherung wurde nicht vollständig wiederhergestellt. Start angehalten; vor einem erneuten Versuch Protokolle und Sicherungen prüfen.",
@@ -2968,7 +2975,6 @@
         "quotaReserveInvalid": "Geben Sie eine ganze Zahl von 1 bis 100 ein.",
         "strictReserve": "Strenger Schutz",
         "strictReserveDesc": "Reserviertes Kontingent wird automatisch mit einem Sicherheitspuffer geschützt. Nahe der Grenze ist pro Konto eine Anfrage erlaubt; danach wird das aktuelle Kontingent bestätigt. Die Nutzung anderer Clients bleibt unberührt.",
-        "strictNativeOnly": "Strenger Schutz erfordert die Rust-Engine. Vor dem Wechsel zu Go bitte ausschalten.",
         "safetyMargin": "Sicherheitspuffer",
         "safetyMarginUnit": "Prozentpunkte",
         "safetyMarginInvalid": "Ganze Zahl von 1 bis 20 eingeben.",
@@ -3051,17 +3057,7 @@
       "gatewayModeNewLabel": "API-Dienst-Neu",
       "gatewayModeOldLabel": "API-Dienst-Alt",
       "gatewayModeSaveSuccess": "Gateway-Modus des API-Dienstes aktualisiert",
-      "gatewayEngineNative": "Rust nativ",
-      "gatewayEngineSidecar": "Go (bisher)",
-      "gatewayEngineHint": "Rust ist der Standard. Beim ersten Upgrade wird zu Rust gewechselt; spätere Einstellungen bleiben erhalten. Ein Wechsel startet den API-Dienst neu und kann laufende Anfragen unterbrechen; Codex-Fenster bleiben geöffnet.",
-      "gatewayEngineSwitching": "Engine wird gewechselt…",
-      "gatewayEngineSwitchFailed": "Engine-Wechsel fehlgeschlagen: {{error}}",
-      "gatewayEngineReadbackFailed": "Aktuelle Engine unbestätigt. Vor einem neuen Versuch aktualisieren: {{error}}",
-      "gatewayEngineReadbackTimeout": "Zeitüberschreitung beim Statusabruf",
       "gatewayEngineRequestsBusy": "Es laufen noch Anfragen. Nach Abschluss erneut versuchen.",
-      "gatewayEngineOperationBusy": "Ein anderer Dienstvorgang läuft. In Kürze erneut versuchen.",
-      "gatewayEngineSwitchRestored": "Wechsel fehlgeschlagen. Die vorherige Engine wurde wiederhergestellt.",
-      "gatewayEngineRestoreFailed": "Wechsel und Wiederherstellung fehlgeschlagen. Vor einem neuen Versuch den Dienststatus prüfen.",
       "gatewayEngineStopped": "Der API-Dienst wurde beendet. Vor einem neuen Versuch neu starten.",
       "gatewayGuideTitle": "Gateway hier wechseln",
       "gatewayGuideDesc": "Standard ist das neue Gateway. Bei Kompatibilitätsproblemen oder Client-Anfragefehlern kannst du hier auf das alte Gateway wechseln.",
@@ -3634,9 +3630,9 @@
         "providerLoadFailed": "Provider-Kandidaten konnten nicht geladen werden: {{error}}",
         "modeTitle": "Reparaturmodus",
         "modeQuick": "Schnellreparatur",
-        "modeQuickDesc": "Normalisiert Anbieter in der offiziellen State-DB und den Sitzungsindizes. Rollout-Dateien bleiben erhalten. Für normale Kontowechsel.",
+        "modeQuickDesc": "Sichtbarkeitsindizes und aktuelle Zuordnungen mit kurzem Zeitlimit reparieren. Zum Schreiben von Projektdaten die Instanz beenden.",
         "modeDeep": "Vollständige Reparatur",
-        "modeDeepDesc": "Repariert alle historischen Anbieter, Kataloge, Arbeitsbereiche und Unteragent-Indizes. Rollout-Dateien bleiben erhalten. Beenden Sie zuerst die Zielinstanz.",
+        "modeDeepDesc": "Umfasst Schnellreparatur, Projektwiederherstellung aus Sicherungen und Chatindexreparatur. Zielinstanz vorher beenden.",
         "scopeTitle": "Sitzungsumfang",
         "scopeAll": "Alle Sitzungen",
         "scopeAllDesc": "{{count}} Sitzung(en) in der aktuellen Liste reparieren.",
@@ -3668,7 +3664,7 @@
         "previewFailedWithError": "Vorschau der Sitzungsreparatur fehlgeschlagen: {{error}}",
         "confirmRepair": "Reparatur bestätigen",
         "title": "Verlauf reparieren",
-        "description": "Normalisiert Anbieter in SQLite-Indizes, Sitzungskatalog und Arbeitsbereichsstatus. Die ursprünglichen Rollout-Dateien bleiben bytegenau erhalten; nur Zeitstempel werden korrigiert. Zuvor wird eine lokale Sicherung erstellt.",
+        "description": "Die Schnellreparatur korrigiert Sichtbarkeitsindizes und aktuelle Projektzuordnungen. Die vollständige Reparatur nutzt auch ältere Sicherungen und repariert Chatindizes. Vor dem Schreiben werden lokale Sicherungen erstellt; Chatinhalte bleiben erhalten.",
         "stopInstanceHint": "Beenden Sie die ausgewählte Codex App-/ChatGPT-Instanz vor der vollständigen Reparatur vollständig. Eine Vorschau ist weiterhin möglich.",
         "encryptedContentWarning": "Es wurde Verlauf erkannt, der von einem anderen Anbieter oder Konto verschlüsselt wurde. Metadaten können migriert werden, doch Fortsetzen oder Komprimieren kann fehlschlagen; wechseln Sie zum ursprünglichen Anbieter/Konto zurück oder starten Sie eine neue Sitzung.",
         "modeHistory": "Bearbeiten/Abzweigen",
@@ -3681,7 +3677,13 @@
         "historyFailed": "Die Reparatur der Verlaufsindizes wurde nicht abgeschlossen: {{error}}",
         "historyChanged": "Chatdaten wurden während der Reparatur geändert. Diese Reparatur wurde nicht angewendet. Versuchen Sie es in Kürze erneut.",
         "historyScan": "Verlaufsindizes werden geprüft ({{current}}/{{total}})…",
-        "historyReset": "Fehlerhafte Indizes werden gesichert und zurückgesetzt…"
+        "historyReset": "Fehlerhafte Indizes werden gesichert und zurückgesetzt…",
+        "projectsChanged": "Projektdaten wurden geändert. Vorschau aktualisieren und erneut versuchen.",
+        "projectsFailed": "Wiederherstellung lokaler Projekte fehlgeschlagen: {{error}}",
+        "projectsPreview": "Vorschau: {{projects}} Projekte, {{assignments}} Zuordnungen; {{skipped}} Projekte und {{ambiguous}} uneindeutige Chats übersprungen.",
+        "projectsSuccess": "Wiederhergestellt: {{projects}} Projekte, {{assignments}} Zuordnungen; {{skipped}} Projekte und {{ambiguous}} uneindeutige Chats übersprungen.",
+        "projectsPending": "Eine Wiederherstellung wurde unterbrochen. Zielinstanz beenden und die vollständige Reparatur ausführen, um offene Schreibvorgänge wiederherzustellen.",
+        "projectsDeferred": "Einige Projektdaten wurden zurückgestellt. Zielinstanz beenden und die Schnellreparatur wiederholen oder die vollständige Reparatur nutzen."
       },
       "importModal": {
         "title": "Sitzungen importieren",
@@ -4105,7 +4107,9 @@
         "chatCompletions": "Chat-Completions-Protokoll",
         "deepseekResponsesHint": "Starte DeepSeek, um Gateway oder offizielle Direktverbindung zu wählen, und wähle dann Flash oder Pro. Das Gateway listet Modelle in Codex; bei Direktverbindung wird das Gateway übersprungen.",
         "deepseekChatHint": "DeepSeek Chat Completions nutzt für Alt-Pfade die lokale Gateway-Brücke. Wähle Responses, wenn du das offizielle Codex-Toolverhalten benötigst.",
-        "deepseekThirdPartyHint": "Diese Adresse ist kein offizieller DeepSeek-Endpunkt und wird als kompatibler Drittanbieter-Endpunkt behandelt; trage im Modellkatalog die echten Upstream-Modell-IDs ein und verwende keine offiziellen Modellnamen."
+        "deepseekThirdPartyHint": "Diese Adresse ist kein offizieller DeepSeek-Endpunkt und wird als kompatibler Drittanbieter-Endpunkt behandelt; trage im Modellkatalog die echten Upstream-Modell-IDs ein und verwende keine offiziellen Modellnamen.",
+        "anthropic": "Anthropic-Protokoll",
+        "gatewayRequired": "Dieses Protokoll benötigt das lokale Gateway. Wählen Sie hier das Startmodell."
       },
       "selectSavedProvider": "Gespeicherte Anbieter",
       "selectSavedApiKey": "Gespeicherte API-Keys",
@@ -4338,7 +4342,22 @@
       "importConfigPlaceholder": "Nutze „Konfiguration kopieren“ auf der Anbieterkarte und füge den Inhalt hier ein",
       "importConfigAction": "Konfiguration importieren",
       "importConfigFromClipboard": "Zwischenablage lesen",
-      "settingsRestartHint": "Anbietereinstellungen aktualisiert. Starten Sie laufende Codex-Instanzen oder API-Dienste mit diesem Anbieter neu, um sie anzuwenden."
+      "settingsRestartHint": "Anbietereinstellungen aktualisiert. Starten Sie laufende Codex-Instanzen oder API-Dienste mit diesem Anbieter neu, um sie anzuwenden.",
+      "anthropic": {
+        "auth": "Authentifizierung",
+        "hint": "Anthropic Messages-Gateway anbinden. Modelle abrufen oder manuell eingeben.",
+        "fetch": "Modelle abrufen",
+        "fetching": "Wird geladen…",
+        "fetchFailed": "Modelle konnten nicht abgerufen werden. Erneut versuchen oder Modell-IDs manuell eingeben.",
+        "import": "Konfig. importieren",
+        "importFailed": "Keine gültige Claude Code- oder Desktop-Gateway-Konfiguration gefunden."
+      },
+      "editor": {
+        "modelScope": "Modellbereich",
+        "providerDefault": "Anbieterstandard",
+        "sharedSettings": "Modelllisten und Fähigkeiten gelten für den gewählten Bereich. Protokoll, Anmeldung und Adresse gelten für den gesamten Anbieter.",
+        "saveScope": "Speichern aktualisiert den Anbieter und verknüpfte Konten. Ist das aktuelle Konto betroffen, werden auch die lokale Codex-Konfiguration und Zugangsdaten aktualisiert. Der Client startet nicht automatisch."
+      }
     },
     "quickSwitch": {
       "action": "Anbieter schnell wechseln",
@@ -5775,6 +5794,14 @@
       }
     },
     "requestDiagnostics": {
+      "requestSizeTitle": "Anfragegröße",
+      "requestSizeHint": "Größe des dekomprimierten Client-JSON; Felder in kompakten JSON-Bytes. Nur Größen werden erfasst.",
+      "requestBytes": "Anfrage",
+      "historyBytes": "Verlauf",
+      "toolsBytes": "Werkzeuge",
+      "instructionsBytes": "Anweisungen",
+      "overloadRetry": "Überlast-Wiederholungen",
+      "overloadRecovery": "Erholungszeit",
       "recordPayloads": "Anfragetexte speichern",
       "recordPayloadsHint": "Standardmäßig aus. Begrenzte Kopien von Client- und Upstream-Anfragen werden lokal gespeichert. Ausschalten stoppt neue Aufzeichnungen; gespeicherte Texte lassen sich separat löschen.",
       "privacyHint": "Authentifizierungsfelder werden maskiert, Geheimnisse im Gespräch können jedoch erhalten bleiben. Vor dem Kopieren oder Teilen prüfen.",
@@ -5956,6 +5983,21 @@
       "saveWithoutLaunch": "Speichern & weiter",
       "saveOnly": "Nur speichern",
       "validationBusy": "Der vorherige Pfad wird noch geprüft. Versuche es gleich erneut."
+    },
+    "openaiUsage": {
+      "monthCost": "Monatskosten",
+      "scope": "Kosten der Organisation; Anfragen und Tokens nur für Text-APIs. Auswertung in UTC.",
+      "loading": "OpenAI-Nutzung wird geladen…",
+      "pending": "OpenAI-Nutzung ausstehend",
+      "permissionRequired": "Diesem Schlüssel fehlt die Leseberechtigung für die Organisationsnutzung (api.usage.read).",
+      "permissionGuide": "Admin-Schlüssel verwenden: Admin keys → Restricted → Usage API Scope → Read. Liefert Kosten und Nutzung, kein Restguthaben.",
+      "openAdminKeys": "Nutzungsrechte",
+      "invalidKey": "Der Schlüssel ist ungültig oder abgelaufen. Aktuellen API-Schlüssel prüfen.",
+      "networkFailed": "Keine Verbindung zur OpenAI-Nutzung. Später aktualisieren.",
+      "queryFailed": "Abfrage der OpenAI-Nutzung fehlgeschlagen. Später erneut versuchen."
+    },
+    "officialApi": {
+      "hint": "Konto mit offiziellem OpenAI-API-Schlüssel, anhand der tatsächlichen Zieladresse erkannt."
     }
   },
   "githubCopilot": {
@@ -8028,7 +8070,7 @@
     "model": "Prüfmodell",
     "selectModel": "Modell wählen",
     "verifyHint": "Das ausgewählte Modell dient nur zum Verbindungstest und schränkt andere verfügbare Modelle nicht ein. Die Prüfung sendet eine kurze Anfrage und verbraucht einen kleinen Teil deines Abo-Kontingents.",
-    "serviceHint": "Das Hinzufügen zum aktuellen Pool startet den API-Dienst nicht. Diese Version benötigt die native Engine.",
+    "serviceHint": "Das Hinzufügen eines Kontos zum aktuellen Pool startet den API-Dienst nicht.",
     "verify": "Nur prüfen",
     "verifyAndJoin": "Prüfen & hinzufügen",
     "remove": "Aus Dienst entfernen",
@@ -8088,8 +8130,6 @@
       "verify": "Die Modellanfrage wurde nicht abgeschlossen. Bitte erneut prüfen.",
       "usage": "Die Tarif- oder App-Nutzung ist begrenzt. Prüfe die Nutzung in den ChatGPT-Einstellungen.",
       "usageUnavailable": "Der offizielle Dienst kann die Nutzung derzeit nicht bestätigen. Versuche es später erneut; das bedeutet nicht, dass dein Kontingent aufgebraucht ist.",
-      "native": "Tarifzugriff erfordert derzeit die native Engine. Bitte zuerst im API-Dienst wechseln.",
-      "nativeSwitch": "Entferne die Tarifkonten aus dem API-Dienst, bevor du zu einer anderen Engine wechselst.",
       "browser": "Browser kann nicht geöffnet werden. Kopiere den Anmeldelink und öffne ihn manuell.",
       "configuration": "Die Autorisierungsregistrierung stimmt nicht überein. Melde dich erneut an oder verbinde den Tarif neu.",
       "notVerified": "Prüfe diesen Tarif, bevor du ihn zum API-Dienst hinzufügst.",
@@ -8269,7 +8309,6 @@
     "title": "Funktionsausweichroute",
     "hint": "Unterstützt ein Konto eine benötigte Funktion nicht, werden Ersatzkonten in dieser Reihenfolge mit den bestehenden Modellzuordnungen versucht.",
     "consent": "Beim Wechsel wird dieses Gespräch an das Ersatzkonto gesendet. Dessen Kontingent wird verbraucht oder es fallen entsprechende Kosten an.",
-    "nativeOnly": "Diese Engine führt keine Funktionsausweichroute aus. Zum Aktivieren zur nativen Engine wechseln; gespeicherte Einstellungen können deaktiviert werden.",
     "backups": "Ersatzkonten",
     "addBackup": "Ersatz hinzufügen",
     "backupEmpty": "Vor dem Aktivieren Ersatzkonten aus dem aktuellen API-Dienst-Pool wählen.",

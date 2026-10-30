@@ -1,6 +1,8 @@
+import { resolveAccountUsageBaseUrl, isOpenAIOfficialUsageAccount } from '../utils/openaiOfficialUsage';
 import type { CodexAccount } from '../types/codex';
 import {
   isCodexApiKeyUsageQueryEligible,
+  isApiKeyFunUsageAccount,
   isDeepSeekAccount,
 } from '../utils/codexDeepSeekAccess';
 import {
@@ -91,7 +93,7 @@ export async function refreshCodexApiKeyUsageForAccounts(
   const initialCache = readCodexApiKeyUsageCache();
   const eligibleAccounts = accounts.filter((account) => {
     if (!isUsageEligibleApiKey(account)) return false;
-    if (options?.force || isDeepSeekAccount(account)) return true;
+    if (options?.force || isDeepSeekAccount(account) || isOpenAIOfficialUsageAccount(account) || isApiKeyFunUsageAccount(account)) return true;
     return !initialCache[account.id]?.unavailable;
   });
   if (eligibleAccounts.length === 0) return;
@@ -103,7 +105,7 @@ export async function refreshCodexApiKeyUsageForAccounts(
     const provider =
       findCodexModelProviderById(providers, account.api_provider_id) ??
       findCodexModelProviderByBaseUrl(providers, account.api_base_url?.trim() ?? '');
-    const baseUrl = provider?.baseUrl.trim() || account.api_base_url?.trim() || '';
+    const baseUrl = resolveAccountUsageBaseUrl(account, provider?.baseUrl);
     if (!baseUrl) continue;
     const apiKey = account.openai_api_key!.trim();
 

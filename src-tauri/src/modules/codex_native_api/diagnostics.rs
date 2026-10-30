@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{contract::ServiceError, server::AppState};
+pub use super::request_metrics::{OverloadRetry, RequestSize};
 
 #[path = "diagnostic_error.rs"]
 mod error;
@@ -59,12 +60,20 @@ pub struct DiagnosticContext {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticAttempt {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_size: Option<RequestSize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_request_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overload_retry: Option<OverloadRetry>,
     pub authorization_route: Option<String>,
     pub sequence: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport_pool_retired: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_http1_fallback: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream_http_version: Option<String>,
     #[serde(default)]

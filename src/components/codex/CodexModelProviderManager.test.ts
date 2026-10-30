@@ -1,3 +1,4 @@
+import { resolveAccountUsageBaseUrl } from "../../utils/openaiOfficialUsage";
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -33,13 +34,13 @@ test('editing only a provider key retains each linked account mode and its model
   const context: Record<string, any> = {
     useCallback: (fn: unknown) => fn, saving: false, providers: [provider], accounts: [account],
     editingApiKey: { providerId: 'provider', apiKeyId: 'key', apiKey: 'new-key', originalApiKey: 'old-key' },
-    isCodexApiKeyAccount, resolveCodexApiProviderPresetId, CODEX_API_PROVIDER_CUSTOM_ID,
+    isCodexApiKeyAccount, resolveCodexApiProviderPresetId, CODEX_API_PROVIDER_CUSTOM_ID, resolveAccountUsageBaseUrl,
     normalizeCodexModelProviderBaseUrl: (url: string) => url.replace(/\/+$/, '').toLowerCase(),
     resolveProviderWireApi: () => 'responses',
     updateApiKeyOnCodexModelProvider: async () => provider,
     updateCodexApiKeyCredentials: async (...args: unknown[]) => { updates.push(args); },
     reloadProviders: async () => {}, emitAccountsChanged: async () => {},
-    setSaving() {}, setNotice() {}, setEditingApiKey() {}, t: (key: string) => key,
+    setSaving() {}, setNotice() {}, setFormError() {}, setEditingApiKey() {}, t: (key: string) => key,
   };
   vm.runInNewContext(ts.transpileModule(handler, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
   await context.save();
@@ -56,4 +57,7 @@ test('editing only a provider key retains each linked account mode and its model
   account.api_provider_mode = 'openai_builtin';
   await context.save();
   assert.equal(updates[1][3], 'openai_builtin');
+  account.api_base_url = undefined;
+  await context.save();
+  assert.equal(updates[2][3], 'openai_builtin', 'implicit official URL still links to the provider key');
 });

@@ -1,5 +1,5 @@
 import type { CodexExperimentalModelDefinition } from '../types/codex';
-import modelTemplates from '../../sidecars/cockpit-cliproxy/third_party/CLIProxyAPI/internal/registry/models/codex_client_models.json';
+import modelTemplates from '../../resources/codex/codex_client_models.json';
 
 /** 已知模型使用原始模板窗口；Reserve 沿用 Luna，无模板时保留调用方的原有回落。 */
 export function getCodexModelContextTemplate(modelId: string) {

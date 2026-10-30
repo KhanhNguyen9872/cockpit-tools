@@ -5,9 +5,7 @@ use futures_util::StreamExt;
 use tokio_tungstenite::{
     tungstenite::{
         handshake::{client::generate_key, derive_accept_key},
-        protocol::{Role, WebSocketConfig},
     },
-    WebSocketStream,
 };
 
 use super::{
@@ -26,7 +24,7 @@ pub(super) async fn connect_websocket(
     max_message_bytes: usize,
     timeout: std::time::Duration,
     stop: StopSignal,
-) -> Result<(WebSocketStream<reqwest::Upgraded>, HeaderMap), ServiceError> {
+) -> Result<(super::websocket_io::UpstreamSocket, HeaderMap), ServiceError> {
     connect_websocket_tracked(
         route,
         url,
@@ -49,7 +47,7 @@ pub(super) async fn connect_websocket_tracked(
     timeout: std::time::Duration,
     mut stop: StopSignal,
     on_dispatch: impl FnOnce(&HeaderMap),
-) -> Result<(WebSocketStream<reqwest::Upgraded>, HeaderMap), ServiceError> {
+) -> Result<(super::websocket_io::UpstreamSocket, HeaderMap), ServiceError> {
     if route.chatgpt_plan {
         return Err(ServiceError::new(
             400,
@@ -65,6 +63,7 @@ pub(super) async fn connect_websocket_tracked(
         .unwrap_or_else(|| url.to_owned());
     // Proxy credentials belong to the selected HTTP client, never the origin.
     headers.remove(header::PROXY_AUTHORIZATION);
+    headers.insert(header::SEC_WEBSOCKET_EXTENSIONS, axum::http::HeaderValue::from_static(super::websocket_io::OFFER));
     let deadline = tokio::time::Instant::now() + timeout;
     let key = generate_key();
     let expected = derive_accept_key(key.as_bytes());
@@ -105,6 +104,7 @@ pub(super) async fn connect_websocket_tracked(
             ?,
     };
     if response.status() != axum::http::StatusCode::SWITCHING_PROTOCOLS {
+        let response = super::http_compression::decode_response(response)?;
         let status = response.status().as_u16();
         let header_challenge = response
             .headers()
@@ -195,11 +195,8 @@ pub(super) async fn connect_websocket_tracked(
             .map_err(|_| ServiceError::new(504,"websocket_connect_timeout","Upstream WebSocket upgrade timed out"))?
             .map_err(|error| super::diagnostics::transport_failure(502,"websocket_connect_failed","Unable to upgrade the upstream connection", &error))?,
     };
-    let config = WebSocketConfig::default()
-        .max_message_size(Some(max_message_bytes))
-        .max_frame_size(Some(max_message_bytes));
-    Ok((
-        WebSocketStream::from_raw_socket(upgraded, Role::Client, Some(config)).await,
-        headers,
-    ))
+    let extensions = super::websocket_io::negotiated(&headers)?;
+    let socket = yawc::WebSocket::from_stream_with_extensions(upgraded, yawc::Role::Client, extensions.as_deref(), super::websocket_io::options(max_message_bytes))
+        .map_err(|error| super::diagnostics::transport_failure(502, "invalid_websocket_handshake", "Invalid WebSocket compression negotiation", &error))?;
+    Ok((super::websocket_io::Socket::new(socket), headers))
 }

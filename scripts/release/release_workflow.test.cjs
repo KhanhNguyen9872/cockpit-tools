@@ -68,6 +68,29 @@ test("macOS release builds use the wrapper that cleans temporary DMG mounts", ()
   assert.match(jobBody("build-macos-universal", "build-linux"), /node scripts\/tauri.cjs bundle --ci --target universal-apple-darwin/);
 });
 
+test("all macOS release assets pass signing and notarization before staging and upload", () => {
+  for (const [job, next] of [
+    ["build-macos-aarch64", "build-macos-x86_64"],
+    ["build-macos-x86_64", "build-macos-universal"],
+    ["build-macos-universal", "build-linux"],
+  ]) {
+    const body = jobBody(job, next);
+    const prepare = body.indexOf('macos-signing.cjs prepare');
+    const build = body.search(/node scripts\/tauri.cjs (build|bundle)/);
+    const rebuild = body.indexOf('inject-dmg-readme.cjs');
+    const verify = body.indexOf('macos-signing.cjs finalize');
+    const stage = body.indexOf('stage_release_assets.cjs');
+    const upload = body.indexOf('upload_release_assets.cjs');
+    assert.ok(prepare >= 0 && prepare < build && build < rebuild && rebuild < verify && verify < stage && stage < upload, job);
+    assert.match(body, /if: always\(\)\s+run: node scripts\/release\/macos-signing.cjs cleanup/);
+    for (const name of ['APPLE_CERTIFICATE', 'APPLE_CERTIFICATE_PASSWORD', 'APPLE_SIGNING_IDENTITY', 'APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID']) {
+      assert.ok(body.includes(`secrets.${name}`), `${job}: missing ${name}`);
+    }
+  }
+  assert.doesNotMatch(jobBody('build-windows', 'build-macos-aarch64'), /APPLE_PASSWORD/);
+  assert.doesNotMatch(jobBody('build-linux', 'finalize-legacy-latest'), /APPLE_PASSWORD/);
+});
+
 test("Universal consumes this run's verified thin inputs and does not recompile", () => {
   const universal = jobBody("build-macos-universal", "build-linux");
   assert.match(universal, /needs:\s+- prepare-release\s+- build-macos-aarch64\s+- build-macos-x86_64/);

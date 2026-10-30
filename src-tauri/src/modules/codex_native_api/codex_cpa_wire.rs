@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 mod ids;
 pub(super) fn sanitize_input_ids(body: &mut Value) {
     ids::sanitize_input_ids(body);
+    ids::shorten_call_ids(body);
 }
 
 const GPT_MAX_BYTES: usize = 32 * 1024 * 1024;

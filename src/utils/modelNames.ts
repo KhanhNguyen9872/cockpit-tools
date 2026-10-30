@@ -8,6 +8,7 @@
 /** 模型 ID 到显示名称的映射（支持两种格式） */
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
   'gemini-4-argon': 'Gemini 4 Argon',
+  'gemini-4-argon-low': 'Gemini 4 Argon (Low)',
   'gemini-4-argon-medium': 'Gemini 4 Argon (Medium)',
   'gemini-4-argon-high': 'Gemini 4 Argon (High)',
   'gemini-3.8-flash': 'Gemini 3.8 Flash',
@@ -15,12 +16,25 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   'gemini-3.8-flash-medium': 'Gemini 3.8 Flash (Medium)',
   'gemini-3.8-flash-high': 'Gemini 3.8 Flash (High)',
   'claude-opus-5-5': 'Claude Opus 5.5',
+  'claude-opus-5-5-low': 'Claude Opus 5.5 (Low)',
   'claude-opus-5-5-medium': 'Claude Opus 5.5 (Medium)',
   'claude-opus-5-5-high': 'Claude Opus 5.5 (High)',
   'claude-sonnet-5-5': 'Claude Sonnet 5.5',
+  'claude-sonnet-5-5-low': 'Claude Sonnet 5.5 (Low)',
   'claude-sonnet-5-5-medium': 'Claude Sonnet 5.5 (Medium)',
   'claude-sonnet-5-5-high': 'Claude Sonnet 5.5 (High)',
   'MODEL_PLACEHOLDER_M318': 'Gemini 3.8 Flash (High)',
+  'MODEL_PLACEHOLDER_M319': 'Gemini 3.8 Flash (Medium)',
+  'MODEL_PLACEHOLDER_M320': 'Gemini 3.8 Flash (Low)',
+  'MODEL_PLACEHOLDER_M417': 'Gemini 4 Argon (High)',
+  'MODEL_PLACEHOLDER_M418': 'Gemini 4 Argon (Medium)',
+  'MODEL_PLACEHOLDER_M419': 'Gemini 4 Argon (Low)',
+  'MODEL_PLACEHOLDER_M402': 'Claude Opus 5.5 (High)',
+  'MODEL_PLACEHOLDER_M401': 'Claude Opus 5.5 (Medium)',
+  'MODEL_PLACEHOLDER_M400': 'Claude Opus 5.5 (Low)',
+  'MODEL_PLACEHOLDER_M405': 'Claude Sonnet 5.5 (High)',
+  'MODEL_PLACEHOLDER_M404': 'Claude Sonnet 5.5 (Medium)',
+  'MODEL_PLACEHOLDER_M403': 'Claude Sonnet 5.5 (Low)',
   // 桌面端格式（小写）
   'claude-opus-4-5-thinking': 'Claude Opus 4.5 (Thinking)',
   'claude-opus-4-6-thinking': 'Claude Opus 4.6 (Thinking)',
@@ -190,15 +204,17 @@ function matchesDefaultGroupPrefixRule(
 /** 获取默认分组配置（支持两种格式） */
 export function getDefaultGroups(): DefaultGroup[] {
   return [
-    { id: 'g4_argon', name: 'Gemini 4 Argon', desktopModels: ['gemini-4-argon', 'gemini-4-argon-medium', 'gemini-4-argon-high'], pluginModels: [] },
+    { id: 'g4_argon', name: 'Gemini 4 Argon', desktopModels: ['gemini-4-argon', 'gemini-4-argon-medium', 'gemini-4-argon-high', 'gemini-4-argon-low'], pluginModels: ['MODEL_PLACEHOLDER_M417', 'MODEL_PLACEHOLDER_M418', 'MODEL_PLACEHOLDER_M419'] },
     {
       id: 'claude_45',
       name: 'Claude 4.5',
       desktopModels: [
         'claude-opus-5-5',
+        'claude-opus-5-5-low',
         'claude-opus-5-5-medium',
         'claude-opus-5-5-high',
         'claude-sonnet-5-5',
+        'claude-sonnet-5-5-low',
         'claude-sonnet-5-5-medium',
         'claude-sonnet-5-5-high',
 
@@ -209,6 +225,12 @@ export function getDefaultGroups(): DefaultGroup[] {
         'gpt-oss-120b-medium',
       ],
       pluginModels: [
+        'MODEL_PLACEHOLDER_M400',
+        'MODEL_PLACEHOLDER_M401',
+        'MODEL_PLACEHOLDER_M402',
+        'MODEL_PLACEHOLDER_M403',
+        'MODEL_PLACEHOLDER_M404',
+        'MODEL_PLACEHOLDER_M405',
         'MODEL_PLACEHOLDER_M12',
         'MODEL_PLACEHOLDER_M26',
         'MODEL_CLAUDE_4_5_SONNET',
@@ -241,6 +263,8 @@ export function getDefaultGroups(): DefaultGroup[] {
       ],
       pluginModels: [
         'MODEL_PLACEHOLDER_M318',
+        'MODEL_PLACEHOLDER_M319',
+        'MODEL_PLACEHOLDER_M320',
 
         'MODEL_PLACEHOLDER_M18',
       ],

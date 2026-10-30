@@ -6,10 +6,12 @@ struct NativeHttpClientEntry {
     client: Client,
     identity: String,
     used: u64,
+    http1_fallback: bool,
 }
 
 struct NativeHttpClientCache {
     entries: HashMap<String, NativeHttpClientEntry>,
+    recovery: HashMap<String, NativeTransportRecovery>,
     clock: u64,
     capacity: usize,
 }
@@ -18,21 +20,65 @@ impl Default for NativeHttpClientCache {
     fn default() -> Self {
         Self {
             entries: HashMap::new(),
+            recovery: HashMap::new(),
             clock: 0,
             capacity: NATIVE_HTTP_CLIENT_CACHE_LIMIT,
         }
     }
 }
 
+struct NativeTransportRecovery {
+    first_failure: Instant,
+    fallback_until: Option<Instant>,
+}
+
 impl NativeHttpClientCache {
+    fn http1_fallback(&mut self, key: &str, now: Instant) -> bool {
+        self.recovery.retain(|_, entry| entry.fallback_until
+            .map_or(now.saturating_duration_since(entry.first_failure) < Duration::from_secs(60), |until| now < until));
+        self.recovery.get(key).is_some_and(|entry| entry.fallback_until.is_some())
+    }
+
+    fn invalidate_http2(&mut self, identity: &str, now: Instant) -> bool {
+        if !self.invalidate(identity) { return false; }
+        let (key, _) = identity.rsplit_once(':').unwrap();
+        self.http1_fallback(key, now);
+        if let Some(entry) = self.recovery.get_mut(key) {
+            // Two distinct failed pool generations, not concurrent failures
+            // of one multiplexed connection. Never extend an active cooldown.
+            if entry.fallback_until.is_none() {
+                entry.fallback_until = Some(now + Duration::from_secs(300));
+                crate::modules::logger::log_info("[Codex API] Repeated HTTP/2 TLS failure: scoped HTTP/1.1 fallback for 300s");
+            }
+        } else {
+            if self.recovery.len() >= self.capacity {
+                if let Some(oldest) = self.recovery.iter().min_by_key(|(_, e)| e.first_failure).map(|(k, _)| k.clone()) {
+                    self.recovery.remove(&oldest);
+                }
+            }
+            self.recovery.insert(key.to_owned(), NativeTransportRecovery { first_failure: now, fallback_until: None });
+        }
+        true
+    }
+
     fn get(&mut self, key: &str) -> Option<(Client, String)> {
+        let fallback = self.http1_fallback(key, Instant::now());
+        if self.entries.get(key).is_some_and(|entry| entry.http1_fallback != fallback) {
+            self.entries.remove(key);
+        }
         let entry = self.entries.get_mut(key)?;
         self.clock = self.clock.saturating_add(1);
         entry.used = self.clock;
         Some((entry.client.clone(), entry.identity.clone()))
     }
 
+    #[cfg(test)]
     fn insert(&mut self, key: String, account_id: String, client: Client) -> String {
+        let fallback = self.http1_fallback(&key, Instant::now());
+        self.insert_with_policy(key, account_id, client, fallback)
+    }
+
+    fn insert_with_policy(&mut self, key: String, account_id: String, client: Client, http1_fallback: bool) -> String {
         self.clock = self.clock.saturating_add(1);
         let identity = format!("{key}:{}", uuid::Uuid::new_v4());
         self.entries.insert(
@@ -42,6 +88,7 @@ impl NativeHttpClientCache {
                 client,
                 identity: identity.clone(),
                 used: self.clock,
+                http1_fallback,
             },
         );
         while self.entries.len() > self.capacity {
@@ -152,10 +199,10 @@ fn native_transport_fingerprint(
         ])
     });
     let material = json!({
-        "version":4,"account":account.id,"owner":context.owner,
+        "version":5,"account":account.id,"owner":context.owner,
         "profile":[context.profile.version,context.profile.scope,context.profile.installation_id,context.profile.revision],
         "base":native_transport_endpoint(context.base_url),
-        "protocol":match context.wire_api { native_contract::WireApi::Responses=>"responses",native_contract::WireApi::Chat=>"chat" },
+        "protocol":match context.wire_api { native_contract::WireApi::Responses=>"responses",native_contract::WireApi::Chat=>"chat",native_contract::WireApi::Anthropic=>"anthropic" },
         "codex_responses_alpn":native_codex_responses_alpn(account, context),
         "http1_only":context.http1_only,
         "compact":endpoint(context.compact_endpoint),"websocket":endpoint(context.websocket_endpoint),
@@ -315,57 +362,73 @@ async fn native_http_client(
         proxy.as_deref(),
         &no_proxy,
     );
-    if let Some((client, identity)) = host
-        .clients
-        .lock()
-        .ok()
-        .and_then(|mut cache| cache.get(&cache_key))
-    {
-        return Ok((client, proxy, proxy_route, identity));
-    }
-    let mut builder = native_http_client_builder(
-        native_codex_responses_alpn(account, context),
-        context.http1_only,
-    )
-    .redirect(reqwest::redirect::Policy::none())
-    .connect_timeout(Duration::from_millis(
-        collection
-            .timeouts
-            .legacy_upstream_connect_timeout_ms
-            .clamp(1000, 120_000),
-    ))
-    .pool_max_idle_per_host(8)
-    .no_proxy();
-    // The current reqwest matcher checks '*' only for domain names, not IPs.
-    // An inherited wildcard excludes every target, so keep the proxy list empty.
-    let bypass_all = no_proxy.split(',').any(|entry| entry.trim() == "*");
-    if let Some(proxy) = proxy.as_deref().filter(|_| !bypass_all) {
-        let normalized = crate::modules::codex_account_proxy::normalize_direct_proxy(proxy)
-            .map_err(|_| native_error(503, "proxy_unavailable", "Upstream proxy is invalid"))?;
-        builder = builder.proxy(
-            Proxy::all(normalized)
-                .map_err(|_| native_error(503, "proxy_unavailable", "Upstream proxy is invalid"))?
-                .no_proxy(reqwest::NoProxy::from_string(&no_proxy)),
-        );
-    }
-    let client = builder.build().map_err(|_| {
-        native_error(
-            503,
-            "transport_unavailable",
-            "Unable to initialize upstream transport",
-        )
-    })?;
-    if let Ok(mut clients) = host.clients.lock() {
-        // Another preparation may have built the same client while this one was
-        // outside the lock. Reuse its entry without replacing its live pool.
-        if let Some((client, identity)) = clients.get(&cache_key) {
+    loop {
+        let (cached, fallback) = host.clients.lock().map(|mut cache| {
+            let fallback = cache.http1_fallback(&cache_key, Instant::now());
+            (cache.get(&cache_key), fallback)
+        }).unwrap_or((None, false));
+        let mut proxy_route = proxy_route.clone();
+        if fallback {
+            if let Some(route) = proxy_route.as_mut().and_then(Value::as_object_mut) {
+                route.insert("transportHttp1Fallback".into(), Value::Bool(true));
+            }
+        }
+        if let Some((client, identity)) = cached {
             return Ok((client, proxy, proxy_route, identity));
         }
-        let identity = clients.insert(cache_key, account.id.clone(), client.clone());
-        return Ok((client, proxy, proxy_route, identity));
+        let mut builder = native_http_client_builder(
+            native_codex_responses_alpn(account, context),
+            context.http1_only || fallback,
+        )
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_millis(
+            collection
+                .timeouts
+                .legacy_upstream_connect_timeout_ms
+                .clamp(1000, 120_000),
+        ))
+        // Decode at the protocol boundary so repeated Content-Encoding headers and
+        // encoding chains are handled together, before SSE/bootstrap inspection.
+        .no_gzip().no_brotli().no_deflate().no_zstd()
+        .default_headers(axum::http::HeaderMap::from_iter([(
+            axum::http::header::ACCEPT_ENCODING,
+            axum::http::HeaderValue::from_static("gzip, deflate, br, zstd"),
+        )]))
+        .pool_max_idle_per_host(8)
+        .no_proxy();
+        // The current reqwest matcher checks '*' only for domain names, not IPs.
+        // An inherited wildcard excludes every target, so keep the proxy list empty.
+        let bypass_all = no_proxy.split(',').any(|entry| entry.trim() == "*");
+        if let Some(proxy) = proxy.as_deref().filter(|_| !bypass_all) {
+            let normalized = crate::modules::codex_account_proxy::normalize_direct_proxy(proxy)
+                .map_err(|_| native_error(503, "proxy_unavailable", "Upstream proxy is invalid"))?;
+            builder = builder.proxy(
+                Proxy::all(normalized)
+                    .map_err(|_| native_error(503, "proxy_unavailable", "Upstream proxy is invalid"))?
+                    .no_proxy(reqwest::NoProxy::from_string(&no_proxy)),
+            );
+        }
+        let client = builder.build().map_err(|_| {
+            native_error(
+                503,
+                "transport_unavailable",
+                "Unable to initialize upstream transport",
+            )
+        })?;
+        if let Ok(mut clients) = host.clients.lock() {
+            if clients.http1_fallback(&cache_key, Instant::now()) != fallback {
+                continue;
+            }
+            // Another preparation may have built the same client outside the lock.
+            if let Some((client, identity)) = clients.get(&cache_key) {
+                return Ok((client, proxy, proxy_route, identity));
+            }
+            let identity = clients.insert_with_policy(cache_key.clone(), account.id.clone(), client.clone(), fallback);
+            return Ok((client, proxy, proxy_route, identity));
+        }
+        // This uncached client has no shared pool to retire.
+        return Ok((client, proxy, proxy_route, cache_key));
     }
-    // This uncached client has no shared pool to retire.
-    Ok((client, proxy, proxy_route, cache_key))
 }
 
 fn native_codex_responses_alpn(

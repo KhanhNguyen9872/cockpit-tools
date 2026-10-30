@@ -5,7 +5,7 @@ type ClientSocket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 pub(super) async fn quota_gate_events(
-    socket: &mut WebSocket,
+    socket: &mut axum::extract::ws::WebSocket,
     metadata: bool,
     business: Option<&Value>,
     wait_interrupt: bool,

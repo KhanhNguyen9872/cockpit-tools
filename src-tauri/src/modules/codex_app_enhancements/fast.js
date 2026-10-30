@@ -153,6 +153,47 @@
     } catch { return false; }
   }
 
+  // 26.1027 loads index -> app-main -> app-initial; older builds import
+  // app-initial directly. Follow only these bootstrap modules, not the whole
+  // application graph (which contains thousands of unrelated chunks).
+  function* initialModuleDiscovery(entries) {
+    const roots = [...new Set(entries)];
+    if (!roots.length || roots.length > 4 || roots.some(url => !localAsset(url, true)))
+      return { ok: false, reason: 'unsupported-entry' };
+    const candidates = new Set(), mains = new Set();
+    let bytes = 0;
+    const inspect = (source, parent, followMain) => {
+      if (typeof source !== 'string' || (bytes += source.length) > LIMIT)
+        throw Error('source-limit');
+      for (const token of tokens(source)) {
+        if (token.kind !== 'literal' || !/^["'`]\.\/app-(?:initial|main)-[A-Za-z0-9_-]+\.js["'`]$/.test(token.text)) continue;
+        const url = new URL(token.text.slice(1, -1), parent).href;
+        if (localAsset(url)) candidates.add(url);
+        else if (followMain) mains.add(url);
+      }
+    };
+    for (const entry of roots) inspect(yield entry, entry, true);
+    if (mains.size > 4) return { ok: false, reason: 'ambiguous-bootstrap' };
+    for (const main of mains) inspect(yield main, main, false);
+    if (!candidates.size) return { ok: false, reason: 'initial-module-not-found' };
+    if (candidates.size !== 1) return { ok: false, reason: 'ambiguous-module' };
+    return { ok: true, url: [...candidates][0] };
+  }
+
+  async function resolveInitialModule(entries, read) {
+    const discovery = initialModuleDiscovery(entries);
+    let step = discovery.next();
+    while (!step.done) step = discovery.next(await read(step.value));
+    return step.value;
+  }
+
+  function resolveInitialModuleSync(entries, read) {
+    const discovery = initialModuleDiscovery(entries);
+    let step = discovery.next();
+    while (!step.done) step = discovery.next(read(step.value));
+    return step.value;
+  }
+
   function localCompanion(value, initialUrl, adapter = false) {
     try {
       const url = new URL(value), initial = new URL(initialUrl);
@@ -305,6 +346,20 @@
     return null;
   }
 
+  function yieldToRenderer() {
+    // A background Electron page clamps setTimeout; yielding once per chunk
+    // must not turn a local module rewrite into a sequence of one-second waits.
+    if (typeof root.scheduler?.yield === 'function') return root.scheduler.yield();
+    if (typeof root.MessageChannel === 'function') return new Promise(resolve => {
+      const channel = new root.MessageChannel();
+      channel.port1.onmessage = () => {
+        channel.port1.close(); channel.port2.close(); resolve();
+      };
+      channel.port2.postMessage(null);
+    });
+    return new Promise(resolve => (root.setTimeout || setTimeout)(resolve, 0));
+  }
+
   async function rewriteModule(source, url) {
     const iterator = tokens(source);
     const buffered = [];
@@ -324,7 +379,7 @@
     while ((token = next())) {
       if (token.end - checkpoint > 256 * 1024) {
         checkpoint = token.end;
-        await new Promise(resolve => (root.setTimeout || setTimeout)(resolve, 0));
+        await yieldToRenderer();
       }
       if (token.kind !== "name" || [".", "?."].includes(previous?.text)) { previous = token; continue; }
       if (peek()?.text === ":") { previous = token; continue; }
@@ -480,7 +535,6 @@
 
   async function prepareDocument() {
     const document = root.document;
-    const candidates = new Set();
     const entries = [...document.scripts].map(script => script.src).filter(url => localAsset(url, true));
     if (!entries.length || entries.length > 4) return { ok: false, reason: "unsupported-entry" };
     const read = async url => {
@@ -491,14 +545,9 @@
       return source;
     };
     try {
-      for (const entry of entries) {
-        for (const match of (await read(entry)).matchAll(/["'`]\.\/app-initial-[A-Za-z0-9_-]+\.js["'`]/g)) {
-          const url = new URL(match[0].slice(1, -1), entry).href;
-          if (localAsset(url)) candidates.add(url);
-        }
-      }
-      if (candidates.size !== 1) return { ok: false, reason: "ambiguous-module" };
-      const url = [...candidates][0];
+      const discovered = await resolveInitialModule(entries, read);
+      if (!discovered.ok) return discovered;
+      const url = discovered.url;
       const source = await read(url);
       let result = await prepareModule(source, url);
       if (!result.ok) return { ok: false, reason: result.diagnostics?.reason || "unsupported-module" };
@@ -744,7 +793,7 @@
     return result;
   }
 
-  const api = { discardHandoff: restoreInheritedName, allow, transform, localAsset, localAdapter, functionRange, rewriteModule, rewriteModuleSync, prepareFastOnly, prepareLive, prepareModule, prepareDocument, installModule, prepareHandoff, consumeHandoff, cancelHandoff, reloadPreparedDocument,
+  const api = { resolveInitialModule, resolveInitialModuleSync, discardHandoff: restoreInheritedName, allow, transform, localAsset, localAdapter, functionRange, rewriteModule, rewriteModuleSync, prepareFastOnly, prepareLive, prepareModule, prepareDocument, installModule, prepareHandoff, consumeHandoff, cancelHandoff, reloadPreparedDocument,
     inspectStartupReload: () => {
       const guard = root.__cockpitStartupGuard;
       if (!guard) return { ok: false, reason: "startup-guard-unavailable" };

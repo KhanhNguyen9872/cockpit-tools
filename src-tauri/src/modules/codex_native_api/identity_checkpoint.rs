@@ -9,7 +9,7 @@ pub(super) struct Metadata {
     pub parameters: Option<String>,
 }
 
-pub(super) struct Encoded {
+pub(in crate::modules::codex_native_api::identity) struct Encoded {
     manifest: String,
     chunks: Vec<(String, Vec<u8>)>,
     parameters: Option<String>,
@@ -66,6 +66,14 @@ pub(super) fn transcript(
     let Some(raw) = raw else {
         return Ok(None);
     };
+    decode_manifest(connection, caller, &raw).map(Some)
+}
+
+pub fn decode_manifest(
+    connection: &Connection,
+    caller: &str,
+    raw: &str,
+) -> Result<Vec<Value>, ServiceError> {
     let manifest: Vec<String> = serde_json::from_str(&raw).map_err(storage)?;
     let mut result = Vec::with_capacity(manifest.len());
     let mut query = connection
@@ -81,10 +89,30 @@ pub(super) fn transcript(
         }
         result.push(serde_json::from_slice(&bytes).map_err(storage)?);
     }
-    Ok(Some(result))
+    Ok(result)
 }
 
 impl Encoded {
+    /// Partial observations never enter the successful checkpoint tables or
+    /// activate a generation. Share immutable chunks with completed history.
+    pub fn publish_partial(
+        &self,
+        transaction: &Transaction<'_>,
+        binding: &Binding,
+        response: &str,
+    ) -> Result<(), ServiceError> {
+        let inserted = transaction.execute(
+            "INSERT OR IGNORE INTO native_partial_history_v1(caller,response,thread,session,account,owner,manifest,parameters,bytes) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![binding.caller,response,binding.thread_id,binding.session_id,binding.account_id,binding.owner_id,self.manifest,self.parameters,self.bytes as i64],
+        ).map_err(storage)?;
+        if inserted == 0 { return Ok(()); }
+        let mut insert = transaction.prepare_cached("INSERT OR IGNORE INTO native_rebuild_items_v1(caller,digest,body) VALUES(?1,?2,?3)").map_err(storage)?;
+        for (digest, body) in &self.chunks {
+            insert.execute(params![binding.caller,digest,body]).map_err(storage)?;
+        }
+        Ok(())
+    }
+
     /// Serialization, hashing and compression happen before the identity write
     /// lock/transaction. Cancellation still gates publication of all these bytes.
     pub fn prepare(

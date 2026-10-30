@@ -577,6 +577,7 @@ impl Execution {
             };
             self.tracker.upstream_http_version(response.version());
             self.tracker.upstream_response_headers(response.headers());
+            response = super::super::http_compression::decode_response(response)?;
             self.tracker.quota_headers(response.headers());
             if oauth && response.status().is_success() {
                 // The shared probe stops at the first business event or its
@@ -621,6 +622,7 @@ impl Execution {
             let mut failure_message = None;
             let mut model_unavailable = false;
             let mut request_scoped = false;
+            let mut execution_observed = false;
             if !response.status().is_success() {
                 let inspected = super::super::retry::inspect_status_error(
                     &self.state,
@@ -639,6 +641,7 @@ impl Execution {
                 failure_message = inspected.2;
                 model_unavailable = inspected.4;
                 request_scoped = inspected.5;
+                execution_observed = inspected.9;
                 self.tracker.capture_request_fault(request_scoped);
                 self.tracker.attempt_result(
                     response.status().as_u16(),
@@ -673,7 +676,7 @@ impl Execution {
                 (headers, body) => headers.or(body),
             };
             self.tracker.set_retry_after(retry_after);
-            if request_scoped {
+            if request_scoped || execution_observed {
                 self.tracker.set_retry_after(retry_after);
                 return Ok((response, binding));
             }
@@ -845,7 +848,7 @@ impl Execution {
     }
 
     async fn renew_transport_after_tls(&mut self, error: &ServiceError) -> Result<(), ServiceError> {
-        if error.transport_failure != Some(super::super::contract::TransportFailureKind::TlsDecrypt) {
+        if !matches!(error.transport_failure, Some(super::super::contract::TransportFailureKind::TlsDecrypt | super::super::contract::TransportFailureKind::TlsDecryptHttp2)) {
             return Ok(());
         }
         self.tracker.release_route();

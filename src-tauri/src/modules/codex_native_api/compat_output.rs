@@ -11,10 +11,12 @@ pub(crate) fn usage(usage: &Value, flavor: CompatFlavor) -> Value {
     let reasoning = usage
         .pointer("/output_tokens_details/reasoning_tokens")
         .and_then(Value::as_u64);
+    let cache_write = usage.pointer("/input_tokens_details/cache_write_tokens").and_then(Value::as_u64)
+        .filter(|n| *n > 0).or_else(|| usage.pointer("/input_tokens_details/cache_creation_tokens").and_then(Value::as_u64)).unwrap_or(0);
     match flavor {
         CompatFlavor::Claude => {
             if let Some(n) = input {
-                out["input_tokens"] = json!(n.saturating_sub(cache.unwrap_or(0)));
+                out["input_tokens"] = json!(n.saturating_sub(cache.unwrap_or(0)).saturating_sub(cache_write));
             }
             if let Some(n) = output {
                 out["output_tokens"] = json!(n);
@@ -144,6 +146,8 @@ pub fn response_from_responses(
     let mut images = Vec::new();
     let mut has_tools = false;
     for item in items {
+        let commentary = (context.flavor == CompatFlavor::Claude).then(|| super::commentary::item(item)).flatten();
+        let item = commentary.as_ref().unwrap_or(item);
         match item["type"].as_str().unwrap_or("") {
             "message" => {
                 for content in item["content"].as_array().into_iter().flatten() {

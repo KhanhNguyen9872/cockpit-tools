@@ -16,6 +16,7 @@ pub(crate) struct ToolContext {
     declarations: Vec<Declaration>,
     indices: BTreeMap<String, usize>,
     local_names: BTreeMap<String, Option<String>>,
+    wire_names: BTreeMap<String, String>,
 }
 
 pub(super) fn qualify(namespace: &str, name: &str) -> String {
@@ -34,6 +35,39 @@ pub(super) fn qualify(namespace: &str, name: &str) -> String {
 }
 
 impl ToolContext {
+    pub(crate) fn for_anthropic(body: &Value) -> Self {
+        use sha2::{Digest, Sha256};
+        let mut context = Self::from_responses(body);
+        let mut reserved = context.indices.keys().cloned().collect::<std::collections::BTreeSet<_>>();
+        for declaration in &mut context.declarations {
+            if declaration.custom {
+                let description = declaration.tool["description"].as_str().unwrap_or("").replace("This is a FREEFORM tool, so do not wrap the patch in JSON.","");
+                let mut description = format!("{description}\n\nPass the complete freeform tool input as the input string property. Keep its contents unchanged.");
+                if declaration.name=="apply_patch" {
+                    description.push_str("\nUse the Codex apply_patch format. Start with *** Begin Patch and end with *** End Patch. Use *** Add File: path, *** Delete File: path, or *** Update File: path. Every added-file content line starts with +. For updates, use @@; context lines start with one space, removed lines with -, and added lines with +. Use *** Move to: path for a rename and *** End of File when required by the patch grammar.");
+                }
+                if let Some(format) = declaration.tool.get("format") {
+                    description.push_str(&format!("\n\nFreeform input format:\n{format}"));
+                }
+                declaration.tool["description"] = json!(description);
+            }
+            let original = declaration.chat_name.clone();
+            if original.len() <= 64 && original.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-') { continue; }
+            let digest = format!("{:x}", Sha256::digest(original.as_bytes()));
+            let base = format!("tool_{}", &digest[..32]);
+            let mut name = base.clone();
+            let mut suffix = 0;
+            while reserved.contains(&name) { suffix += 1; name = format!("{base}_{suffix}"); }
+            reserved.insert(name.clone());
+            context.wire_names.insert(original, name.clone());
+            declaration.chat_name = name;
+        }
+        context.indices = context.declarations.iter().enumerate().map(|(index, d)|(d.chat_name.clone(), index)).collect();
+        for name in context.local_names.values_mut().flatten() {
+            if let Some(wire) = context.wire_names.get(name) { *name = wire.clone(); }
+        }
+        context
+    }
     pub(crate) fn from_responses(body: &Value) -> Self {
         let mut result = Self::default();
         result.scan(&body["tools"]);
@@ -88,10 +122,12 @@ impl ToolContext {
             tool: tool.clone(),
         });
     }
-    pub(super) fn canonical(&self, name: &str, namespace: Option<&str>) -> String {
+    pub(crate) fn canonical(&self, name: &str, namespace: Option<&str>) -> String {
         if let Some(namespace) = namespace.filter(|s| !s.is_empty()) {
-            return qualify(namespace, name);
+            let qualified = qualify(namespace, name);
+            return self.wire_names.get(&qualified).cloned().unwrap_or(qualified);
         }
+        if let Some(wire) = self.wire_names.get(name) { return wire.clone(); }
         if self.indices.contains_key(name) {
             return name.into();
         }
@@ -101,10 +137,13 @@ impl ToolContext {
             .cloned()
             .unwrap_or_else(|| name.into())
     }
-    pub(super) fn custom(&self, name: &str) -> bool {
+    pub(crate) fn custom(&self, name: &str) -> bool {
         self.indices
             .get(name)
             .is_some_and(|index| self.declarations[*index].custom)
+    }
+    pub(crate) fn is_apply_patch(&self,name:&str)->bool {
+        self.indices.get(name).is_some_and(|index|self.declarations[*index].custom&&self.declarations[*index].name=="apply_patch")
     }
     pub(super) fn pending_name(&self, name: &str) -> bool {
         !self.indices.contains_key(name)
@@ -127,7 +166,7 @@ impl ToolContext {
             .unwrap_or_else(|| (name.into(), None))
     }
 
-    pub(super) fn tools(&self, native_custom: bool) -> Vec<Value> {
+    pub(crate) fn tools(&self, native_custom: bool) -> Vec<Value> {
         self.declarations.iter().map(|d| {
             if d.custom && native_custom {
                 let mut details = d.tool.as_object().cloned().unwrap_or_default();
@@ -142,7 +181,7 @@ impl ToolContext {
             json!({"type":"function","function":function})
         }).collect()
     }
-    pub(super) fn restore_item(&self, item: &mut Value) {
+    pub(crate) fn restore_item(&self, item: &mut Value) {
         if !matches!(
             item["type"].as_str(),
             Some("function_call" | "custom_tool_call")
@@ -167,7 +206,7 @@ impl ToolContext {
 
 /// Decode a complete wrapper or the available prefix of its JSON string. Partial
 /// escapes remain buffered, so split Unicode/surrogate pairs never corrupt input.
-pub(super) fn unwrap_input(raw: &str, partial: bool) -> String {
+pub(crate) fn unwrap_input(raw: &str, partial: bool) -> String {
     if let Ok(value) = serde_json::from_str::<Value>(raw) {
         return value
             .get("input")

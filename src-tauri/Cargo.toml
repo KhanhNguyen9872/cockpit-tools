@@ -1,6 +1,6 @@
 [package]
 name = "cockpit-tools"
-version = "1.3.75"
+version = "1.3.76"
 description = "Cockpit Tools"
 authors = ["jlcodes"]
 license = "CC-BY-NC-SA-4.0"
@@ -60,6 +60,7 @@ minisign-verify = "0.2"
 tokio = { version = "1", features = ["full"] }
 tokio-rustls = "0.26"
 rustls = "0.23"
+h2 = "0.4"
 rustls-native-certs = "0.8"
 rcgen = "0.13"
 thiserror = "2"
@@ -80,6 +81,10 @@ futures = "0.3"
 sysinfo = "0.33"
 libc = "0.2"
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
+yawc = { version = "0.5", default-features = false, features = ["axum", "zlib"] }
+brotli = "8"
+async-compression = { version = "0.4", features = ["tokio", "gzip", "zlib", "deflate", "brotli", "zstd"] }
+tokio-util = { version = "0.7", features = ["io"] }
 futures-util = "0.3"
 md5 = "0.7"
 tiny_http = "0.12"

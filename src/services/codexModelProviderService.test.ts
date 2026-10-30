@@ -21,8 +21,8 @@ function account(key = 'sk-first'): CodexAccount {
     tokens: { access_token: '', id_token: '' }, created_at: 1, last_used: 1,
   };
 }
-function harness(initial = provider()) {
-  let disk = JSON.stringify([initial]);
+function harness(initial: CodexModelProvider | CodexModelProvider[] = provider()) {
+  let disk = JSON.stringify(Array.isArray(initial) ? initial : [initial]);
   let writeError: Error | null = null;
   let readError: Error | null = null;
   let gate: ReturnType<typeof deferred<void>> | null = null;
@@ -47,6 +47,154 @@ function harness(initial = provider()) {
     gateWrite() { return gate = deferred<void>(); },
   };
 }
+
+test('account reconciliation creates missing official, built-in and imported providers once', async () => {
+  const h = harness([]);
+  const official = { ...account('official-key'), api_provider_id: 'openai_official', api_provider_mode: 'openai_builtin' as const, api_base_url: undefined };
+  const explicit = { ...official, id: 'official-2', openai_api_key: 'other-official-key', api_base_url: 'https://api.openai.com/' };
+  const cockpit = { ...account('cockpit-key'), api_provider_id: 'cockpit_api', api_base_url: 'https://chongcodex.cn/v1' };
+  const imported = { ...account('imported-key'), api_provider_id: 'missing-provider', api_model_catalog: ['model-a'],
+    api_model_context_windows: { 'model-a': 100000 }, api_supports_vision: true, api_model_vision_support: { 'model-a': true } };
+  const source = [official, explicit, cockpit, imported];
+  const before = structuredClone(source);
+  const result = await h.service.mergeCodexModelProviderApiKeysFromAccounts(source);
+  assert.equal(result.length, 3);
+  const openai = result.find(item => item.baseUrl === 'https://api.openai.com/v1')!;
+  assert.equal(openai.name, 'OpenAI Official');
+  assert.deepEqual(Array.from(openai.apiKeys, item => item.apiKey), ['official-key', 'other-official-key']);
+  const relay = result.find(item => item.baseUrl === imported.api_base_url)!;
+  assert.deepEqual(Array.from(relay.apiKeys[0].modelCatalog!), ['model-a']);
+  assert.equal(relay.apiKeys[0].modelContextWindows?.['model-a'], 100000);
+  assert.equal(relay.apiKeys[0].modelCapabilities?.['model-a'].supportsVision, true);
+  const writes = h.writeCount();
+  h.service.invalidateCodexModelProviderCache();
+  await h.service.mergeCodexModelProviderApiKeysFromAccounts(source);
+  assert.equal(h.writeCount(), writes);
+  assert.deepEqual(source, before, 'backfill must not rewrite account credentials or routes');
+});
+
+test('missing keys and service credential references do not create providers', async () => {
+  const h = harness([]);
+  const result = await h.service.mergeCodexModelProviderApiKeysFromAccounts([
+    { ...account(), auth_mode: 'oauth' },
+    { ...account(), openai_api_key: '' },
+    { ...account(), api_provider_id: 'cockpit_chatgpt_plan' },
+    { ...account(), upstream_grok_account_id: 'source-oauth' },
+    { ...account(), api_base_url: '', api_provider_mode: 'custom' },
+  ]);
+  assert.equal(result.length, 0);
+  assert.equal(h.writeCount(), 0);
+});
+
+test('a stale provider ID cannot copy a credential to the wrong endpoint', async () => {
+  const original = { ...provider(), name: 'Preserve name', boundInstanceId: 'instance-a', supportsWebsockets: true };
+  const h = harness(original);
+  const result = await h.service.mergeCodexModelProviderApiKeysFromAccounts([
+    { ...account('other-endpoint-key'), api_base_url: 'https://other.example/v1' },
+  ]);
+  const existing = result.find(item => item.id === original.id)!;
+  assert.equal(existing.name, original.name);
+  assert.equal(existing.boundInstanceId, original.boundInstanceId);
+  assert.equal(existing.supportsWebsockets, true);
+  assert.deepEqual(Array.from(existing.apiKeys, item => item.apiKey), ['sk-first', 'sk-second']);
+  assert.equal(result.find(item => item.baseUrl === 'https://other.example/v1')?.apiKeys[0].apiKey, 'other-endpoint-key');
+});
+
+test('provider removal survives refresh and restart without retaining deleted secrets', async () => {
+  const h = harness();
+  await h.service.deleteCodexModelProvider('provider');
+  assert.equal((await h.service.listCodexModelProviders()).length, 0);
+  assert.ok(!JSON.stringify(h.stored()).includes('sk-first'));
+  assert.ok(!JSON.stringify(h.stored()).includes('sk-second'));
+  h.service.invalidateCodexModelProviderCache();
+  assert.equal((await h.service.mergeCodexModelProviderApiKeysFromAccounts([account()])).length, 0);
+  const restored = await h.service.createCodexModelProvider({ name: 'Restored', baseUrl: 'https://relay.example/v1', initialApiKey: 'explicit-new-key' });
+  assert.equal((await h.service.listCodexModelProviders())[0].id, restored.id);
+  assert.equal(h.stored().length, 1);
+});
+
+test('concurrent removal wins over automatic backfill and failed removal remains retryable', async () => {
+  const h = harness();
+  h.failWrite(new Error('disk full'));
+  await assert.rejects(h.service.deleteCodexModelProvider('provider'), /disk full/);
+  assert.equal((await h.service.listCodexModelProviders()).length, 1);
+  h.failWrite(null);
+  const gate = h.gateWrite();
+  const remove = h.service.deleteCodexModelProvider('provider');
+  await settlePromises();
+  const merge = h.service.mergeCodexModelProviderApiKeysFromAccounts([account()]);
+  gate.resolve();
+  await Promise.all([remove, merge]);
+  assert.equal((await h.service.listCodexModelProviders()).length, 0);
+});
+
+test('explicit account imports restore a removed provider while background refresh respects its removal', async () => {
+  const h = harness();
+  await h.service.deleteCodexModelProvider('provider');
+  h.service.invalidateCodexModelProviderCache();
+  assert.equal((await h.service.mergeCodexModelProviderApiKeysFromAccounts([account()])).length, 0);
+  const restored = await h.service.mergeCodexModelProviderApiKeysFromAccounts([account()], { explicitImport: true });
+  assert.equal(restored.length, 1);
+  assert.deepEqual(Array.from(restored[0].apiKeys, key => key.apiKey), ['sk-first']);
+  assert.equal(h.stored().length, 1);
+  assert.equal(h.stored()[0].deletedAt, undefined);
+});
+
+test('explicit import restores only the selected removed key and preserves other exclusions', async () => {
+  const h = harness();
+  await h.service.removeApiKeyFromCodexModelProvider('provider', 'key-1');
+  await h.service.removeApiKeyFromCodexModelProvider('provider', 'key-2');
+  await h.service.mergeCodexModelProviderApiKeysFromAccounts([account()], { explicitImport: true });
+  h.service.invalidateCodexModelProviderCache();
+  const result = await h.service.mergeCodexModelProviderApiKeysFromAccounts([account(), account('sk-second')]);
+  assert.deepEqual(Array.from(result[0].apiKeys, key => key.apiKey), ['sk-first']);
+  assert.equal(h.stored()[0].excludedApiKeyHashes?.length, 1);
+});
+
+test('failed provider backfill preserves existing state and can be retried', async () => {
+  const h = harness();
+  const imported = { ...account('new-key'), api_base_url: 'https://new.example/v1' };
+  await h.service.listCodexModelProviders();
+  const before = h.stored();
+  h.failWrite(new Error('disk full'));
+  await assert.rejects(h.service.mergeCodexModelProviderApiKeysFromAccounts([imported]), /disk full/);
+  assert.deepEqual(h.stored(), before);
+  assert.equal((await h.service.listCodexModelProviders()).length, 1);
+  h.failWrite(null);
+  assert.equal((await h.service.mergeCodexModelProviderApiKeysFromAccounts([imported])).length, 2);
+});
+
+test('editing a provider to an explicitly removed endpoint replaces its removal marker', async () => {
+  const other = { ...provider(), id: 'other', baseUrl: 'https://other.example/v1' };
+  const h = harness([provider(), other]);
+  await h.service.deleteCodexModelProvider('other');
+  await h.service.updateCodexModelProvider('provider', { baseUrl: other.baseUrl });
+  assert.equal(h.stored().length, 1);
+  const restored = await h.service.mergeCodexModelProviderApiKeysFromAccounts([
+    { ...account('new-key'), api_base_url: other.baseUrl },
+  ]);
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0].apiKeys.length, 3);
+});
+
+test('Anthropic protocol, authentication and manual model catalogs survive save and reload', async () => {
+  const h = harness();
+  const created = await h.service.createCodexModelProvider({
+    name: 'Claude gateway', baseUrl: 'https://anthropic.example.invalid',
+    wireApi: 'anthropic', authScheme: 'bearer', supportsWebsockets: true,
+    modelCatalog: ['claude-sonnet-4-6', 'claude-opus-4-6'], initialApiKey: 'fixture-anthropic',
+  });
+  assert.equal(created.wireApi, 'anthropic');
+  assert.equal(created.authScheme, 'bearer');
+  assert.equal(created.supportsWebsockets, false);
+  h.service.invalidateCodexModelProviderCache();
+  const reloaded = (await h.service.listCodexModelProviders()).find(item => item.id === created.id)!;
+  assert.equal(reloaded.wireApi, 'anthropic');
+  assert.equal(reloaded.authScheme, 'bearer');
+  assert.deepEqual(Array.from(reloaded.modelCatalog!), ['claude-sonnet-4-6', 'claude-opus-4-6']);
+  await h.service.updateCodexModelProvider(created.id, { authScheme: 'x-api-key' });
+  assert.equal(h.stored().find(item => item.id === created.id)?.authScheme, 'x-api-key');
+});
 
 test('deleted provider keys stay removed after account reconciliation and disk reload', async () => {
   const h = harness();
@@ -226,4 +374,31 @@ test('legacy provider expansion preserves an explicit credential opt-out and mod
     { 'qwen-vl': false, 'text-only': true });
   assert.deepEqual(h.stored()[0].modelCapabilities,
     { 'qwen-vl': { supportsVision: true }, 'text-only': { supportsVision: true } });
+});
+
+test('the shared editor persists a selected key model configuration without overwriting provider defaults or other keys', async () => {
+  const original = { ...provider(), modelCatalog: ['shared-model'] };
+  const h = harness(original);
+  await h.service.updateCodexModelProvider('provider', {
+    wireApi: 'anthropic', authScheme: 'bearer',
+    keyModelConfig: { apiKeyId: 'key-1', config: { modelCatalog: ['key-model'], modelContextWindows: { 'key-model': 200000 }, supportsVision: false, visionRoutingModel: null } },
+  });
+  h.service.invalidateCodexModelProviderCache();
+  const saved = (await h.service.listCodexModelProviders())[0];
+  assert.deepEqual(Array.from(saved.modelCatalog!), ['shared-model']);
+  assert.deepEqual(Array.from(saved.apiKeys[0].modelCatalog!), ['key-model']);
+  assert.equal(saved.apiKeys[0].modelContextWindows?.['key-model'], 200000);
+  assert.equal(saved.apiKeys[0].visionRoutingModel, null);
+  assert.equal(saved.apiKeys[1].modelCatalog, undefined);
+  assert.equal(saved.authScheme, 'bearer');
+});
+
+test('invalid or failed scoped writes leave both provider and key settings unchanged', async () => {
+  const h = harness(); await h.service.listCodexModelProviders(); const before = h.stored();
+  await assert.rejects(h.service.updateCodexModelProvider('provider', { wireApi: 'anthropic', keyModelConfig: { apiKeyId: 'missing', config: { modelCatalog: ['new'] } } }), /API_KEY_NOT_FOUND/);
+  assert.deepEqual(h.stored(), before);
+  h.failWrite(new Error('disk full'));
+  await assert.rejects(h.service.updateCodexModelProvider('provider', { wireApi: 'anthropic', keyModelConfig: { apiKeyId: 'key-1', config: { modelCatalog: ['new'] } } }), /disk full/);
+  assert.deepEqual(h.stored(), before);
+  assert.equal((await h.service.listCodexModelProviders())[0].wireApi, 'responses');
 });

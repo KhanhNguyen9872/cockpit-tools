@@ -56,7 +56,7 @@ test('plan error messages allowlist codes and never interpolate raw credentials 
   for (const failure of ['https://user:secret@host/?token=secret', '/private/auth.json', 'CHATGPT_PLAN_NETWORK: secret', new Error('access_token=secret')]) {
     assert.equal(service.chatGptPlanErrorKey(failure), 'chatgptPlan.error.generic');
   }
-  assert.equal(service.chatGptPlanErrorKey('CHATGPT_PLAN_NATIVE_REQUIRED'), 'chatgptPlan.error.native');
+  assert.equal(service.chatGptPlanErrorKey('CHATGPT_PLAN_NATIVE_REQUIRED'), 'chatgptPlan.error.generic');
   assert.equal(service.chatGptPlanErrorKey(new Error('CHATGPT_PLAN_IDENTITY_MISMATCH')), 'chatgptPlan.error.mismatch');
 });
 

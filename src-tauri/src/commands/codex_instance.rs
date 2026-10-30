@@ -789,7 +789,7 @@ async fn repair_session_visibility_for_selected_instance(
             &instance_name,
             &data_dir,
         )
-        .map(|_| true)
+        .map(|summary| !summary.local_project_recovery_deferred)
         .or_else(|error| {
             if modules::codex_session_visibility::can_defer_launch_snapshot_error(&error) {
                 modules::logger::log_warn(&format!("[Codex Start] session maintenance deferred before writes: instance_id={instance_id}, error={error}"));

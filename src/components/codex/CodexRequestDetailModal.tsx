@@ -17,6 +17,7 @@ import { CodexAuthorizationFallbackTrace } from './CodexAuthorizationFallbackTra
 import type { RequestTimeoutField } from '../../utils/codexRequestDiagnostics';
 import { CodexOutputSpeed } from './CodexOutputSpeed';
 import { CodexRequestIdentityHeaders } from './CodexRequestIdentityHeaders';
+import { formatTrafficBytes } from '../../utils/codexProxyTraffic';
 import './CodexRequestIdentityHeaders.css';
 import './CodexRequestDiagnostics.css';
 
@@ -71,6 +72,9 @@ export function CodexRequestDetailModal({ event, accountDisplayNames = new Map()
   };
   const payload = detail?.payloads[Number(selectedPayload)];
   const firstResponseMs = detail?.firstResponseMs ?? event.firstResponseMs;
+  const requestSize = detail?.attempts.find((attempt) => attempt.requestSize)?.requestSize;
+  const upstreamSize = detail?.attempts.find((attempt) => attempt.upstreamRequestBytes != null);
+  const overloadRetry = detail?.attempts.filter((attempt) => attempt.overloadRetry).pop()?.overloadRetry;
   const tierLabel = (tier: string) => {
     const key = requestedServiceTierLabelKey(tier);
     return key ? t(key) : tier;
@@ -96,6 +100,21 @@ export function CodexRequestDetailModal({ event, accountDisplayNames = new Map()
           <div className="codex-request-metric"><span><Gauge size={14} aria-hidden="true" />{t('common.outputSpeed.label')}</span><strong><CodexOutputSpeed event={event} t={t} hideLabel /></strong></div>
         </div>
         <p className="codex-request-diagnostics-hint codex-request-detail-explanation"><Info size={14} aria-hidden="true" /><span>{t('codex.requestDiagnostics.firstResponseHint')}</span></p>
+        {requestSize && <section className="codex-request-detail-section">
+          <h4>{t('codex.requestDiagnostics.requestSizeTitle')}</h4>
+          <div className="codex-request-detail-summary">
+            {([
+              ['requestBytes', requestSize.totalBytes], ['historyBytes', requestSize.inputBytes],
+              ['toolsBytes', requestSize.toolsBytes], ['instructionsBytes', requestSize.instructionsBytes],
+            ] as const).map(([key, bytes]) => <div className="codex-request-metric" key={key}><span>{t(`codex.requestDiagnostics.${key}`)}</span><strong>{formatTrafficBytes(bytes)}</strong></div>)}
+            {upstreamSize?.upstreamRequestBytes != null && <div className="codex-request-metric"><span>{t('codex.requestDiagnostics.upstreamPayload', { sequence: upstreamSize.sequence })}</span><strong>{formatTrafficBytes(upstreamSize.upstreamRequestBytes)}</strong></div>}
+            {overloadRetry && <>
+              <div className="codex-request-metric"><span>{t('codex.requestDiagnostics.overloadRetry')}</span><strong>{overloadRetry.retry}</strong></div>
+              <div className="codex-request-metric"><span>{t('codex.requestDiagnostics.overloadRecovery')}</span><strong>{overloadRetry.recoveryMs} ms</strong></div>
+            </>}
+          </div>
+          <p className="codex-request-diagnostics-hint">{t('codex.requestDiagnostics.requestSizeHint')}</p>
+        </section>}
         <p className="codex-request-diagnostics-hint">{t('codex.requestDiagnostics.authorizationRoute')}: {t(requestAuthorizationRouteKey(event.accountId, event.authorizationRoute))}</p>
         <section className="codex-request-detail-section" aria-labelledby="codex-request-tier-title">
           <h4 id="codex-request-tier-title"><Gauge size={16} aria-hidden="true" />{t('codex.apiService.logs.serviceTier')}</h4>

@@ -1,3 +1,9 @@
+import { resolveNewApiQuotaSnapshot } from "../services/modelProviderUsageService";
+import { resolveCodexAccountDailyUsage } from "./codexApiKeyUsagePanel";
+import { codexDailyUsageMetrics } from "../components/codex/CodexDailyUsagePanel";
+import { isCodexOfficialApiAccount } from "../types/codex";
+import { OpenAIOfficialUsagePanel } from '../components/codex/OpenAIOfficialUsagePanel';
+import { isOpenAIOfficialUsageAccount, resolveAccountUsageBaseUrl } from '../utils/openaiOfficialUsage';
 import { useEffect, type ReactElement } from "react";
 import { RefreshCw, Upload, Trash2, X, Power, Database, Copy, Check, Play, RotateCw, CircleAlert, Info, Calendar, Tag, Eye, EyeOff, FileText, ExternalLink, Pencil, FolderPlus, ChevronRight, Wrench, Terminal, Link2, Waypoints } from "lucide-react";
 import { isCodexApiKeyAccount, isCodexAgentIdentityAccount, isCodexChatCompletionsApiKeyAccount, isCodexNewApiAccount } from "../types/codex";
@@ -16,14 +22,13 @@ import "../styles/pages/codex-account-card-skins.css";
 import { CodexTeamQuotaHistory } from "../components/codex/CodexTeamQuotaHistory";
 import { isCodexAccountReauthRequired, isCodexClientReauthNoticeOnly, isCodexRefreshTokenNoticeOnly, isCodexRefreshTokenReusedAccount, isCodexServerRevokedReauth } from "../utils/codexSwitchAuthFailure";
 import { CODEX_LAUNCH_PREVIEW_API_SERVICE_CARD_KEY } from "../utils/codexLaunchPreviewInstancePreference";
- import { isDeepSeekAccount, isCodexTokenPlanAccount, shouldShowCodexApiKeyUsagePanel } from "../utils/codexDeepSeekAccess";
+ import { isDeepSeekAccount, shouldShowCodexApiKeyUsagePanel } from "../utils/codexDeepSeekAccess";
 import { SingleSelectDropdown } from "../components/SingleSelectDropdown";
 import { CODEX_API_SERVICE_BIND_ID } from "../types/instance";
 import { COCKPIT_API_BASE_URL } from "../utils/codexProviderPresets";
 import { formatCodexQuotaPoolPlanLabel, formatCodexQuotaPoolPercent, formatCodexQuotaPoolWindowLabel } from "../utils/codexQuotaPool";
 import { CODEX_LOCAL_ACCESS_STATUS_KEYS, resolveCodexLocalAccessRuntimeStatus } from "../utils/codexLocalAccessStatus";
-import { resolveNewApiQuotaSnapshot } from "../services/modelProviderUsageService";
-import { CODEX_LOCAL_ACCESS_FALLBACK_API_KEY_MASK, formatCockpitApiInteger, formatCockpitApiTokenCount, getCockpitApiStatsRecord, getCockpitApiUsageRecord, getCodexAccountNoteTitle, hasCodexAccountNoteDetails, isPendingOAuthCodexAccount, isSponsorModelProvider, readCockpitApiNumber, readCockpitApiString, resolveApiKeyUsageMode, toCockpitApiRecord, type CockpitApiJsonRecord } from "./codexAccountsControllerModel";
+import { formatCockpitApiInteger, formatCockpitApiTokenCount, getCockpitApiStatsRecord, getCockpitApiUsageRecord, readCockpitApiNumber, readCockpitApiString, toCockpitApiRecord, type CockpitApiJsonRecord, CODEX_LOCAL_ACCESS_FALLBACK_API_KEY_MASK, getCodexAccountNoteTitle, hasCodexAccountNoteDetails, isPendingOAuthCodexAccount, isSponsorModelProvider, resolveApiKeyUsageMode } from "./codexAccountsControllerModel";
 import type { useCodexAccountsBaseController } from "./useCodexAccountsBaseController";
 import type { useCodexAccountsOAuthController } from "./useCodexAccountsOAuthController";
 import type { useCodexAccountsAccessController } from "./useCodexAccountsAccessController";
@@ -176,6 +181,14 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
   | "visibleApiKeyAccountIds"
 >) {
   const {
+    findApiKeyUsageDetail,
+    formatApiKeyUsageDetailByKey,
+    formatApiKeyUsageDetailLabel,
+    formatApiKeyUsageDetailValue,
+    formatApiKeyUsageMoney,
+    formatApiKeyUsagePercent,
+    formatApiKeyUsageQuotaValue,
+    resolveCockpitApiAccountBalanceText,
     accountIdLabel,
     accounts,
     addingLocalAccessAccountId,
@@ -194,13 +207,6 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
     editingApiKeyNameValue,
     externalImportProgress,
     filteredAccounts,
-    findApiKeyUsageDetail,
-    formatApiKeyUsageDetailByKey,
-    formatApiKeyUsageDetailLabel,
-    formatApiKeyUsageDetailValue,
-    formatApiKeyUsageMoney,
-    formatApiKeyUsagePercent,
-    formatApiKeyUsageQuotaValue,
     formatDate,
     getCodexSwitchOrLaunchBlockedReason,
     handleAccountNameDoubleClick,
@@ -275,7 +281,6 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
     resolveAccountMeta,
     resolveApiKeyDisplayText,
     resolveApiProviderDisplayName,
-    resolveCockpitApiAccountBalanceText,
     resolveLocalAccessBaseUrl,
     resolvePresentation,
     resolveQuotaErrorMeta,
@@ -335,12 +340,6 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
           account,
           presentation.quotaItems,
         ).filter((item) => item.key === "primary" || item.key === "secondary");
-        const compactDeepSeekSummary = isDeepSeekAccount(account)
-          ? apiKeyUsageMap[account.id]?.summary
-          : undefined;
-        const compactTokenPlanSummary = isCodexTokenPlanAccount(account)
-          ? apiKeyUsageMap[account.id]?.summary
-          : undefined;
         const subscriptionInfo = resolveSubscriptionPresentation(account);
         const showCompactExpiry =
           !isApiKeyAccount &&
@@ -401,96 +400,15 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
             </div>
             <CodexAccountOfficialBadge account={account} grants={planOverview.accounts} memberIds={localAccessAccountIdSet} />
             <div className="codex-compact-quotas">
-              {isDeepSeekAccount(account) ? (
-                <>
-                  {(
-                    [
-                      [
-                        "totalBalance",
-                        t(
-                          "codex.modelProviders.usage.fields.totalBalance",
-                          "总余额",
-                        ),
-                        formatApiKeyUsageMoney(
-                          compactDeepSeekSummary?.balance,
-                          compactDeepSeekSummary?.unit,
-                        ),
-                      ],
-                      [
-                        "grantedBalance",
-                        t(
-                          "codex.modelProviders.usage.fields.grantedBalance",
-                          "赠金余额",
-                        ),
-                        formatApiKeyUsageDetailByKey(
-                          compactDeepSeekSummary,
-                          "grantedBalance",
-                        ),
-                      ],
-                      [
-                        "toppedUpBalance",
-                        t(
-                          "codex.modelProviders.usage.fields.toppedUpBalance",
-                          "充值余额",
-                        ),
-                        formatApiKeyUsageDetailByKey(
-                          compactDeepSeekSummary,
-                          "toppedUpBalance",
-                        ),
-                      ],
-                    ] as const
-                  ).map(([key, label, value]) => (
-                    <span
-                      key={`${account.id}-${key}`}
-                      className={`codex-compact-quota codex-compact-quota-${key}`}
-                      title={`${label} ${value}`}
-                    >
-                      <span className="codex-compact-dot" />
-                      <span className="codex-compact-quota-value high">
-                        {value}
-                      </span>
-                    </span>
-                  ))}
-                </>
-              ) : isCodexTokenPlanAccount(account) ? (
-                <>
-                  {(
-                    [
-                      [
-                        "remaining",
-                        t(
-                          "codex.modelProviders.usage.fields.remaining",
-                          "Remaining",
-                        ),
-                        formatApiKeyUsageMoney(
-                          compactTokenPlanSummary?.quotaRemaining ??
-                            compactTokenPlanSummary?.remaining,
-                          compactTokenPlanSummary?.unit,
-                        ),
-                      ],
-                      [
-                        "planName",
-                        t("codex.modelProviders.usage.fields.planName", "Plan"),
-                        compactTokenPlanSummary?.planName || "-",
-                      ],
-                    ] as const
-                  ).map(([key, label, value]) => (
-                    <span
-                      key={`${account.id}-${key}`}
-                      className={`codex-compact-quota codex-compact-quota-${key}`}
-                      title={`${label} ${value}`}
-                    >
-                      <span className="codex-compact-dot" />
-                      <span className="codex-compact-quota-value high">
-                        {value}
-                      </span>
-                    </span>
-                  ))}
-                </>
-              ) : (
-                !isChatCompletionsApiKey && (
-                  <>{account.plan_type !== 'self_serve_business_usage_based' && <CodexQuotaMiniRows items={compactOfficialQuotaItems} t={t} />}<CodexTeamQuotaHistory account={account} /></>
-                )
+              {isApiKeyAccount ? (
+                (!hideRelayQuota || shouldShowCodexApiKeyUsagePanel(account, hideRelayQuota)) && codexDailyUsageMetrics(resolveCodexAccountDailyUsage(account, apiKeyUsageMap[account.id]?.summary), t).map(item => (
+                  <span key={`${account.id}-${item.key}`} className="codex-compact-quota" title={`${item.label} ${item.value}`}>
+                    <span className="codex-compact-dot" /><span>{item.label}</span>
+                    <span className="codex-compact-quota-value high">{item.value}</span>
+                  </span>
+                ))
+              ) : !isChatCompletionsApiKey && (
+                <>{account.plan_type !== 'self_serve_business_usage_based' && <CodexQuotaMiniRows items={compactOfficialQuotaItems} t={t} />}<CodexTeamQuotaHistory account={account} /></>
               )}
               {showCompactExpiry && (
                 <span className="codex-compact-expiry-wrap">
@@ -573,6 +491,9 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
         const isCurrent = overviewCurrentAccountId === account.id;
         const isApiKeyAccount = isCodexApiKeyAccount(account);
         const cardSkin = isApiKeyAccount ? resolveCodexAccountCardSkin(account.api_base_url) : "";
+        const cardDisplayName = cardSkin === "codex-card-skin-apikey-fun"
+          ? "APIKEY.FUN"
+          : presentation.displayName;
         const serverRevokedReauth = isCodexServerRevokedReauth(account);
         const refreshTokenReusedState = isCodexRefreshTokenReusedAccount(account);
         const clientAuthRequired =
@@ -691,7 +612,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
         const signInLine = `${meta.signedInWithText} | ${accountIdLabel}: ${accountIdText}`;
         const apiProviderName = resolveApiProviderDisplayName(account);
         const apiProviderLine = `${t("codex.api.provider.label", "供应商")}：${apiProviderName}`;
-        const apiBaseUrlText = (account.api_base_url || "").trim() || "-";
+        const apiBaseUrlText = resolveAccountUsageBaseUrl(account) || "-";
         const apiBaseUrlLine = `${t("codex.api.baseUrl", "Base URL")}：${apiBaseUrlText}`;
         const apiKeyUsageProvider = resolveUsageProviderForApiKeyAccount(account);
         const isSponsorApiKeyAccount =
@@ -703,7 +624,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
         const apiKeyUsageMode = resolveApiKeyUsageMode(
           apiKeyUsageMap[account.id]?.summary,
         );
-        const showApiKeyUsagePanel = shouldShowCodexApiKeyUsagePanel(
+        const showApiKeyUsagePanel = (isApiKeyAccount && !hideRelayQuota) || shouldShowCodexApiKeyUsagePanel(
           account,
           hideRelayQuota,
         );
@@ -724,18 +645,15 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
           showApiKeyUsagePanel ||
           !isApiKeyAccount ||
           (isNewApiAccount && !hideRelayQuota);
-        const displayPlanClass = isSponsorApiKeyAccount
+        const officialApi = isCodexOfficialApiAccount(account);
+        const displayPlanClass = officialApi ? planClass : isSponsorApiKeyAccount
           ? "sponsor-api"
           : isQuotaAwareApiKeyAccount
             ? "new-api-exclusive"
             : planClass;
-        const displayPlanLabel = isSponsorApiKeyAccount && cardSkin !== "codex-card-skin-apikey-fun"
+        const displayPlanLabel = officialApi ? presentation.planLabel : isSponsorApiKeyAccount && cardSkin !== "codex-card-skin-apikey-fun"
           ? apiProviderName
           : presentation.planLabel;
-        const cockpitApiAccountBalanceText =
-          isNewApiAccount && !hideRelayQuota
-            ? resolveCockpitApiAccountBalanceText(account)
-            : null;
         const accountTags = (account.tags || [])
           .map((tag) => tag.trim())
           .filter(Boolean);
@@ -797,7 +715,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                   title={maskAccountText(presentation.displayName)}
                   onDoubleClick={() => handleAccountNameDoubleClick(account)}
                 >
-                  {maskAccountText(presentation.displayName)}
+                  {maskAccountText(cardDisplayName)}
                 </span>
               )}
               {isCurrent && (
@@ -828,7 +746,8 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                   {accountIssueBadge}
                 </span>
               )}
-              <span className={`tier-badge ${displayPlanClass}`}>
+              <span className={`tier-badge ${displayPlanClass}`}
+                title={officialApi ? t("codex.officialApi.hint") : undefined}>
                 {displayPlanLabel}
               </span>
             </div>
@@ -929,7 +848,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                   >
                     {apiBaseUrlLine}
                   </span>
-                  {(isSub2ApiUsageAccount || isTokenPlanUsageAccount) && (
+                  {(isSub2ApiUsageAccount || isTokenPlanUsageAccount || isOpenAIOfficialUsageAccount(account)) && (
                     <button
                       type="button"
                       className="codex-provider-inline-switch"
@@ -1000,21 +919,9 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                         onReauthorize: () =>
                           openCodexAddModal("tempLogin", account),
                       })}
-                    {cockpitApiAccountBalanceText && (
-                      <div className="codex-account-balance-line">
-                        <span>
-                          {t(
-                            "codex.modelProviders.usage.accountBalance",
-                            "账户余额",
-                          )}
-                          ：
-                        </span>
-                        <strong>{cockpitApiAccountBalanceText}</strong>
-                      </div>
-                    )}
                     {account.plan_type !== 'self_serve_business_usage_based' && <CodexQuotaMiniRows items={quotaItems} t={t} />}
                     <CodexTeamQuotaHistory account={account} />
-                    {quotaItems.length === 0 && !cockpitApiAccountBalanceText && (
+                    {quotaItems.length === 0 && (
                       <div className="quota-empty">
                         {t("common.shared.quota.noData", "暂无配额数据")}
                       </div>
@@ -1976,7 +1883,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
         const signInLine = `${meta.signedInWithText} | ${accountIdLabel}: ${accountIdText}`;
         const apiProviderName = resolveApiProviderDisplayName(account);
         const apiProviderLine = `${t("codex.api.provider.label", "供应商")}：${apiProviderName}`;
-        const apiBaseUrlText = (account.api_base_url || "").trim() || "-";
+        const apiBaseUrlText = resolveAccountUsageBaseUrl(account) || "-";
         const apiBaseUrlLine = `${t("codex.api.baseUrl", "Base URL")}：${apiBaseUrlText}`;
         const apiKeyUsageProvider = resolveUsageProviderForApiKeyAccount(account);
         const isSponsorApiKeyAccount =
@@ -1988,7 +1895,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
         const apiKeyUsageMode = resolveApiKeyUsageMode(
           apiKeyUsageMap[account.id]?.summary,
         );
-        const showApiKeyUsagePanel = shouldShowCodexApiKeyUsagePanel(
+        const showApiKeyUsagePanel = (isApiKeyAccount && !hideRelayQuota) || shouldShowCodexApiKeyUsagePanel(
           account,
           hideRelayQuota,
         );
@@ -2005,18 +1912,15 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
             isDeepSeekAccount(account) ||
             apiKeyUsageProvider?.integrationType === "new_api" ||
             apiKeyUsageProvider?.integrationType === "sub2api");
-        const displayPlanClass = isSponsorApiKeyAccount
+        const officialApi = isCodexOfficialApiAccount(account);
+        const displayPlanClass = officialApi ? planClass : isSponsorApiKeyAccount
           ? "sponsor-api"
           : isQuotaAwareApiKeyAccount
             ? "new-api-exclusive"
             : planClass;
-        const displayPlanLabel = isSponsorApiKeyAccount
+        const displayPlanLabel = officialApi ? presentation.planLabel : isSponsorApiKeyAccount
           ? apiProviderName
           : presentation.planLabel;
-        const cockpitApiAccountBalanceText =
-          isNewApiAccount && !hideRelayQuota
-            ? resolveCockpitApiAccountBalanceText(account)
-            : null;
         const isInLocalAccess = chatGptPlanSourceMemberIds(account.id, planOverview.accounts, localAccessAccountIdSet, accounts).length > 0;
         const subscriptionInfo = resolveSubscriptionPresentation(account);
         const showSubscriptionRefreshAction =
@@ -2167,7 +2071,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                       >
                         {apiBaseUrlLine}
                       </span>
-                      {(isSub2ApiUsageAccount || isTokenPlanUsageAccount) && (
+                      {(isSub2ApiUsageAccount || isTokenPlanUsageAccount || isOpenAIOfficialUsageAccount(account)) && (
                         <button
                           type="button"
                           className="codex-provider-inline-switch"
@@ -2203,7 +2107,8 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
               </div>
             </td>
             <td>
-              <span className={`tier-badge ${displayPlanClass}`}>
+              <span className={`tier-badge ${displayPlanClass}`}
+                title={officialApi ? t("codex.officialApi.hint") : undefined}>
                 {displayPlanLabel}
               </span>
             </td>
@@ -2263,21 +2168,9 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
               ) : (
                 <>
                   <div className="quota-grid">
-                    {cockpitApiAccountBalanceText && (
-                      <div className="codex-account-balance-line table">
-                        <span>
-                          {t(
-                            "codex.modelProviders.usage.accountBalance",
-                            "账户余额",
-                          )}
-                          ：
-                        </span>
-                        <strong>{cockpitApiAccountBalanceText}</strong>
-                      </div>
-                    )}
                     {account.plan_type !== 'self_serve_business_usage_based' && <CodexQuotaMiniRows items={quotaItems} t={t} />}
                     <CodexTeamQuotaHistory account={account} />
-                    {quotaItems.length === 0 && !cockpitApiAccountBalanceText && (
+                    {quotaItems.length === 0 && (
                       <span style={{ color: "var(--text-muted)", fontSize: 13 }}>
                         {t("common.shared.quota.noData", "暂无配额数据")}
                       </span>
@@ -2530,7 +2423,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
       const provider = resolveUsageProviderForApiKeyAccount(account);
       const usageMode =
         resolveApiKeyUsageMode(summary) ??
-        (provider?.integrationType === "sub2api" ? "sub2api" : null);
+        (isOpenAIOfficialUsageAccount(account, provider?.baseUrl) ? "openai_official" : provider?.integrationType === "sub2api" ? "sub2api" : null);
       if (!usageMode) return null;
       const coreDetailKeys =
         usageMode === "new_api"
@@ -2553,7 +2446,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
       const visible = visibleApiKeyAccountIds.has(account.id);
       const apiKeyDisplay = resolveApiKeyDisplayText(account, visible);
       const baseUrl =
-        provider?.baseUrl.trim() || (account.api_base_url || "").trim() || "-";
+        resolveAccountUsageBaseUrl(account, provider?.baseUrl) || "-";
       const usedPercent = formatApiKeyUsagePercent(summary);
       const newApiQuota = resolveNewApiQuotaSnapshot(summary);
       const summaryDetails =
@@ -2648,9 +2541,9 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                       "codex.modelProviders.usage.fields.todayRequests",
                       "今日请求",
                     ),
-                    value: summary
-                      ? formatCockpitApiInteger(summary.todayRequests ?? 0)
-                      : "-",
+                    value: summary?.todayRequests != null
+                      ? formatCockpitApiInteger(summary.todayRequests)
+                      : "—",
                   },
                   {
                     key: "todayTokens",
@@ -2658,9 +2551,9 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                       "codex.modelProviders.usage.fields.todayTokens",
                       "今日 Token",
                     ),
-                    value: summary
-                      ? formatCockpitApiTokenCount(summary.todayTotalTokens ?? 0)
-                      : "-",
+                    value: summary?.todayTotalTokens != null
+                      ? formatCockpitApiTokenCount(summary.todayTotalTokens)
+                      : "—",
                   },
                 ]
               : usageMode === "deepseek"
@@ -2779,6 +2672,11 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                   </div>
                 </div>
               </section>
+              {usageMode === "openai_official" ? (
+                <OpenAIOfficialUsagePanel summary={summary} loading={state?.loading} error={state?.error} detailed t={t} />
+              ) : <>
+                {state?.loading && <p className="codex-daily-usage-note" role="status">{t("common.loading")}</p>}
+                {state?.error && <p className="codex-daily-usage-note" role="status">{t("common.shared.quota.queryFailed")}</p>}
               <section className={summaryGridClassName}>
                 {summaryDetails.map((item) => (
                   <div
@@ -2832,6 +2730,7 @@ export function useCodexAccountsRenderers(context: Pick<ReturnType<typeof useCod
                   )}
                 </div>
               </section>
+              </>}
             </div>
             <div className="modal-footer cockpit-api-panel-footer">
               <button

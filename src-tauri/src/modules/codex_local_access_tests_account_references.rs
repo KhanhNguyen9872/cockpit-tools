@@ -68,6 +68,7 @@ fn full_key_edit_migrates_persisted_references_and_failed_edits_remain_retryable
         None,
         None,
         None,
+        None,
     )
     .unwrap();
     let mut store = crate::models::InstanceStore::new();
@@ -108,6 +109,7 @@ fn full_key_edit_migrates_persisted_references_and_failed_edits_remain_retryable
             false,
             false,
             HashMap::new(),
+            None,
             None,
             None,
             None,

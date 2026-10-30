@@ -1660,13 +1660,20 @@
       "center": "Centro",
       "top": "Arriba",
       "bottom": "Abajo",
-      "localHint": "Los cambios se aplican al instante y se guardan automáticamente en este dispositivo. Las imágenes no se suben. Restaurar elimina la imagen guardada.",
+      "localHint": "Los cambios se aplican al instante. La imagen y los ajustes de cada tema se guardan por separado en este dispositivo; las imágenes no se suben. Restaurar los valores predeterminados conserva tus temas.",
       "restore": "Restaurar",
       "imageType": "Elige una imagen JPG, PNG o WebP.",
       "imageSize": "Elige una imagen de menos de 10 MB.",
       "imageRead": "No se pudo leer la imagen. Prueba otro archivo.",
       "storage": "No se pudo cargar o guardar el fondo. Reinténtalo; el fondo anterior se conserva.",
-      "saveFailed": "El fondo se muestra, pero no se pudo guardar. Reinténtalo; se conserva el fondo guardado anteriormente."
+      "saveFailed": "Los cambios se muestran, pero no se pudieron guardar. Reinténtalo; se conservan los temas guardados anteriormente.",
+      "builtInSkins": "Temas incluidos",
+      "mySkins": "Mis temas",
+      "addSkin": "Añadir",
+      "rename": "Renombrar",
+      "skinName": "Nombre del tema",
+      "manageSkin": "Gestionar tema: {{name}}",
+      "deleteSkinConfirm": "¿Eliminar «{{name}}»? Al eliminar el tema activo se restaura el fondo predeterminado."
     }
   },
   "appPath": {
@@ -2398,7 +2405,7 @@
       "check": "Verificar estado",
       "notRunning": "Aún no se ha detectado la instancia de destino. Comprueba más tarde o cierra este diálogo antes de volver a iniciarla.",
       "checkFailed": "No se pudo consultar el estado de ejecución. Vuelve a comprobarlo más tarde.",
-      "maintenanceDeferred": "La comprobación de sesiones no está disponible temporalmente. Se conservó el historial y se omitió este paso de mantenimiento."
+      "maintenanceDeferred": "Parte del mantenimiento sigue pendiente. Se conserva el historial; vuelve a intentarlo desde la gestión de sesiones."
     },
     "launchErrors": {
       "sessionRestoreFailed": "Falló la reparación de sesiones y la restauración está incompleta. Inicio detenido; revisa los registros y las copias de seguridad antes de reintentar.",
@@ -2968,7 +2975,6 @@
         "quotaReserveInvalid": "Introduce un entero del 1 al 100.",
         "strictReserve": "Protección estricta",
         "strictReserveDesc": "La cuota reservada se protege automáticamente con un margen de seguridad. Cerca del límite se permite una solicitud por cuenta y se confirma la cuota actual al terminar. El uso de otros clientes no se limita.",
-        "strictNativeOnly": "La protección estricta requiere el motor Rust. Desactívala antes de cambiar a Go.",
         "safetyMargin": "Margen de seguridad",
         "safetyMarginUnit": "puntos porcentuales",
         "safetyMarginInvalid": "Introduce un entero del 1 al 20.",
@@ -3051,17 +3057,7 @@
       "gatewayModeNewLabel": "Servicio API-Nuevo",
       "gatewayModeOldLabel": "Servicio API-Anterior",
       "gatewayModeSaveSuccess": "Se actualizo el modo de gateway del servicio API",
-      "gatewayEngineNative": "Rust nativo",
-      "gatewayEngineSidecar": "Go (actual)",
-      "gatewayEngineHint": "Rust es el motor predeterminado. La primera actualización cambia a Rust; las elecciones posteriores se conservan. El cambio reinicia el servicio API y puede interrumpir solicitudes activas; las ventanas de Codex permanecen abiertas.",
-      "gatewayEngineSwitching": "Cambiando motor…",
-      "gatewayEngineSwitchFailed": "No se pudo cambiar el motor: {{error}}",
-      "gatewayEngineReadbackFailed": "No se pudo confirmar el motor actual. Actualiza antes de reintentar: {{error}}",
-      "gatewayEngineReadbackTimeout": "Se agotó el tiempo para actualizar el estado",
       "gatewayEngineRequestsBusy": "Hay solicitudes en curso. Reintenta cuando terminen.",
-      "gatewayEngineOperationBusy": "Hay otra operación del servicio en curso. Reintenta en unos instantes.",
-      "gatewayEngineSwitchRestored": "El cambio falló. Se restauró el motor anterior.",
-      "gatewayEngineRestoreFailed": "El cambio falló y no se pudo restaurar el motor anterior. Revisa el estado del servicio antes de reintentar.",
       "gatewayEngineStopped": "El servicio API se detuvo. Reinícialo antes de reintentar.",
       "gatewayGuideTitle": "Cambia el gateway aqui",
       "gatewayGuideDesc": "El gateway nuevo es el predeterminado. Si hay problemas de compatibilidad o errores de solicitud del cliente, vuelve aquí al gateway anterior.",
@@ -3634,9 +3630,9 @@
         "providerLoadFailed": "No se pudieron cargar providers: {{error}}",
         "modeTitle": "Modo de reparación",
         "modeQuick": "Reparación rápida",
-        "modeQuickDesc": "Normaliza proveedores en la base oficial y los índices de sesiones. Conserva los archivos rollout. Para cambios habituales de cuenta.",
+        "modeQuickDesc": "Corrige índices y asignaciones actuales con un plazo breve. Cierra la instancia para escribir metadatos de proyectos.",
         "modeDeep": "Reparación completa",
-        "modeDeepDesc": "Repara proveedores históricos, catálogos, espacios de trabajo e índices de subagentes. Conserva los archivos rollout. Cierra primero la instancia de destino.",
+        "modeDeepDesc": "Incluye reparación rápida, recuperación de proyectos desde copias e índices de chats. Cierra la instancia antes de aplicar.",
         "scopeTitle": "Alcance de sesiones",
         "scopeAll": "Todas las sesiones",
         "scopeAllDesc": "Repara {{count}} sesión(es) de la lista actual.",
@@ -3668,7 +3664,7 @@
         "previewFailedWithError": "Error al previsualizar la reparación de sesiones: {{error}}",
         "confirmRepair": "Confirmar reparación",
         "title": "Reparar historial",
-        "description": "Normaliza los proveedores en los índices SQLite, el catálogo de sesiones y los espacios de trabajo. Los archivos rollout conservan todos sus bytes; solo se corrigen las fechas. Primero se crea una copia de seguridad local.",
+        "description": "La reparación rápida corrige índices de visibilidad y asignaciones actuales. La completa también restaura copias históricas y repara índices de chats. Se crea una copia local antes de escribir y se conserva el contenido de los registros.",
         "stopInstanceHint": "Cierra por completo la instancia seleccionada de Codex App/ChatGPT antes de la reparación completa. Aún puedes previsualizar los cambios.",
         "encryptedContentWarning": "Se detectó historial cifrado por otro proveedor o cuenta. Los metadatos se pueden migrar, pero continuar o compactar esas sesiones puede fallar; vuelve al proveedor/cuenta original o inicia una sesión nueva.",
         "modeHistory": "Edición/ramas",
@@ -3681,7 +3677,13 @@
         "historyFailed": "La reparación de los índices de historial no se completó: {{error}}",
         "historyChanged": "Los datos del chat cambiaron durante la reparación. Esta reparación no se aplicó. Vuelve a intentarlo en unos instantes.",
         "historyScan": "Revisando índices de historial ({{current}}/{{total}})…",
-        "historyReset": "Guardando copias y restableciendo índices incorrectos…"
+        "historyReset": "Guardando copias y restableciendo índices incorrectos…",
+        "projectsChanged": "Los datos han cambiado. Actualiza la vista previa e inténtalo de nuevo.",
+        "projectsFailed": "No se pudieron restaurar los proyectos locales: {{error}}",
+        "projectsPreview": "Vista previa: {{projects}} proyectos, {{assignments}} asignaciones; se omiten {{skipped}} proyectos y {{ambiguous}} chats ambiguos.",
+        "projectsSuccess": "Restauración completada: {{projects}} proyectos, {{assignments}} asignaciones; se omiten {{skipped}} proyectos y {{ambiguous}} chats ambiguos.",
+        "projectsPending": "Se interrumpió una restauración. Cierra la instancia y ejecuta la reparación completa para recuperar las escrituras pendientes.",
+        "projectsDeferred": "Se aplazaron algunos metadatos. Cierra la instancia y repite la reparación rápida, o utiliza la completa."
       },
       "importModal": {
         "title": "Importar sesiones",
@@ -4105,7 +4107,9 @@
         "chatCompletions": "Protocolo Chat Completions",
         "deepseekResponsesHint": "Inicia DeepSeek para elegir puerta de enlace o conexión directa oficial y luego selecciona Flash o Pro. La puerta de enlace lista los modelos en Codex; la conexión directa omite la puerta de enlace.",
         "deepseekChatHint": "DeepSeek Chat Completions usa el puente local de la puerta de enlace para rutas antiguas. Elige Responses cuando necesites el comportamiento oficial de las herramientas de Codex.",
-        "deepseekThirdPartyHint": "Esta dirección no es un endpoint oficial de DeepSeek: se tratará como endpoint compatible de terceros; en el catálogo de modelos usa los ID reales del upstream, no los nombres oficiales."
+        "deepseekThirdPartyHint": "Esta dirección no es un endpoint oficial de DeepSeek: se tratará como endpoint compatible de terceros; en el catálogo de modelos usa los ID reales del upstream, no los nombres oficiales.",
+        "anthropic": "Protocolo Anthropic",
+        "gatewayRequired": "Este protocolo requiere la pasarela local. Selecciona aquí el modelo de inicio."
       },
       "selectSavedProvider": "Proveedores guardados",
       "selectSavedApiKey": "Claves API guardadas",
@@ -4338,7 +4342,22 @@
       "importConfigPlaceholder": "Usa Copiar configuración en la tarjeta del proveedor y pega el contenido aquí",
       "importConfigAction": "Importar configuración",
       "importConfigFromClipboard": "Leer portapapeles",
-      "settingsRestartHint": "Configuración del proveedor actualizada. Reinicia las instancias de Codex o el servicio API que estén usando este proveedor para aplicarla."
+      "settingsRestartHint": "Configuración del proveedor actualizada. Reinicia las instancias de Codex o el servicio API que estén usando este proveedor para aplicarla.",
+      "anthropic": {
+        "auth": "Autenticación",
+        "hint": "Conecta una pasarela Anthropic Messages. Obtén los modelos o introdúcelos manualmente.",
+        "fetch": "Obtener modelos",
+        "fetching": "Cargando…",
+        "fetchFailed": "No se pudieron obtener los modelos. Reintenta o introduce sus identificadores.",
+        "import": "Importar config.",
+        "importFailed": "No se encontró una configuración válida de Claude Code o Desktop Gateway."
+      },
+      "editor": {
+        "modelScope": "Ámbito de modelos",
+        "providerDefault": "Valores del proveedor",
+        "sharedSettings": "Los modelos y sus capacidades se aplican al ámbito elegido. El protocolo, la autenticación y la dirección se comparten en el proveedor.",
+        "saveScope": "Al guardar se actualizan el proveedor y las cuentas vinculadas. Si afecta a la cuenta actual, también se actualizan la configuración y las credenciales locales de Codex. El cliente no se inicia automáticamente."
+      }
     },
     "quickSwitch": {
       "action": "Cambio rápido de proveedor",
@@ -5775,6 +5794,14 @@
       }
     },
     "requestDiagnostics": {
+      "requestSizeTitle": "Tamaño de solicitud",
+      "requestSizeHint": "Tamaño del JSON del cliente descomprimido; campos en bytes JSON compactos. Solo se registran tamaños.",
+      "requestBytes": "Solicitud",
+      "historyBytes": "Historial",
+      "toolsBytes": "Herramientas",
+      "instructionsBytes": "Instrucciones",
+      "overloadRetry": "Reintentos por carga",
+      "overloadRecovery": "Tiempo de recuperación",
       "recordPayloads": "Guardar cuerpos",
       "recordPayloadsHint": "Desactivado por defecto. Guarda localmente copias limitadas de solicitudes del cliente y del servidor. Al desactivarlo se detienen nuevas capturas; los cuerpos guardados pueden borrarse por separado.",
       "privacyHint": "Los campos de autenticación se ocultan, pero pueden quedar secretos en la conversación. Revisa antes de copiar o compartir.",
@@ -5956,6 +5983,21 @@
       "saveWithoutLaunch": "Guardar y continuar",
       "saveOnly": "Solo guardar",
       "validationBusy": "La comprobación de la ruta anterior sigue en curso. Inténtalo de nuevo en unos instantes."
+    },
+    "openaiUsage": {
+      "monthCost": "Gasto del mes",
+      "scope": "Gasto de la organización; solicitudes y tokens solo de las API de texto. Datos en UTC.",
+      "loading": "Consultando uso de OpenAI…",
+      "pending": "Uso de OpenAI pendiente",
+      "permissionRequired": "Esta clave no tiene permiso para leer el uso de la organización (api.usage.read).",
+      "permissionGuide": "Usa una clave de administrador: Admin keys → Restricted → Usage API Scope → Read. Permite consultar gastos y uso, no el saldo restante.",
+      "openAdminKeys": "Permisos de uso",
+      "invalidKey": "La clave no es válida o ha caducado. Revisa la clave API actual.",
+      "networkFailed": "No se puede conectar con el uso de OpenAI. Actualiza más tarde.",
+      "queryFailed": "No se pudo consultar el uso de OpenAI. Inténtalo más tarde."
+    },
+    "officialApi": {
+      "hint": "Cuenta con clave API oficial de OpenAI, identificada por su dirección de conexión real."
     }
   },
   "githubCopilot": {
@@ -8028,7 +8070,7 @@
     "model": "Modelo de prueba",
     "selectModel": "Elegir modelo",
     "verifyHint": "El modelo seleccionado solo prueba la conexión y no limita otros modelos disponibles. La verificación envía una solicitud breve y consume una pequeña parte de tu cuota.",
-    "serviceHint": "Añadir la cuenta al grupo actual no inicia el servicio API. Esta versión requiere el motor nativo.",
+    "serviceHint": "Añadir una cuenta al grupo actual no inicia el servicio API.",
     "verify": "Solo probar",
     "verifyAndJoin": "Probar y añadir",
     "remove": "Quitar del servicio",
@@ -8088,8 +8130,6 @@
       "verify": "La solicitud al modelo no se completó. Repite la prueba.",
       "usage": "El uso del plan o de la aplicación está limitado. Revisa el uso en los ajustes de ChatGPT.",
       "usageUnavailable": "El servicio oficial no puede confirmar el uso ahora. Inténtalo más tarde; esto no significa que hayas agotado el plan.",
-      "native": "El acceso al plan requiere el motor nativo. Cambia de motor en el servicio API antes de continuar.",
-      "nativeSwitch": "Quita las cuentas de plan del servicio API antes de cambiar a otro motor.",
       "browser": "No se puede abrir el navegador. Copia el enlace de acceso y ábrelo manualmente.",
       "configuration": "El registro de autorización no coincide. Repite el acceso o vuelve a conectar el plan.",
       "notVerified": "Verifica el plan antes de añadirlo al servicio API.",
@@ -8269,7 +8309,6 @@
     "title": "Respaldo por capacidad",
     "hint": "Si una cuenta no admite una capacidad requerida, prueba los respaldos en este orden con las asignaciones de modelos existentes.",
     "consent": "El cambio envía esta conversación a la cuenta de respaldo y consume su cuota o genera los cargos correspondientes.",
-    "nativeOnly": "Este motor no ejecuta el respaldo por capacidad. Cambia al motor nativo para activarlo; los ajustes guardados sí se pueden desactivar.",
     "backups": "Cuentas de respaldo",
     "addBackup": "Añadir respaldo",
     "backupEmpty": "Elige respaldos del grupo actual del servicio API antes de activar.",

@@ -68,7 +68,7 @@ export function capabilityFallbackErrorKey(error: unknown): string {
   const code = String(error).replace(/^Error:\s*/, '').trim();
   const keys: Record<string, string> = {
     ACCOUNT_REQUIRED: 'errorBackups', ACCOUNT_NOT_IN_POOL: 'errorMembers', INVALID_MODEL: 'errorModel',
-    DUPLICATE_OVERRIDE: 'errorDuplicate', NATIVE_REQUIRED: 'nativeOnly',
+    DUPLICATE_OVERRIDE: 'errorDuplicate',
   };
   const key = code.startsWith('CAPABILITY_FALLBACK_') ? keys[code.slice('CAPABILITY_FALLBACK_'.length)] : undefined;
   return `capabilityFallback.${key ?? 'errorGeneric'}`;

@@ -14,6 +14,9 @@ pub(super) use capability::retry as retry_capability;
 #[path = "mapping_official_fallback.rs"]
 mod official_fallback;
 pub(super) use official_fallback::retry as retry_official_local;
+#[path = "mapping_continuation.rs"]
+mod continuation;
+pub(super) use continuation::recover as recover_previous;
 
 #[derive(Clone)]
 pub(super) struct Prepared {
@@ -39,6 +42,7 @@ pub(super) struct Prepared {
     pub capability_fallback_enabled: bool,
     pub capability_fallback: Option<super::diagnostics::CapabilityFallbackTrace>,
     pub transport_pinned: bool,
+    pub continuation_recovered: bool,
     pub preflight_attempts: Vec<super::diagnostics::DiagnosticAttempt>,
 }
 
@@ -156,19 +160,39 @@ async fn prepare_excluding(
     execution
         .run(super::execution::prepare(
             state,
-            prepare_excluding_inner(
-                state,
-                caller,
-                incoming,
-                body,
-                preferred,
-                excluded_account_ids,
-                capability_fallback_from,
-                compact,
-                websocket,
-            ),
+            async {
+                let expanded = if !compact && preferred.is_none() && execution.policy.account_switch_rebuild {
+                    expand_partial_history(state, caller, incoming, &body).await?
+                } else { None };
+                let original = expanded.as_ref().map(|_| body.clone());
+                let mut prepared = prepare_excluding_inner(
+                    state, caller, incoming, expanded.as_ref().map(|partial|partial.body.clone()).unwrap_or(body), preferred,
+                    excluded_account_ids, capability_fallback_from, compact, websocket,
+                    expanded.as_ref().map(|partial| partial.account_id.as_str()),
+                ).await?;
+                if let Some(original) = original {
+                    prepared.source_body = original;
+                    if !prepared.rebuild_applied { prepared.bridge_body = expanded.map(|partial|partial.body); }
+                }
+                Ok(prepared)
+            },
         ))
         .await
+}
+
+pub(super) async fn expand_partial_history(
+    state: &AppState,
+    caller: &Caller,
+    headers: &HeaderMap,
+    body: &Value,
+) -> Result<Option<super::identity::PartialHistory>, ServiceError> {
+    if body.get("previous_response_id").and_then(Value::as_str).is_none() { return Ok(None); }
+    let identity = state.identity.clone();
+    let caller = caller.id.clone();
+    let headers = headers.clone();
+    let body = body.clone();
+    let limit = state.options.max_body_bytes;
+    super::blocking::run_prepared(state, move || identity.expand_partial_history(&caller, &headers, &body, limit)).await
 }
 
 async fn prepare_excluding_inner(
@@ -181,7 +205,9 @@ async fn prepare_excluding_inner(
     capability_fallback_from: Option<String>,
     compact: bool,
     websocket: bool,
+    partial_owner: Option<&str>,
 ) -> Result<Prepared, ServiceError> {
+    body = super::request_compat::ingress(body)?;
     apply_request_image_policy(incoming, &mut body);
     let model = body
         .get("model")
@@ -197,6 +223,7 @@ async fn prepare_excluding_inner(
             .is_some_and(|execution| execution.policy.account_switch_rebuild);
     let mut context =
         inspect_mode(state, caller, incoming, &body, requested_rebuild || compact).await?;
+    if let Some(owner) = partial_owner { context.prefer_partial_owner(owner)?; }
     // A preferred owner supplied by the partial-HTTP continuation path is a
     // transport constraint, not a replaceable affinity hint.
     let enabled = requested_rebuild && preferred.is_none();
@@ -630,7 +657,9 @@ async fn finalize(
         // They do not create a generated-history checkpoint, but validated
         // portable blobs must survive identity rewriting unchanged.
         context.disable_checkpoints();
-    } else if selected.wire_api != super::contract::WireApi::Responses {
+    } else if selected.wire_api == super::contract::WireApi::Chat {
+        // The direct Anthropic adapter preserves canonical tool and opaque
+        // state, so it participates in authenticated Responses checkpoints.
         context.disable_rebuild();
     }
     body["model"] = Value::String(selected.model.clone());
@@ -698,6 +727,7 @@ async fn finalize(
         capability_fallback_enabled: selection.enabled,
         capability_fallback: selection.trace,
         transport_pinned,
+        continuation_recovered: false,
         preflight_attempts,
     })
 }
@@ -806,6 +836,7 @@ pub(super) async fn observe_event(
     prepared: &Prepared,
     event: &Value,
 ) -> Result<(), ServiceError> {
+    prepared.binding.note_partial_content(event);
     let kind = event.get("type").and_then(Value::as_str);
     let reusable = matches!(
         kind,
@@ -830,7 +861,9 @@ pub(super) async fn observe_event(
     let identity = state.identity.clone();
     let binding = prepared.binding.clone();
     let event = event.clone();
-    super::blocking::run_tracked(state, move || identity.observe_event(&binding, &event)).await
+    let replay = (event["type"] == "response.incomplete")
+        .then(|| prepared.rebuild_plan.as_ref().map(|plan| plan.body.clone())).flatten();
+    super::blocking::run_tracked(state, move || identity.observe_event_with_partial_history(&binding, &event, replay.as_ref())).await
 }
 
 async fn inspect_mode(
@@ -850,7 +883,7 @@ async fn inspect_mode(
     .await
 }
 
-/// A 401 is the only automatic replay: same account and owner, before any output.
+/// Refresh a 401 on the same account and owner before any output.
 pub(super) async fn refresh(state: &AppState, prepared: &mut Prepared) -> Result<(), ServiceError> {
     refresh_route(state, prepared, true).await
 }
@@ -859,6 +892,57 @@ pub(super) async fn refresh(state: &AppState, prepared: &mut Prepared) -> Result
 /// retains the account/owner fence and performs no forced credential refresh.
 pub(super) async fn refresh_transport(state: &AppState, prepared: &mut Prepared) -> Result<(), ServiceError> {
     refresh_route(state, prepared, false).await
+}
+
+/// A known connection-local parent may still be running/incomplete. Validate
+/// all other opaque input and reauthorize the pinned route without treating
+/// this control message as a new full response.create or a portable transcript.
+pub(super) async fn prepare_control(
+    state: &AppState, caller: &Caller, incoming: &HeaderMap,
+    parent: &Prepared, body: Value,
+) -> Result<Prepared, ServiceError> {
+    if state.authorize(incoming).await?.id != caller.id {
+        return Err(ServiceError::new(401, "invalid_api_key", "WebSocket credential is no longer valid"));
+    }
+    let mut next = parent.clone();
+    super::execution::within(state, state.host.validate_websocket_control(caller, &next.route, &next.request)).await?;
+    if next.route.permit.is_none() {
+        next.execution = super::execution::current_or_new(state).await?;
+        refresh_transport(state, &mut next).await?;
+        if super::websocket::websocket_transport_changed(&parent.route, &next.route) {
+            return Err(ServiceError::new(409, "transport_route_changed", "Steering cannot change the active upstream connection"));
+        }
+    }
+    if !super::execution::within(state, state.host.responses_websocket_passthrough(caller, &next.route)).await? {
+        return Err(ServiceError::new(409, "steer_transport_unavailable", "Steering requires an enabled upstream WebSocket"));
+    }
+    let mut inspected = body.clone();
+    inspected.as_object_mut().unwrap().remove("previous_response_id");
+    let context = inspect_mode(state, caller, incoming, &inspected, false).await?;
+    let mut wire = super::execution::within(state, state.host.prepare_body(caller, &next.route, incoming, body.clone(), false, false)).await?;
+    let fields = wire.as_object().unwrap().keys().cloned().collect::<std::collections::HashSet<_>>();
+    let identity = state.identity.clone();
+    let account = next.route.continuity_id().to_owned();
+    let owner = next.route.owner_id.clone();
+    let mut headers = next.headers.clone();
+    let (mut wire, binding) = super::blocking::run_prepared(state, move || {
+        let binding = identity.rewrite(&context, &account, &owner, &mut headers, &mut wire)?;
+        wire.as_object_mut().unwrap().retain(|key, _| fields.contains(key));
+        Ok((wire, binding.steering_scope()))
+    }).await?;
+    let prior_context = next.multi_agent_context.clone();
+    super::multi_agent_transport::prepare(&mut next, &mut wire)?;
+    let endpoint = next.route.websocket_endpoint.as_ref().map_or(next.route.base_url.as_str(), |endpoint| endpoint.base_url.as_str());
+    super::codex_wire::normalize_steering(&mut wire, next.route.chatgpt, endpoint);
+    next.multi_agent_context.inherit_plaintext(&prior_context);
+    next.multi_agent_context.optimized_namespace |= prior_context.optimized_namespace;
+    next.body = wire;
+    next.source_body = body;
+    next.bridge_body = None;
+    next.rebuild_plan = None;
+    next.rebuild_applied = false;
+    next.binding = binding;
+    Ok(next)
 }
 
 async fn refresh_route(state: &AppState, prepared: &mut Prepared, force_refresh: bool) -> Result<(), ServiceError> {
@@ -949,7 +1033,7 @@ pub(super) async fn rewrite_body(
 async fn rewrite_body_inner(
     state: &AppState,
     prepared: &Prepared,
-    mut body: Value,
+    body: Value,
 ) -> Result<Value, ServiceError> {
     let mut context = inspect_mode(
         state,
@@ -963,6 +1047,15 @@ async fn rewrite_body_inner(
     )
     .await?;
     context.retain_binding_generation(&prepared.binding);
+    Ok(rewrite_with_context(state, prepared, context, body).await?.0)
+}
+
+async fn rewrite_with_context(
+    state: &AppState,
+    prepared: &Prepared,
+    context: RequestIdentity,
+    mut body: Value,
+) -> Result<(Value, HeaderMap, Binding), ServiceError> {
     body["model"] = Value::String(prepared.route.model.clone());
     apply_grok_thinking(
         &prepared.route,
@@ -986,9 +1079,9 @@ async fn rewrite_body_inner(
     let account = prepared.route.continuity_id().to_owned();
     let owner = prepared.route.owner_id.clone();
     let mut headers = prepared.headers.clone();
-    let (mut body, mut headers) = super::blocking::run_prepared(state, move || {
-        store.rewrite(&context, &account, &owner, &mut headers, &mut body)?;
-        Ok((body, headers))
+    let (mut body, mut headers, binding) = super::blocking::run_prepared(state, move || {
+        let binding = store.rewrite(&context, &account, &owner, &mut headers, &mut body)?;
+        Ok((body, headers, binding))
     })
     .await?;
     super::account_installation::apply(&prepared.route, &mut headers, &mut body)?;
@@ -1000,7 +1093,7 @@ async fn rewrite_body_inner(
             body["service_tier"] = Value::String(tier.clone());
         }
     }
-    Ok(body)
+    Ok((body, headers, binding))
 }
 
 fn apply_grok_thinking(

@@ -644,3 +644,5 @@ async fn native_codex_responses_h2_reads_large_chunked_sse_through_the_completed
     drop(client);
     server.await.unwrap();
 }
+
+include!("codex_local_access_native_transport_recovery_tests.rs");

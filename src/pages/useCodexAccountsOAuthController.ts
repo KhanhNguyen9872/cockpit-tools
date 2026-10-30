@@ -4,7 +4,7 @@ import * as codexService from "../services/codexService";
 import * as codexInstanceService from "../services/codexInstanceService";
 import * as codexLocalAccessService from "../services/codexLocalAccessService";
 import { useModalErrorState } from "../components/ModalErrorMessage";
-import { isCodexApiKeyAccount, type CodexProviderWireApi, type CodexApiProviderMode } from "../types/codex";
+import { isCodexApiKeyAccount, type CodexApiProviderMode } from "../types/codex";
 import { isCodexOAuthBindingEligibleAccount } from "../utils/codexLocalAccessAccounts";
 import { mergeIdListsPreferExisting, subscribeUserMemory } from "../utils/userMemory";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
@@ -24,7 +24,7 @@ import { type ApiKeyFunPrefillPayload } from "../utils/apiKeyFunPrefill";
 import { resolveCodexProviderCapabilityProfile } from "../utils/codexProviderGateway";
 import { contextWindowDraftsFromRecord } from "../utils/codexModelContextWindows";
 import { resolveCodexModelProviderForApiKey } from "../utils/codexModelProviderKeyConfig";
-import { findCodexModelProviderById, findCodexModelProviderByBaseUrl, mergeCodexModelProviderApiKeysFromAccounts, type CodexModelProvider } from "../services/codexModelProviderService";
+import { findCodexModelProviderById, findCodexModelProviderByBaseUrl, listCodexModelProviders, mergeCodexModelProviderApiKeysFromAccounts, type CodexModelProvider } from "../services/codexModelProviderService";
 import { readCodexApiKeyUsageCache, type CodexApiKeyUsageState } from "../services/codexApiKeyUsageRefreshService";
 import { parseMfaCredentialInput, upsertSavedMfaRecord } from "../utils/mfaVault";
 import { DEFAULT_CODEX_API_BASE_URL, DEFAULT_CODEX_API_PROVIDER_ID, getDefaultApiProviderPresetId, isSameHttpBaseUrl, normalizeHttpBaseUrl, normalizeSponsorApiProviderTemplates, OPENAI_OFFICIAL_PRESET_ID, parseApiModelCatalogText, resolveApiProviderPresetDefaults, type OAuthBindingQuotaReserveFieldErrors, type OAuthBindingTargetKind, type SponsorApiProviderTemplate } from "./codexAccountsControllerModel";
@@ -215,43 +215,6 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
     const [editingApiKeyCredentialsId, setEditingApiKeyCredentialsId] = useState<
       string | null
     >(null);
-    const [editingApiKeyCredentialsValue, setEditingApiKeyCredentialsValue] =
-      useState("");
-    const [editingApiKeyCredentialsVisible, setEditingApiKeyCredentialsVisible] =
-      useState(false);
-    const [
-      editingApiBaseUrlCredentialsValue,
-      setEditingApiBaseUrlCredentialsValue,
-    ] = useState("");
-    const [editingApiProviderPresetId, setEditingApiProviderPresetId] = useState(
-      DEFAULT_CODEX_API_PROVIDER_ID,
-    );
-    const [editingApiWireApi, setEditingApiWireApi] = useState<CodexProviderWireApi>("responses");
-    const [editingApiSupportsWebsockets, setEditingApiSupportsWebsockets] = useState(false);
-    const [editingApiCredentialsError, setEditingApiCredentialsError] = useState<string | null>(null);
-    const [editingApiModelCatalogInput, setEditingApiModelCatalogInput] =
-      useState("");
-    const [
-      editingApiModelContextWindowsInput,
-      setEditingApiModelContextWindowsInput,
-    ] = useState<Record<string, string>>({});
-    const [
-      editingApiSyncModelCatalogToCodex,
-      setEditingApiSyncModelCatalogToCodex,
-    ] = useState(false);
-    const [editingApiModelCatalogFetching, setEditingApiModelCatalogFetching] =
-      useState(false);
-    const [editingApiModelCatalogError, setEditingApiModelCatalogError] =
-      useState<string | null>(null);
-    const [editingManagedProviderId, setEditingManagedProviderId] =
-      useState<string>("");
-    const [editingManagedProviderApiKeyId, setEditingManagedProviderApiKeyId] =
-      useState<string>("");
-    const [
-      editingNewManagedProviderNameInput,
-      setEditingNewManagedProviderNameInput,
-    ] = useState("");
-    const [savingApiKeyCredentials, setSavingApiKeyCredentials] = useState(false);
     const [quickSwitchAccountId, setQuickSwitchAccountId] = useState<
       string | null
     >(null);
@@ -347,10 +310,6 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
       () => getDefaultApiProviderPresetId(sponsorApiProviderTemplates),
       [sponsorApiProviderTemplates],
     );
-    const selectedEditingApiProviderPreset = useMemo(
-      () => findCodexApiProviderPresetById(editingApiProviderPresetId),
-      [editingApiProviderPresetId],
-    );
     const selectedManagedProvider = useMemo(
       () =>
         managedProviders.find((item) => item.id === managedProviderId) ?? null,
@@ -363,19 +322,6 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
         ) ?? null,
       [managedProviderApiKeyId, selectedManagedProvider],
     );
-    const selectedEditingManagedProvider = useMemo(
-      () =>
-        managedProviders.find((item) => item.id === editingManagedProviderId) ??
-        null,
-      [editingManagedProviderId, managedProviders],
-    );
-    const selectedEditingManagedProviderApiKey = useMemo(
-      () =>
-        selectedEditingManagedProvider?.apiKeys.find(
-          (item) => item.id === editingManagedProviderApiKeyId,
-        ) ?? null,
-      [editingManagedProviderApiKeyId, selectedEditingManagedProvider],
-    );
     const selectedKeyCatalogIdentity = useRef({ add: "", edit: "" });
     useEffect(() => {
       const identity = `${managedProviderId}:${managedProviderApiKeyId}`;
@@ -386,22 +332,9 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
       setApiModelCatalogInput((effective.modelCatalog ?? []).join("\n"));
       setApiModelContextWindowsInput(contextWindowDraftsFromRecord(effective.modelContextWindows, effective.modelCatalog ?? []));
     }, [managedProviderId, managedProviderApiKeyId, selectedManagedProvider, selectedManagedProviderApiKey]);
-    useEffect(() => {
-      const identity = `${editingManagedProviderId}:${editingManagedProviderApiKeyId}`;
-      if (selectedKeyCatalogIdentity.current.edit === identity) return;
-      selectedKeyCatalogIdentity.current.edit = identity;
-      if (!selectedEditingManagedProvider || !selectedEditingManagedProviderApiKey) return;
-      const effective = resolveCodexModelProviderForApiKey(selectedEditingManagedProvider, selectedEditingManagedProviderApiKey.apiKey);
-      setEditingApiModelCatalogInput((effective.modelCatalog ?? []).join("\n"));
-      setEditingApiModelContextWindowsInput(contextWindowDraftsFromRecord(effective.modelContextWindows, effective.modelCatalog ?? []));
-    }, [editingManagedProviderId, editingManagedProviderApiKeyId, selectedEditingManagedProvider, selectedEditingManagedProviderApiKey]);
     const apiModelCatalogDraft = useMemo(
       () => parseApiModelCatalogText(apiModelCatalogInput),
       [apiModelCatalogInput],
-    );
-    const editingApiModelCatalogDraft = useMemo(
-      () => parseApiModelCatalogText(editingApiModelCatalogInput),
-      [editingApiModelCatalogInput],
     );
     const apiModelCatalogSyncAvailable = useMemo(
       () =>
@@ -421,30 +354,11 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
         selectedSponsorApiProviderTemplate?.wireApi,
       ],
     );
-    const editingApiModelCatalogSyncAvailable = useMemo(
-      () =>
-        editingApiProviderPresetId !== OPENAI_OFFICIAL_PRESET_ID &&
-        resolveCodexProviderCapabilityProfile({
-          presetId: editingApiProviderPresetId,
-          baseUrl: editingApiBaseUrlCredentialsValue,
-          wireApi: editingApiWireApi,
-        }).wireApi === "responses",
-      [
-        editingApiBaseUrlCredentialsValue,
-        editingApiProviderPresetId,
-        editingApiWireApi,
-      ],
-    );
     useEffect(() => {
       if (!apiModelCatalogSyncAvailable) {
         setApiSyncModelCatalogToCodex(false);
       }
     }, [apiModelCatalogSyncAvailable]);
-    useEffect(() => {
-      if (!editingApiModelCatalogSyncAvailable) {
-        setEditingApiSyncModelCatalogToCodex(false);
-      }
-    }, [editingApiModelCatalogSyncAvailable]);
     const quickSwitchAccount = useMemo(
       () =>
         quickSwitchAccountId
@@ -577,6 +491,8 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
     const reloadManagedProviders = useCallback(async () => {
       setManagedProvidersLoading(true);
       try {
+        setManagedProviders(await listCodexModelProviders());
+        setManagedProvidersLoading(false);
         const items = await mergeCodexModelProviderApiKeysFromAccounts(accounts);
         setManagedProviders(items);
       } catch (err) {
@@ -599,7 +515,7 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
         apiProviderId?: string;
         apiProviderName?: string;
         apiModelCatalog?: string[];
-        apiWireApi?: "responses" | "chat_completions";
+        apiWireApi?: "responses" | "chat_completions" | "anthropic";
         apiSupportsWebsockets?: boolean;
         apiSupportsVision?: boolean;
         apiModelVisionSupport?: Record<string, boolean>;
@@ -980,64 +896,6 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
       setApiKeyInput(selectedManagedProviderApiKey.apiKey);
       setApiKeyInputVisible(false);
     }, [managedProviderApiKeyId, selectedManagedProviderApiKey]);
-  
-    useEffect(() => {
-      if (editingApiProviderPresetId === OPENAI_OFFICIAL_PRESET_ID) {
-        setEditingManagedProviderId("");
-        setEditingManagedProviderApiKeyId("");
-        return;
-      }
-  
-      const matchedById = editingManagedProviderId
-        ? findCodexModelProviderById(managedProviders, editingManagedProviderId)
-        : null;
-      const matchedByUrl = editingApiBaseUrlCredentialsValue.trim()
-        ? findCodexModelProviderByBaseUrl(
-            managedProviders,
-            editingApiBaseUrlCredentialsValue,
-          )
-        : null;
-      const matched =
-        matchedById &&
-        isSameHttpBaseUrl(matchedById.baseUrl, editingApiBaseUrlCredentialsValue)
-          ? matchedById
-          : matchedByUrl;
-  
-      if (matched) {
-        if (editingManagedProviderId !== matched.id) {
-          setEditingManagedProviderId(matched.id);
-        }
-      } else if (editingManagedProviderId) {
-        setEditingManagedProviderId("");
-        setEditingManagedProviderApiKeyId("");
-        return;
-      } else {
-        setEditingManagedProviderApiKeyId("");
-        return;
-      }
-  
-      if (matched.apiKeys.length === 0) {
-        setEditingManagedProviderApiKeyId("");
-        return;
-      }
-      setEditingManagedProviderApiKeyId((prev) => {
-        if (matched.apiKeys.some((item) => item.id === prev)) return prev;
-        return matched.apiKeys[0]?.id ?? "";
-      });
-    }, [
-      editingApiBaseUrlCredentialsValue,
-      editingApiProviderPresetId,
-      editingManagedProviderId,
-      managedProviders,
-    ]);
-  
-    useEffect(() => {
-      if (!selectedEditingManagedProviderApiKey) return;
-      setEditingApiKeyCredentialsValue(
-        selectedEditingManagedProviderApiKey.apiKey,
-      );
-      setEditingApiKeyCredentialsVisible(false);
-    }, [editingManagedProviderApiKeyId, selectedEditingManagedProviderApiKey]);
   
     useEffect(() => {
       if (!quickSwitchAccountId) return;
@@ -2230,29 +2088,9 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
     deviceAuthStarting,
     deviceCodeCopied,
     draggedCustomSortAccountId,
-    editingApiBaseUrlCredentialsValue,
-    editingApiWireApi,
-    editingApiSupportsWebsockets,
-    editingApiCredentialsError,
-    setEditingApiWireApi,
-    setEditingApiSupportsWebsockets,
-    setEditingApiCredentialsError,
     editingApiKeyCredentialsId,
-    editingApiKeyCredentialsValue,
-    editingApiKeyCredentialsVisible,
     editingApiKeyNameId,
     editingApiKeyNameValue,
-    editingApiModelCatalogDraft,
-    editingApiModelCatalogError,
-    editingApiModelCatalogFetching,
-    editingApiModelCatalogInput,
-    editingApiModelCatalogSyncAvailable,
-    editingApiModelContextWindowsInput,
-    editingApiProviderPresetId,
-    editingApiSyncModelCatalogToCodex,
-    editingManagedProviderApiKeyId,
-    editingManagedProviderId,
-    editingNewManagedProviderNameInput,
     handleCopyDeviceCode,
     handleCopyOauthUrl,
     handleOpenCodexSecuritySettings,
@@ -2324,12 +2162,8 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
     quickSwitchSubmitting,
     reloadManagedProviders,
     resolveManagedProviderIdForAccount,
-    savingApiKeyCredentials,
     savingApiKeyNameId,
     selectedApiProviderPreset,
-    selectedEditingApiProviderPreset,
-    selectedEditingManagedProvider,
-    selectedEditingManagedProviderApiKey,
     selectedManagedProvider,
     selectedManagedProviderApiKey,
     selectedOAuthBindingAccount,
@@ -2351,21 +2185,9 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
     setCustomSortDropTargetId,
     setCustomSortOrder,
     setDraggedCustomSortAccountId,
-    setEditingApiBaseUrlCredentialsValue,
     setEditingApiKeyCredentialsId,
-    setEditingApiKeyCredentialsValue,
-    setEditingApiKeyCredentialsVisible,
     setEditingApiKeyNameId,
     setEditingApiKeyNameValue,
-    setEditingApiModelCatalogError,
-    setEditingApiModelCatalogFetching,
-    setEditingApiModelCatalogInput,
-    setEditingApiModelContextWindowsInput,
-    setEditingApiProviderPresetId,
-    setEditingApiSyncModelCatalogToCodex,
-    setEditingManagedProviderApiKeyId,
-    setEditingManagedProviderId,
-    setEditingNewManagedProviderNameInput,
     setManagedProviderApiKeyId,
     setManagedProviderId,
     setManagedProviders,
@@ -2387,7 +2209,6 @@ export function useCodexAccountsOAuthController(context: Pick<ReturnType<typeof 
     setQuickSwitchError,
     setQuickSwitchProviderId,
     setQuickSwitchSubmitting,
-    setSavingApiKeyCredentials,
     setSavingApiKeyNameId,
     setShowCustomSortModal,
     setSwitching,

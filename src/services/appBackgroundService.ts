@@ -3,6 +3,30 @@ import { DEFAULT_APP_BACKGROUND, normalizeAppBackground, type AppBackgroundSetti
 export interface AppBackgroundRecord {
   settings: AppBackgroundSettings;
   image: Blob | null;
+  /** Optional only for records saved before the skin library was introduced. */
+  skins?: BackgroundSkin[];
+  activeSkinId?: string | null;
+}
+
+export interface BackgroundSkin {
+  id: string;
+  name: string;
+  image: Blob;
+  settings: AppBackgroundSettings;
+}
+
+/** Upgrade the old single-image record in memory; the next edit saves it atomically. */
+export function normalizeBackgroundRecord(record: AppBackgroundRecord): AppBackgroundRecord {
+  const settings = normalizeAppBackground(record.settings);
+  const skins = (record.skins ?? []).map(skin => ({ ...skin, settings: normalizeAppBackground({ ...skin.settings, preset: 'custom' }) }));
+  let activeSkinId = record.activeSkinId ?? null;
+  if (!record.skins && record.image instanceof Blob) {
+    skins.push({ id: 'legacy-custom', name: '', image: record.image, settings: { ...settings, preset: 'custom' } });
+    if (settings.preset === 'custom') activeSkinId = 'legacy-custom';
+  }
+  const active = settings.preset === 'custom' ? skins.find(skin => skin.id === activeSkinId) : undefined;
+  if (settings.preset === 'custom' && !active) settings.preset = 'default';
+  return { settings: active ? active.settings : settings, image: active?.image ?? null, skins, activeSkinId: active?.id ?? null };
 }
 
 /** Backgrounds belong to this WebView's local storage, never account exports or network sync. */
@@ -39,11 +63,7 @@ async function transaction(write?: AppBackgroundRecord): Promise<AppBackgroundRe
 
 export async function loadAppBackground(): Promise<AppBackgroundRecord> {
   const record = await transaction();
-  if (!record) return { settings: { ...DEFAULT_APP_BACKGROUND }, image: null };
-  const image = record.image instanceof Blob ? record.image : null;
-  const settings = normalizeAppBackground(record.settings);
-  if (settings.preset === 'custom' && !image) settings.preset = 'default';
-  return { settings, image };
+  return normalizeBackgroundRecord(record ?? { settings: { ...DEFAULT_APP_BACKGROUND }, image: null });
 }
 
 export async function saveAppBackground(record: AppBackgroundRecord): Promise<void> {

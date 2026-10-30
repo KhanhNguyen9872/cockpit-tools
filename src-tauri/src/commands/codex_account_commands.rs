@@ -2307,6 +2307,7 @@ pub fn add_codex_account_with_api_key(
     api_vision_routing_model: Option<String>,
     account_name: Option<String>,
     api_model_context_windows: Option<std::collections::HashMap<String, i64>>,
+    api_auth_scheme: Option<String>,
 ) -> Result<CodexAccount, String> {
     let account = codex_account::upsert_api_key_account(
         api_key,
@@ -2323,6 +2324,7 @@ pub fn add_codex_account_with_api_key(
         api_vision_routing_model,
         account_name,
         api_model_context_windows,
+        api_auth_scheme.clone(),
     )?;
     codex_account::load_account(&account.id).ok_or_else(|| "账号保存后无法读取".to_string())
 }
@@ -2431,6 +2433,7 @@ pub async fn update_codex_api_key_credentials(
     api_vision_routing_model: Option<String>,
     account_name: Option<String>,
     api_model_context_windows: Option<std::collections::HashMap<String, i64>>,
+    api_auth_scheme: Option<String>,
 ) -> Result<CodexAccount, String> {
     tauri::async_runtime::spawn_blocking(move || codex_account::update_api_key_credentials(
         &account_id,
@@ -2448,6 +2451,7 @@ pub async fn update_codex_api_key_credentials(
         api_vision_routing_model,
         account_name,
         api_model_context_windows,
+        api_auth_scheme.clone(),
     ))
     .await.map_err(|error| format!("更新 API Key 任务失败: {}", error))?
 }
@@ -2466,6 +2470,7 @@ pub async fn sync_codex_api_key_provider_accounts(
     api_model_vision_support: Option<std::collections::HashMap<String, bool>>,
     api_vision_routing_model: Option<String>,
     api_model_context_windows: Option<std::collections::HashMap<String, i64>>,
+    api_auth_scheme: Option<String>,
 ) -> Result<usize, String> {
     tauri::async_runtime::spawn_blocking(move || {
         codex_account::sync_api_key_provider_accounts(
@@ -2481,6 +2486,7 @@ pub async fn sync_codex_api_key_provider_accounts(
             api_model_vision_support.unwrap_or_default(),
             api_vision_routing_model,
             api_model_context_windows,
+            api_auth_scheme.clone(),
         )
     })
     .await

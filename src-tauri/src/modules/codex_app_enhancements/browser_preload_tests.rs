@@ -178,6 +178,11 @@ async fn waits_for_trusted_profile_without_blocking_target_and_registers_complet
         super::super::fast::browser_preload_source(true, false, true, true, "test-preload");
     source.send(Some(script.clone())).unwrap();
     let adds = wait_for(&mock, "Page.addScriptToEvaluateOnNewDocument", 1).await;
+    let commands = mock.commands.lock().unwrap().clone();
+    let enable = commands.iter().position(|v| v["method"] == "Page.enable").unwrap();
+    let add = commands.iter().position(|v| v["method"] == "Page.addScriptToEvaluateOnNewDocument").unwrap();
+    assert!(enable < add, "enable the target Page domain before registering preload");
+    assert_eq!(commands[enable]["sessionId"], "one");
     let installed = adds[0]["params"]["source"].as_str().unwrap();
     assert!(installed.contains("__cockpitStartupPreloadStarted"));
     assert!(installed.contains("document-already-started"));
@@ -418,6 +423,20 @@ async fn verified_configuration_change_replaces_script_and_detached_session_is_n
     );
     stop.send(true).unwrap();
     task.await.unwrap().unwrap();
+    assert_never_paused_or_navigated(&mock);
+    mock.task.abort();
+}
+
+#[tokio::test]
+async fn rejected_page_enable_never_registers_an_inert_preload() {
+    let mock = mock(Some("Page.enable"), false, Duration::ZERO).await;
+    let (_source, receiver) = watch::channel(Some("verified".into()));
+    let (_stop, stopping) = watch::channel(false);
+    let task = spawn(&mock, receiver, stopping, Duration::from_secs(5));
+    wait_for(&mock, "Target.setAutoAttach", 1).await;
+    mock.event.send(attached("page", "page", "about:blank", false)).unwrap();
+    assert!(timeout(Duration::from_secs(2), task).await.unwrap().unwrap().unwrap_err().contains("rejected"));
+    assert!(!mock.commands.lock().unwrap().iter().any(|v| v["method"] == "Page.addScriptToEvaluateOnNewDocument"));
     assert_never_paused_or_navigated(&mock);
     mock.task.abort();
 }

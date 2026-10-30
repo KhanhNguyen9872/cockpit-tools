@@ -1707,13 +1707,20 @@
       "center": "Tengah",
       "top": "Atas",
       "bottom": "Bawah",
-      "localHint": "Perubahan langsung diterapkan dan disimpan otomatis di perangkat ini. Gambar tidak diunggah. Pulihkan menghapus gambar tersimpan.",
+      "localHint": "Perubahan langsung diterapkan. Gambar dan pengaturan setiap tema disimpan secara terpisah di perangkat ini; gambar tidak diunggah. Memulihkan pengaturan bawaan tidak menghapus tema Anda.",
       "restore": "Pulihkan",
       "imageType": "Pilih gambar JPG, PNG, atau WebP.",
       "imageSize": "Pilih gambar di bawah 10 MB.",
       "imageRead": "Gambar tidak dapat dibaca. Coba berkas lain.",
       "storage": "Latar tidak dapat dimuat atau disimpan. Coba lagi; latar sebelumnya tetap tersimpan.",
-      "saveFailed": "Latar ditampilkan tetapi belum tersimpan. Coba lagi; latar yang sebelumnya tersimpan tetap dipertahankan."
+      "saveFailed": "Perubahan terlihat, tetapi gagal disimpan. Coba lagi; tema yang tersimpan sebelumnya tetap dipertahankan.",
+      "builtInSkins": "Tema bawaan",
+      "mySkins": "Tema saya",
+      "addSkin": "Tambah tema",
+      "rename": "Ubah nama",
+      "skinName": "Nama tema",
+      "manageSkin": "Kelola tema: {{name}}",
+      "deleteSkinConfirm": "Hapus “{{name}}”? Menghapus tema aktif akan memulihkan latar bawaan."
     }
   },
   "appPath": {
@@ -2445,7 +2452,7 @@
       "check": "Periksa status",
       "notRunning": "Instans tujuan belum terdeteksi. Periksa lagi nanti, atau tutup dialog ini sebelum mencoba meluncurkan kembali.",
       "checkFailed": "Status aplikasi tidak dapat dibaca. Silakan periksa lagi nanti.",
-      "maintenanceDeferred": "Pemeriksaan sesi sementara tidak tersedia. Riwayat tetap tersimpan dan langkah pemeliharaan ini dilewati."
+      "maintenanceDeferred": "Sebagian pemeliharaan belum selesai. Riwayat tetap terjaga; coba lagi melalui pengelolaan sesi."
     },
     "launchErrors": {
       "sessionRestoreFailed": "Perbaikan sesi gagal dan pemulihan cadangan belum selesai. Peluncuran dihentikan; periksa log dan cadangan sebelum mencoba lagi.",
@@ -3018,7 +3025,6 @@
         "quotaReserveInvalid": "Masukkan bilangan bulat dari 1 sampai 100.",
         "strictReserve": "Perlindungan ketat",
         "strictReserveDesc": "Kuota cadangan dilindungi otomatis dengan margin keamanan. Mendekati batas, setiap akun hanya mengirim satu permintaan lalu mengonfirmasi kuota terbaru setelah selesai. Penggunaan klien lain tidak dibatasi.",
-        "strictNativeOnly": "Perlindungan ketat memerlukan mesin Rust. Nonaktifkan sebelum beralih ke Go.",
         "safetyMargin": "Margin aman",
         "safetyMarginUnit": "poin persentase",
         "safetyMarginInvalid": "Masukkan bilangan bulat dari 1 hingga 20.",
@@ -3101,17 +3107,7 @@
       "gatewayModeNewLabel": "Layanan API-Baru",
       "gatewayModeOldLabel": "Layanan API-Lama",
       "gatewayModeSaveSuccess": "Mode gateway layanan API telah diperbarui",
-      "gatewayEngineNative": "Rust bawaan",
-      "gatewayEngineSidecar": "Go (lama)",
-      "gatewayEngineHint": "Rust adalah mesin bawaan. Peningkatan pertama beralih ke Rust; pilihan berikutnya tetap disimpan. Pergantian memulai ulang layanan API dan dapat mengganggu permintaan aktif; jendela Codex tetap terbuka.",
-      "gatewayEngineSwitching": "Mengganti mesin…",
-      "gatewayEngineSwitchFailed": "Gagal mengganti mesin: {{error}}",
-      "gatewayEngineReadbackFailed": "Mesin saat ini belum dapat dipastikan. Segarkan sebelum mencoba lagi: {{error}}",
-      "gatewayEngineReadbackTimeout": "Pembaruan status kehabisan waktu",
       "gatewayEngineRequestsBusy": "Permintaan masih berjalan. Coba lagi setelah selesai.",
-      "gatewayEngineOperationBusy": "Operasi layanan lain sedang berjalan. Coba lagi sebentar.",
-      "gatewayEngineSwitchRestored": "Pergantian gagal. Mesin sebelumnya telah dipulihkan.",
-      "gatewayEngineRestoreFailed": "Pergantian gagal dan mesin sebelumnya tidak dapat dipulihkan. Periksa status layanan sebelum mencoba lagi.",
       "gatewayEngineStopped": "Layanan API telah berhenti. Mulai ulang sebelum mencoba lagi.",
       "gatewayGuideTitle": "Ganti gateway di sini",
       "gatewayGuideDesc": "Gateway baru menjadi default. Jika ada masalah kompatibilitas atau error permintaan klien, kembali ke gateway lama dari sini.",
@@ -3812,9 +3808,9 @@
         "providerLoadFailed": "Gagal memuat kandidat provider: {{error}}",
         "modeTitle": "Mode perbaikan",
         "modeQuick": "Perbaikan cepat",
-        "modeQuickDesc": "Menormalkan penyedia di basis data resmi dan indeks sesi. File rollout dipertahankan. Untuk pergantian akun biasa.",
+        "modeQuickDesc": "Memperbaiki indeks dan hubungan saat ini dengan batas waktu singkat. Tutup instans untuk menulis metadata proyek.",
         "modeDeep": "Perbaikan lengkap",
-        "modeDeepDesc": "Memperbaiki penyedia historis, katalog, ruang kerja, dan indeks subagen. File rollout dipertahankan. Tutup instans tujuan terlebih dahulu.",
+        "modeDeepDesc": "Mencakup perbaikan cepat, pemulihan proyek dari salinan, dan indeks percakapan. Tutup instans tujuan sebelum menerapkan.",
         "scopeTitle": "Cakupan sesi",
         "scopeAll": "Semua sesi",
         "scopeAllDesc": "Perbaiki {{count}} sesi di daftar saat ini.",
@@ -3846,7 +3842,7 @@
         "previewFailedWithError": "Pratinjau perbaikan sesi gagal: {{error}}",
         "confirmRepair": "Konfirmasi perbaikan",
         "title": "Perbaiki riwayat",
-        "description": "Menormalkan penyedia dalam indeks SQLite, katalog sesi, dan ruang kerja. Semua byte asli file rollout dipertahankan; hanya waktu file yang diperbaiki. Cadangan lokal dibuat terlebih dahulu.",
+        "description": "Perbaikan cepat membenahi indeks visibilitas dan hubungan proyek saat ini. Perbaikan lengkap juga memakai salinan lama dan memperbaiki indeks percakapan. Cadangan lokal dibuat sebelum penulisan; isi log tetap terjaga.",
         "stopInstanceHint": "Tutup sepenuhnya instans Codex App/ChatGPT yang dipilih sebelum perbaikan lengkap. Anda tetap dapat meninjau perubahan lebih dulu.",
         "encryptedContentWarning": "Terdeteksi riwayat yang dienkripsi oleh penyedia atau akun lain. Metadata dapat dimigrasikan, tetapi melanjutkan atau memadatkan sesi tersebut mungkin gagal; kembali ke penyedia/akun asal atau mulai sesi baru.",
         "modeHistory": "Perbaikan edit/cabang",
@@ -3859,7 +3855,13 @@
         "historyFailed": "Perbaikan indeks riwayat belum selesai: {{error}}",
         "historyChanged": "Data percakapan berubah selama perbaikan. Perbaikan ini tidak diterapkan. Coba lagi sebentar lagi.",
         "historyScan": "Memeriksa indeks riwayat ({{current}}/{{total}})…",
-        "historyReset": "Mencadangkan dan mengatur ulang indeks yang tidak valid…"
+        "historyReset": "Mencadangkan dan mengatur ulang indeks yang tidak valid…",
+        "projectsChanged": "Data proyek telah berubah. Perbarui pratinjau lalu coba lagi.",
+        "projectsFailed": "Pemulihan proyek lokal gagal: {{error}}",
+        "projectsPreview": "Pratinjau: {{projects}} proyek, {{assignments}} hubungan; melewati {{skipped}} proyek dan {{ambiguous}} percakapan ambigu.",
+        "projectsSuccess": "Pemulihan selesai: {{projects}} proyek, {{assignments}} hubungan; melewati {{skipped}} proyek dan {{ambiguous}} percakapan ambigu.",
+        "projectsPending": "Pemulihan sebelumnya terputus. Tutup instans lalu jalankan perbaikan lengkap untuk memulihkan penulisan yang belum selesai.",
+        "projectsDeferred": "Sebagian metadata ditunda. Tutup instans lalu ulangi perbaikan cepat, atau gunakan perbaikan lengkap."
       },
       "importModal": {
         "title": "Impor sesi",
@@ -4152,7 +4154,9 @@
         "chatCompletions": "Protokol Chat Completions",
         "deepseekResponsesHint": "Mulai DeepSeek untuk memilih gateway atau koneksi langsung resmi, lalu pilih Flash atau Pro. Gateway menampilkan model di Codex; koneksi langsung melewati gateway.",
         "deepseekChatHint": "DeepSeek Chat Completions menggunakan jembatan gateway lokal untuk jalur lama. Pilih Responses saat Anda memerlukan perilaku alat resmi Codex.",
-        "deepseekThirdPartyHint": "Alamat ini bukan endpoint resmi DeepSeek sehingga akan diperlakukan sebagai endpoint kompatibel pihak ketiga; isi katalog model dengan ID model asli dari upstream, bukan nama model resmi."
+        "deepseekThirdPartyHint": "Alamat ini bukan endpoint resmi DeepSeek sehingga akan diperlakukan sebagai endpoint kompatibel pihak ketiga; isi katalog model dengan ID model asli dari upstream, bukan nama model resmi.",
+        "anthropic": "Protokol Anthropic",
+        "gatewayRequired": "Protokol ini memerlukan gateway lokal. Pilih model awal di sini."
       },
       "selectSavedProvider": "Penyedia tersimpan",
       "selectSavedApiKey": "API Key tersimpan",
@@ -4385,7 +4389,22 @@
       "importConfigPlaceholder": "Gunakan Salin konfigurasi pada kartu lalu tempel isinya di sini",
       "importConfigAction": "Impor konfigurasi",
       "importConfigFromClipboard": "Baca papan klip",
-      "settingsRestartHint": "Pengaturan penyedia diperbarui. Mulai ulang instans Codex atau layanan API yang sedang menggunakan penyedia ini untuk menerapkannya."
+      "settingsRestartHint": "Pengaturan penyedia diperbarui. Mulai ulang instans Codex atau layanan API yang sedang menggunakan penyedia ini untuk menerapkannya.",
+      "anthropic": {
+        "auth": "Autentikasi",
+        "hint": "Hubungkan gateway Anthropic Messages. Ambil model atau masukkan secara manual.",
+        "fetch": "Ambil model",
+        "fetching": "Mengambil…",
+        "fetchFailed": "Model gagal diambil. Coba lagi atau masukkan ID model secara manual.",
+        "import": "Impor konfigurasi",
+        "importFailed": "Konfigurasi Claude Code atau Desktop Gateway yang valid tidak ditemukan."
+      },
+      "editor": {
+        "modelScope": "Cakupan model",
+        "providerDefault": "Bawaan penyedia",
+        "sharedSettings": "Daftar dan kemampuan model berlaku untuk cakupan terpilih. Protokol, autentikasi, dan alamat digunakan bersama oleh penyedia.",
+        "saveScope": "Penyimpanan memperbarui penyedia dan akun tertaut. Jika akun saat ini terdampak, konfigurasi serta kredensial Codex lokal juga diperbarui. Klien tidak dimulai secara otomatis."
+      }
     },
     "quickSwitch": {
       "action": "Alih cepat penyedia",
@@ -5822,6 +5841,14 @@
       }
     },
     "requestDiagnostics": {
+      "requestSizeTitle": "Ukuran permintaan",
+      "requestSizeHint": "Ukuran JSON klien setelah dekompresi; kolom dalam byte JSON ringkas. Hanya ukuran yang dicatat.",
+      "requestBytes": "Permintaan",
+      "historyBytes": "Riwayat",
+      "toolsBytes": "Alat",
+      "instructionsBytes": "Instruksi",
+      "overloadRetry": "Ulang saat penuh",
+      "overloadRecovery": "Waktu pemulihan",
       "recordPayloads": "Rekam isi permintaan",
       "recordPayloadsHint": "Nonaktif secara bawaan. Salinan permintaan klien dan server dengan ukuran terbatas disimpan secara lokal. Menonaktifkan menghentikan rekaman baru; isi tersimpan dapat dihapus terpisah.",
       "privacyHint": "Kolom autentikasi disamarkan, tetapi rahasia dalam teks percakapan mungkin tetap ada. Periksa sebelum menyalin atau berbagi.",
@@ -6003,6 +6030,21 @@
       "saveWithoutLaunch": "Simpan dan lanjutkan",
       "saveOnly": "Simpan saja",
       "validationBusy": "Pemeriksaan lokasi sebelumnya masih berjalan. Coba lagi sebentar lagi."
+    },
+    "openaiUsage": {
+      "monthCost": "Biaya bulan ini",
+      "scope": "Biaya organisasi; permintaan dan token hanya untuk API teks. Statistik memakai UTC.",
+      "loading": "Memuat penggunaan OpenAI…",
+      "pending": "Menunggu penggunaan OpenAI",
+      "permissionRequired": "Kunci ini tidak dapat membaca penggunaan organisasi (api.usage.read).",
+      "permissionGuide": "Gunakan kunci admin: Admin keys → Restricted → Usage API Scope → Read. Menampilkan biaya dan penggunaan, bukan sisa saldo.",
+      "openAdminKeys": "Izin penggunaan",
+      "invalidKey": "Kunci tidak valid atau kedaluwarsa. Periksa kunci API saat ini.",
+      "networkFailed": "Tidak dapat terhubung ke layanan penggunaan OpenAI. Segarkan nanti.",
+      "queryFailed": "Gagal mengambil penggunaan OpenAI. Coba lagi nanti."
+    },
+    "officialApi": {
+      "hint": "Akun dengan kunci API resmi OpenAI, dikenali berdasarkan alamat koneksi yang digunakan."
     }
   },
   "codebuddy": {
@@ -8028,7 +8070,7 @@
     "model": "Model uji",
     "selectModel": "Pilih model",
     "verifyHint": "Model yang dipilih hanya untuk menguji koneksi dan tidak membatasi model lain yang tersedia. Verifikasi mengirim satu permintaan singkat dan memakai sedikit kuota paket Anda.",
-    "serviceHint": "Menambahkan ke kumpulan saat ini tidak memulai layanan API. Versi ini memerlukan mesin bawaan.",
+    "serviceHint": "Menambahkan akun ke kumpulan saat ini tidak memulai layanan API.",
     "verify": "Uji saja",
     "verifyAndJoin": "Uji dan tambah",
     "remove": "Hapus dari layanan",
@@ -8088,8 +8130,6 @@
       "verify": "Permintaan model tidak selesai. Ulangi pengujian.",
       "usage": "Penggunaan paket atau aplikasi dibatasi. Periksa penggunaan di pengaturan ChatGPT.",
       "usageUnavailable": "Layanan resmi belum dapat memastikan penggunaan saat ini. Coba lagi nanti; ini bukan berarti kuota paket sudah habis.",
-      "native": "Akses paket memerlukan mesin bawaan. Ganti mesin di layanan API terlebih dahulu.",
-      "nativeSwitch": "Hapus akun paket dari layanan API sebelum beralih ke mesin lain.",
       "browser": "Tidak dapat membuka peramban. Salin tautan masuk dan buka secara manual.",
       "configuration": "Pendaftaran otorisasi tidak cocok. Coba masuk lagi atau hubungkan ulang paket.",
       "notVerified": "Verifikasi paket sebelum menambahkannya ke layanan API.",
@@ -8269,7 +8309,6 @@
     "title": "Cadangan kemampuan",
     "hint": "Jika akun tidak mendukung kemampuan yang diperlukan, coba akun cadangan dalam urutan ini dengan pemetaan model yang ada.",
     "consent": "Peralihan mengirim percakapan ini ke akun cadangan dan memakai kuotanya atau menimbulkan biaya yang berlaku.",
-    "nativeOnly": "Mesin ini tidak menjalankan cadangan kemampuan. Beralih ke mesin bawaan untuk mengaktifkan; pengaturan tersimpan masih dapat dinonaktifkan.",
     "backups": "Akun cadangan",
     "addBackup": "Tambah cadangan",
     "backupEmpty": "Pilih cadangan dari kumpulan layanan API saat ini sebelum mengaktifkan.",

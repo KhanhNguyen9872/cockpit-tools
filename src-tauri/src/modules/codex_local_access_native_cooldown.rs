@@ -102,6 +102,18 @@ fn native_cooldown_wait(
     .max()
 }
 
+fn native_upsert_transient_rate_limit(
+    states: &mut HashMap<NativeCooldownKey, NativeCooldown>, account: &str, model: &str,
+    retry_after: Option<Duration>, now: Instant,
+) {
+    let key = native_cooldown_key(account, model, false);
+    if states.get(&key).is_some_and(|state| state.quota && state.until > now) { return; }
+    let until = now.checked_add(retry_after.unwrap_or(Duration::from_secs(1)))
+        .unwrap_or_else(|| now + Duration::from_secs(10 * 365 * 86400));
+    let until = states.get(&key).map_or(until, |state| state.until.max(until));
+    states.insert(key, NativeCooldown { until, quota: false, backoff_level: 0, reason: "transient_rate_limit" });
+}
+
 fn native_upsert_challenge_cooldown(
     states: &mut HashMap<NativeCooldownKey, NativeCooldown>,
     account: &str,

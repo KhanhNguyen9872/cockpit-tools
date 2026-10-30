@@ -94,6 +94,7 @@ async fn discover(client: &reqwest::Client, port: u16) -> Result<String, String>
 #[derive(Clone)]
 enum Action {
     Setup,
+    EnablePage { session: String },
     Revoke {
         session: String,
     },
@@ -117,6 +118,7 @@ struct Browser {
     pending: HashMap<u64, Pending>,
     sessions: HashSet<String>,
     prepared_sessions: HashSet<String>,
+    enabled_pages: HashSet<String>,
     installed: HashSet<(String, String)>,
     command_timeout: Duration,
     owner: String,
@@ -159,6 +161,13 @@ impl Browser {
         revision: u64,
         immediate: bool,
     ) -> Result<(), String> {
+        if !self.enabled_pages.contains(session) {
+            if !self.pending.values().any(|pending| matches!(&pending.action, Action::EnablePage { session: owner } if owner == session)) {
+                self.send("Page.enable", json!({}), Some(session),
+                    Some(Action::EnablePage { session: session.into() })).await?;
+            }
+            return Ok(());
+        }
         self.prepared_sessions.insert(session.to_string());
         let mut params = json!({"source":guarded_source(source)});
         if immediate {
@@ -248,6 +257,14 @@ impl Browser {
             }
             match pending.action {
                 Action::Setup => {}
+                Action::EnablePage { session } => {
+                    if self.sessions.contains(&session) {
+                        self.enabled_pages.insert(session.clone());
+                        if let Some(source) = source {
+                            self.add(&session, source, revision, true).await?;
+                        }
+                    }
+                }
                 Action::Revoke { .. } => {}
                 Action::Remove {
                     session,
@@ -316,9 +333,11 @@ impl Browser {
                 if let Some(session) = event.pointer("/params/sessionId").and_then(Value::as_str) {
                     self.sessions.remove(session);
                     self.prepared_sessions.remove(session);
+                    self.enabled_pages.remove(session);
                     self.installed.retain(|(owner, _)| owner != session);
                     self.pending.retain(|_, pending| match &pending.action {
-                        Action::Add { session: owner, .. }
+                        Action::EnablePage { session: owner }
+                        | Action::Add { session: owner, .. }
                         | Action::Revoke { session: owner }
                         | Action::Remove { session: owner, .. } => owner != session,
                         Action::Setup => true,
@@ -420,6 +439,7 @@ async fn run_bounded(
         pending: HashMap::new(),
         sessions: HashSet::new(),
         prepared_sessions: HashSet::new(),
+        enabled_pages: HashSet::new(),
         installed: HashSet::new(),
         command_timeout,
         owner: format!("preload-{port}"),

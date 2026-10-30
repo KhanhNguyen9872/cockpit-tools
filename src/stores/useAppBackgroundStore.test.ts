@@ -146,3 +146,94 @@ test('slider persistence runs automatically after the brief debounce', async () 
   assert.equal(writes[0].settings.strength, 70);
   assert.equal(store.getState().saving, false);
 });
+
+test('legacy backgrounds migrate once, including a saved image while a built-in skin is selected', async () => {
+  for (const preset of ['custom', 'forest'] as const) {
+    const image = new Blob(['legacy']);
+    let saved: AppBackgroundRecord = { settings: { ...DEFAULT_APP_BACKGROUND, preset, blur: 7 }, image };
+    const storage = { load: async () => saved, save: async (record: AppBackgroundRecord) => { saved = record; } };
+    const store = createAppBackgroundStore(storage);
+    await store.getState().load();
+    assert.equal(store.getState().record.skins?.length, 1);
+    const skin = store.getState().record.skins![0];
+    assert.equal(skin.image, image);
+    assert.equal(skin.settings.blur, 7);
+    assert.equal(store.getState().record.settings.preset, preset);
+    store.getState().selectSkin(skin.id);
+    await store.getState().flush();
+    const restarted = createAppBackgroundStore(storage);
+    await restarted.getState().load();
+    assert.equal(restarted.getState().record.skins?.length, 1);
+    assert.equal(restarted.getState().record.activeSkinId, skin.id);
+    assert.equal(restarted.getState().record.image, image);
+  }
+});
+
+test('skin settings, replacements and names survive switching, reset and restart', async () => {
+  let saved: AppBackgroundRecord = { settings: DEFAULT_APP_BACKGROUND, image: null };
+  const storage = { load: async () => saved, save: async (record: AppBackgroundRecord) => { saved = record; } };
+  const store = createAppBackgroundStore(storage);
+  await store.getState().load();
+  const firstImage = new Blob(['first']);
+  const secondImage = new Blob(['second']);
+  const replacement = new Blob(['replacement']);
+  store.getState().addSkin('First', firstImage);
+  const firstId = store.getState().record.activeSkinId!;
+  store.getState().update({ blur: 8, strength: 72, position: 'bottom' }, { debounce: true });
+  store.getState().addSkin('Second', secondImage);
+  const secondId = store.getState().record.activeSkinId!;
+  assert.notEqual(firstId, secondId);
+  assert.equal(store.getState().record.settings.blur, 0, 'new skins start with default settings');
+  store.getState().replaceSkin(firstId, replacement);
+  assert.equal(store.getState().record.image, secondImage, 'replacing an inactive skin preserves the active background');
+  store.getState().renameSkin(firstId, '  Renamed  ');
+  store.getState().selectSkin(firstId);
+  assert.equal(store.getState().record.image, replacement);
+  assert.deepEqual(store.getState().record.settings, { preset: 'custom', blur: 8, strength: 72, position: 'bottom' });
+  store.getState().update({ preset: 'forest' });
+  assert.equal(store.getState().record.activeSkinId, null);
+  store.getState().update(DEFAULT_APP_BACKGROUND, { image: null });
+  assert.equal(store.getState().record.skins?.length, 2, 'restoring defaults keeps all skins');
+  await store.getState().flush();
+  const restarted = createAppBackgroundStore(storage);
+  await restarted.getState().load();
+  assert.equal(restarted.getState().record.settings.preset, 'default');
+  assert.equal(restarted.getState().record.skins![0].name, 'Renamed');
+  restarted.getState().selectSkin(firstId);
+  assert.equal(restarted.getState().record.settings.blur, 8);
+  assert.equal(restarted.getState().record.image, replacement);
+  restarted.getState().deleteSkin(secondId);
+  assert.equal(restarted.getState().record.activeSkinId, firstId, 'deleting an inactive skin preserves the active skin');
+  restarted.getState().deleteSkin(firstId);
+  assert.deepEqual(restarted.getState().record.settings, DEFAULT_APP_BACKGROUND);
+  assert.equal(restarted.getState().record.image, null);
+  await restarted.getState().flush();
+  assert.equal(saved.skins?.length, 0);
+});
+
+test('failed library writes retain saved skins; the newest replacement and rename can be retried', async () => {
+  let saved: AppBackgroundRecord = { settings: DEFAULT_APP_BACKGROUND, image: null };
+  let fail = false;
+  const storage = { load: async () => saved, save: async (record: AppBackgroundRecord) => {
+    if (fail) throw new Error('quota');
+    saved = record;
+  } };
+  const store = createAppBackgroundStore(storage);
+  await store.getState().load();
+  store.getState().addSkin('Original', new Blob(['original']));
+  await store.getState().flush();
+  const id = saved.activeSkinId!;
+  fail = true;
+  store.getState().replaceSkin(id, new Blob(['replacement']));
+  store.getState().renameSkin(id, 'Latest');
+  await store.getState().flush();
+  assert.equal(store.getState().saveError, true);
+  assert.equal(saved.skins![0].name, 'Original');
+  assert.equal(await saved.image!.text(), 'original');
+  fail = false;
+  store.getState().retrySave();
+  await store.getState().flush();
+  assert.equal(saved.skins![0].name, 'Latest');
+  assert.equal(await saved.image!.text(), 'replacement');
+  assert.equal(store.getState().saveError, false);
+});

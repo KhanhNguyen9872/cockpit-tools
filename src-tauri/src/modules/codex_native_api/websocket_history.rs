@@ -206,7 +206,7 @@ impl History {
             .get("previous_response_id")
             .and_then(Value::as_str)
             .is_some()
-            && prepared.route.wire_api == super::super::contract::WireApi::Chat
+            && prepared.route.wire_api != super::super::contract::WireApi::Responses
         {
             let input = body
                 .get("input")

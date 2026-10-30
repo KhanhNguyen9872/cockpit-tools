@@ -31,13 +31,9 @@
       .map(match => new URL(match[2], indexUrl).href)
       .filter(url => fast.localAsset(url, true));
     if (entries.length < 1 || entries.length > 4) return fail('unsupported-entry');
-    const candidates = new Set();
-    for (const entry of entries) {
-      for (const match of read(entry).matchAll(/["'`]\.\/app-initial-[A-Za-z0-9_-]+\.js["'`]/g))
-        candidates.add(new URL(match[0].slice(1, -1), entry).href);
-    }
-    if (candidates.size !== 1) return fail('ambiguous-module');
-    const initialUrl = [...candidates][0], initialSource = read(initialUrl);
+    const discovered = fast.resolveInitialModuleSync(entries, read);
+    if (!discovered.ok) return fail(discovered.reason);
+    const initialUrl = discovered.url, initialSource = read(initialUrl);
     let initial = fast.prepareLive(initialSource, initialUrl);
     if (!initial.ok) return fail(initial.diagnostics?.reason || 'initial-transform-failed');
     const modules = [];

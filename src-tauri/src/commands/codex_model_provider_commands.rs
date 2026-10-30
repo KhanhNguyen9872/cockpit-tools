@@ -1,5 +1,8 @@
 use crate::modules::codex_provider_protocol::normalize_model_provider_wire_api;
 
+#[path = "codex_openai_usage.rs"]
+mod openai_usage;
+
 // Codex 模型供应商命令实现。
 //
 // 本片段由 `commands/codex.rs` 通过 `include!` 纳入 `commands::codex` 模块，集中负责供应商
@@ -27,22 +30,20 @@ pub async fn save_codex_account_groups(data: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn load_codex_model_providers() -> Result<String, String> {
-    let path = account::get_data_dir()?.join(CODEX_MODEL_PROVIDERS_FILE);
-    if !path.exists() {
-        return Ok("[]".to_string());
-    }
-    std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read codex model providers: {}", e))
+    tauri::async_runtime::spawn_blocking(|| {
+        let path = account::get_data_dir()?.join(CODEX_MODEL_PROVIDERS_FILE);
+        if !path.exists() { return Ok("[]".to_string()); }
+        std::fs::read_to_string(&path).map_err(|error| format!("Failed to read codex model providers: {error}"))
+    }).await.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
 pub async fn save_codex_model_providers(data: String) -> Result<(), String> {
-    let dir = account::get_data_dir()?;
-    if !dir.exists() {
-        std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create dir: {}", e))?;
-    }
-    let path = dir.join(CODEX_MODEL_PROVIDERS_FILE);
-    std::fs::write(&path, data).map_err(|e| format!("Failed to write codex model providers: {}", e))
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = account::get_data_dir()?;
+        std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        crate::modules::atomic_write::write_secret_string_atomic(&dir.join(CODEX_MODEL_PROVIDERS_FILE), &data)
+    }).await.map_err(|error| error.to_string())?
 }
 
 fn codex_model_provider_models_url(base_url: &str) -> Result<String, String> {
@@ -78,7 +79,11 @@ fn codex_model_provider_usage_url(base_url: &str) -> Result<String, String> {
         _ => return Err("PROVIDER_BASE_URL_INVALID".to_string()),
     }
     let next_path = if url.path().is_empty() || url.path() == "/" {
-        "/usage".to_string()
+        if url.scheme() == "https" && matches!(url.host_str(), Some("api.apikey.fan" | "api.apikey.fun")) && url.port().is_none() && url.username().is_empty() && url.password().is_none() {
+            "/v1/usage".to_string()
+        } else {
+            "/usage".to_string()
+        }
     } else {
         format!("{}/usage", url.path().trim_end_matches('/'))
     };
@@ -264,6 +269,7 @@ pub struct CodexModelProviderChatTestTarget {
     pub api_key_name: Option<String>,
     pub api_key: String,
     pub wire_api: Option<String>,
+    pub auth_scheme: Option<String>,
     #[serde(default)]
     pub model_catalog: Vec<String>,
 }
@@ -413,24 +419,15 @@ fn first_model_from_provider_models(body: &serde_json::Value, wire_api: &str) ->
 }
 
 async fn discover_model_provider_model(
-    client: &reqwest::Client,
-    base_url: &str,
-    api_key: &str,
-    wire_api: &str,
+    client: &reqwest::Client, base_url: &str, api_key: &str, wire_api: &str, auth_scheme: Option<&str>,
 ) -> Option<String> {
-    let url = codex_model_provider_models_url(base_url).ok()?;
-    let response = client
-        .get(url)
-        .bearer_auth(api_key.trim())
-        .header(reqwest::header::ACCEPT, "application/json")
-        .send()
-        .await
-        .ok()?;
-    if !response.status().is_success() {
-        return None;
-    }
-    let text = response.text().await.ok()?;
-    let parsed = serde_json::from_str::<serde_json::Value>(&text).ok()?;
+    let url = if wire_api == "anthropic" {
+        crate::modules::codex_native_api::anthropic::endpoint(base_url, "models").ok()?
+    } else { codex_model_provider_models_url(base_url).ok()? };
+    let response = crate::modules::codex_provider_protocol::authenticate_provider_request(client.get(url), wire_api, auth_scheme, api_key)
+        .header(reqwest::header::ACCEPT, "application/json").send().await.ok()?;
+    if !response.status().is_success() { return None; }
+    let parsed: serde_json::Value = response.json().await.ok()?;
     first_model_from_provider_models(&parsed, wire_api)
 }
 
@@ -472,6 +469,7 @@ async fn run_single_model_provider_chat_test(
                 &target.base_url,
                 &api_key,
                 &wire_api,
+                target.auth_scheme.as_deref(),
             ) => model_id,
             _ = async {
                 while !codex_local_access::is_model_provider_chat_test_cancelled(run_id) {
@@ -525,6 +523,7 @@ async fn run_single_model_provider_chat_test(
             api_key_name: target.api_key_name.clone(),
             api_key,
             wire_api: wire_api.clone(),
+            auth_scheme: target.auth_scheme.clone(),
             model_catalog: target.model_catalog.clone(),
             model_id: model_id.clone(),
             prompt: prompt.to_string(),
@@ -643,7 +642,7 @@ pub struct CodexModelProviderModelsResult {
     pub latency_ms: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexModelProviderUsageSummary {
     pub mode: Option<String>,
@@ -1475,6 +1474,7 @@ pub async fn codex_test_model_provider_connection(
     base_url: String,
     api_key: String,
     wire_api: Option<String>,
+    auth_scheme: Option<String>,
 ) -> Result<CodexLocalAccessTestResult, String> {
     let key = api_key.trim();
     if key.is_empty() {
@@ -1488,7 +1488,10 @@ pub async fn codex_test_model_provider_connection(
         ));
     }
 
-    let url = match codex_model_provider_models_url(&base_url) {
+    let models_url = if wire_api.as_deref() == Some("anthropic") {
+        crate::modules::codex_native_api::anthropic::endpoint(&base_url, "models").map_err(|_| "PROVIDER_BASE_URL_INVALID".to_string())
+    } else { codex_model_provider_models_url(&base_url) };
+    let url = match models_url {
         Ok(url) => url,
         Err(error) => {
             return Ok(codex_model_provider_failure(
@@ -1507,9 +1510,8 @@ pub async fn codex_test_model_provider_connection(
         .build()
         .map_err(|e| format!("CREATE_HTTP_CLIENT_FAILED: {}", e))?;
     let started = Instant::now();
-    let response = match client
-        .get(&url)
-        .bearer_auth(key)
+    let request = crate::modules::codex_provider_protocol::authenticate_provider_request(client.get(&url), wire_api.as_deref().unwrap_or("responses"), auth_scheme.as_deref(), key);
+    let response = match request
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .await
@@ -1713,43 +1715,29 @@ pub fn codex_cancel_model_provider_chat_test(run_id: String) -> Result<bool, Str
 }
 
 #[tauri::command]
-pub async fn codex_list_model_provider_models(
-    base_url: String,
-    api_key: String,
-) -> Result<CodexModelProviderModelsResult, String> {
-    let key = api_key.trim();
-    if key.is_empty() {
-        return Err("MISSING_API_KEY".to_string());
-    }
-    let url = codex_model_provider_models_url(&base_url)?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(CODEX_MODEL_PROVIDER_TEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| format!("CREATE_HTTP_CLIENT_FAILED: {}", e))?;
+pub async fn codex_list_model_provider_models(base_url: String, api_key: String, wire_api: Option<String>, auth_scheme: Option<String>) -> Result<CodexModelProviderModelsResult, String> {
+    if api_key.trim().is_empty() { return Err("MISSING_API_KEY".into()); }
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(20)).build().map_err(|_| "PROVIDER_MODELS_NETWORK_FAILED".to_string())?;
+    let protocol = normalize_model_provider_wire_api(wire_api.as_deref(), &base_url);
+    let raw = if protocol == "anthropic" {
+        crate::modules::codex_native_api::anthropic::endpoint(&base_url,"models").map_err(|_| "PROVIDER_BASE_URL_INVALID".to_string())?
+    } else { codex_model_provider_models_url(&base_url)? };
+    let mut url = reqwest::Url::parse(&raw).map_err(|_| "PROVIDER_BASE_URL_INVALID".to_string())?;
     let started = Instant::now();
-    let response = client
-        .get(&url)
-        .bearer_auth(key)
-        .header(reqwest::header::ACCEPT, "application/json")
-        .send()
-        .await
-        .map_err(|e| format!("PROVIDER_MODELS_NETWORK_FAILED: {}", e))?;
-    let latency_ms = started.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-    let status = response.status();
-    let text = response.text().await.unwrap_or_default();
-    if !status.is_success() {
-        return Err(format!(
-            "PROVIDER_MODELS_HTTP_{}: {}",
-            status.as_u16(),
-            text.chars().take(300).collect::<String>()
-        ));
+    let mut models = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..10 {
+        let remaining = Duration::from_secs(20).checked_sub(started.elapsed()).ok_or("PROVIDER_MODELS_NETWORK_FAILED")?;
+        let request = crate::modules::codex_provider_protocol::authenticate_provider_request(client.get(url.clone()), &protocol, auth_scheme.as_deref(), &api_key).timeout(remaining);
+        let response = request.send().await.map_err(|_| "PROVIDER_MODELS_NETWORK_FAILED".to_string())?;
+        if !response.status().is_success() { return Err(format!("PROVIDER_MODELS_HTTP_{}",response.status().as_u16())); }
+        let body: serde_json::Value = response.json().await.map_err(|_| "PROVIDER_MODELS_PARSE_FAILED".to_string())?;
+        for model in list_model_provider_models(&body) { if seen.insert(model.id.clone()) { models.push(model); } }
+        if body["has_more"] != true { break; }
+        let Some(last) = body["last_id"].as_str().filter(|s|!s.is_empty()) else { break; };
+        url.query_pairs_mut().clear().append_pair("after_id",last);
     }
-    let parsed = serde_json::from_str::<serde_json::Value>(&text)
-        .map_err(|e| format!("PROVIDER_MODELS_PARSE_FAILED: {}", e))?;
-    Ok(CodexModelProviderModelsResult {
-        models: list_model_provider_models(&parsed),
-        latency_ms,
-    })
+    Ok(CodexModelProviderModelsResult {models,latency_ms:started.elapsed().as_millis().min(u64::MAX as u128) as u64})
 }
 
 #[tauri::command]
@@ -1766,6 +1754,10 @@ pub async fn codex_query_model_provider_usage(
         .timeout(Duration::from_secs(CODEX_MODEL_PROVIDER_TEST_TIMEOUT_SECS))
         .build()
         .map_err(|e| format!("CREATE_HTTP_CLIENT_FAILED: {}", e))?;
+
+    if openai_usage::is_official_base_url(&base_url) {
+        return openai_usage::query(&client, key).await;
+    }
 
     if let Some(provider) = codex_model_provider_token_plan_provider(&base_url)? {
         return query_token_plan_model_provider_usage(&client, &base_url, key, provider).await;
@@ -2015,6 +2007,13 @@ async fn query_sub2api_model_provider_usage(
 mod new_api_usage_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn apikey_fun_root_uses_versioned_usage_endpoint() {
+        assert_eq!(codex_model_provider_usage_url("https://api.apikey.fan").unwrap(), "https://api.apikey.fan/v1/usage");
+        assert_eq!(codex_model_provider_usage_url("https://api.apikey.fan/v1").unwrap(), "https://api.apikey.fan/v1/usage");
+        assert_eq!(codex_model_provider_usage_url("https://other.example").unwrap(), "https://other.example/usage");
+    }
 
     fn detail(summary: &CodexModelProviderUsageSummary, key: &str) -> Option<String> {
         summary

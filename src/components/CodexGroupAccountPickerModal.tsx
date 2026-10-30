@@ -1,3 +1,5 @@
+import { ModalErrorMessage } from "./ModalErrorMessage";
+import { useDialogSession } from "../hooks/useDialogSession";
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { FolderPlus, Search, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -34,13 +36,11 @@ export function CodexGroupAccountPickerModal({
   const [error, setError] = useState('')
   const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null)
 
-  useEffect(() => {
-    if (!isOpen || !targetGroup) return
+  useDialogSession(isOpen && targetGroup ? targetGroup.id : null, () => {
     setQuery('')
-    const validIds = new Set(accounts.map((a) => a.id))
-    setSelected(new Set((targetGroup.accountIds || []).filter((id) => validIds.has(id))))
+    setSelected(new Set(targetGroup?.accountIds ?? []))
     setError('')
-  }, [isOpen, targetGroup, accounts])
+  })
 
   const groupsByAccountId = useMemo(() => {
     const result = new Map<string, CodexAccountGroup[]>()
@@ -247,7 +247,7 @@ export function CodexGroupAccountPickerModal({
             )}
           </div>
 
-          {error && <div className="group-account-error">{error}</div>}
+          <ModalErrorMessage message={error} className="group-account-error" />
         </div>
 
         <div className="modal-footer group-account-picker-footer">

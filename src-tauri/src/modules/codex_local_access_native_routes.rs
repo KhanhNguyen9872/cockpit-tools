@@ -410,6 +410,23 @@ mod native_provider_routes_tests {
             403
         );
     }
+
+    #[tokio::test]
+    async fn anthropic_credentials_use_only_the_selected_authentication_header() {
+        for scheme in ["x-api-key", "bearer"] {
+            let mut account = provider();
+            account.api_wire_api = Some("anthropic".into());
+            account.api_auth_scheme = Some(scheme.into());
+            let (_, headers, _, _) = native_account_credentials(account, false).await.unwrap();
+            if scheme == "bearer" {
+                assert_eq!(headers[AUTHORIZATION], "Bearer live-token");
+                assert!(!headers.contains_key("x-api-key"));
+            } else {
+                assert_eq!(headers["x-api-key"], "live-token");
+                assert!(!headers.contains_key(AUTHORIZATION));
+            }
+        }
+    }
 }
 
 fn native_plan_account_model(
@@ -473,6 +490,7 @@ fn native_wire_api(
     match account.api_wire_api.as_deref().unwrap_or("responses") {
         "responses" => Ok(native_contract::WireApi::Responses),
         "chat_completions" => Ok(native_contract::WireApi::Chat),
+        "anthropic" => Ok(native_contract::WireApi::Anthropic),
         _ => Err(native_error(
             400,
             "unsupported_wire_api",
@@ -652,10 +670,12 @@ async fn native_account_credentials(
                 headers = auth;
                 "https://chatgpt.com/backend-api/codex".to_string()
             } else if account.is_api_key_auth() {
-                native_insert_bearer(
+                if account.api_wire_api.as_deref() == Some("anthropic") && account.api_auth_scheme.as_deref() != Some("bearer") {
+                    headers.insert("x-api-key", HeaderValue::from_str(account.openai_api_key.as_deref().unwrap_or("")).map_err(|_| "Invalid API key")?);
+                } else { native_insert_bearer(
                     &mut headers,
                     account.openai_api_key.as_deref().unwrap_or(""),
-                )?;
+                )?; }
                 account
                     .api_base_url
                     .clone()
@@ -988,6 +1008,34 @@ async fn native_models(
     Ok(catalog)
 }
 
+// Some(ZERO) is ready now; Some(delay) is a known quota reset; None means
+// quota policy cannot predict recovery. Reservation and entitlement denials
+// must not be interpreted as promises that the account recovers at reset.
+fn native_model_quota_retry_wait(
+    collection: &CodexLocalAccessCollection,
+    account: &CodexAccount,
+    model: &str,
+) -> Option<Duration> {
+    if native_model_quota_allows(collection, account, model) {
+        return Some(Duration::ZERO);
+    }
+    if (native_is_reserve_model(model) && !account.is_api_key_auth())
+        || !native_bound_quota_reserve_allows(collection, account)
+    {
+        return None;
+    }
+    let now = now_ms();
+    let snapshot = account_quota_cooldown(account, now)?;
+    if !snapshot.active(now) {
+        // The reset may have elapsed between the first policy check and now.
+        return native_model_quota_allows(collection, account, model)
+            .then_some(Duration::ZERO);
+    }
+    snapshot
+        .reset_at_ms
+        .map(|reset| Duration::from_millis(reset.saturating_sub(now).max(0) as u64))
+}
+
 async fn native_select_route(
     host: &NativeHostBridge,
     caller: &native_contract::Caller,
@@ -1172,8 +1220,7 @@ async fn native_select_route_once(
                 request.image_input,
             )
             .is_some_and(|upstream| {
-                native_model_quota_allows(&collection, account, &upstream)
-                    && !native_excluded(&collection.excluded_models, &upstream)
+                !native_excluded(&collection.excluded_models, &upstream)
                     && !key.is_some_and(|key| native_excluded(&key.excluded_models, &upstream))
                     && !collection.account_model_rules.iter().any(|rule| {
                         rule.account_id == account.id
@@ -1184,41 +1231,57 @@ async fn native_select_route_once(
             })
     });
     native_filter_capability_backups(&collection, &plan, &request, &mut accounts)?;
-    let mut closest_cooldown = None;
-    {
-        let cooldowns = host.cooldowns.lock().map_err(|_| {
-            native_error(503, "service_unavailable", "Account state is unavailable")
-        })?;
-        accounts.retain(|account| {
-            if native_is_chatgpt_plan_account(account) {
-                return true;
-            }
+    // Quota reservation uses a separate coordinator lock. Resolve quota readiness
+    // first, then combine it with in-memory cooldowns without nesting those locks.
+    let quota_candidates: HashMap<_, _> = accounts
+        .iter()
+        .filter_map(|account| {
             let upstream = native_operation_model(
                 &collection,
                 &plan,
                 account,
                 request.auxiliary.as_deref(),
                 request.image_input,
-            )
-            .unwrap_or_else(|| model.clone());
-            let wait = native_cooldown_wait(
-                &cooldowns,
-                &account.id,
-                &upstream,
-                collection.disable_cooling,
-                Instant::now(),
-            );
+            )?;
+            let wait = native_model_quota_retry_wait(&collection, account, &upstream)?;
+            Some((account.id.clone(), (upstream, wait)))
+        })
+        .collect();
+    let mut closest_cooldown = None;
+    {
+        let cooldowns = host.cooldowns.lock().map_err(|_| {
+            native_error(503, "service_unavailable", "Account state is unavailable")
+        })?;
+        accounts.retain(|account| {
+            let Some((upstream, quota_wait)) = quota_candidates.get(&account.id) else {
+                return false;
+            };
+            let memory_wait = if native_is_chatgpt_plan_account(account) {
+                Duration::ZERO
+            } else {
+                native_cooldown_wait(
+                    &cooldowns,
+                    &account.id,
+                    upstream,
+                    collection.disable_cooling,
+                    Instant::now(),
+                )
+                .unwrap_or(Duration::ZERO)
+            };
+            // Both barriers must expire; an ordinary cooldown cannot shorten
+            // the real quota window, including when soft cooling is disabled.
+            let wait = (*quota_wait).max(memory_wait);
             if request
                 .preferred_account_id
                 .as_ref()
                 .is_none_or(|id| id == &account.id)
             {
-                if let Some(wait) = wait {
+                if !wait.is_zero() {
                     closest_cooldown =
                         Some(closest_cooldown.map_or(wait, |current: Duration| current.min(wait)));
                 }
             }
-            wait.is_none()
+            wait.is_zero()
         });
     }
     // A known continuation owner can be temporarily cooling even while another

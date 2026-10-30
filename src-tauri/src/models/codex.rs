@@ -222,6 +222,8 @@ pub struct CodexAccount {
     pub api_sync_model_catalog_to_codex: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_wire_api: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_auth_scheme: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub api_supports_websockets: bool,
     #[serde(default)]
@@ -678,6 +680,7 @@ impl CodexAccount {
             api_model_mappings: Vec::new(),
             api_sync_model_catalog_to_codex: false,
             api_wire_api: None,
+            api_auth_scheme: None,
             api_supports_websockets: false,
             api_supports_vision: false,
             api_model_vision_support: HashMap::new(),

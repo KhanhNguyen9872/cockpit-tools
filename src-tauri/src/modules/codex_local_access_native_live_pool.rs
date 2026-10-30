@@ -186,6 +186,9 @@ impl Host for PoolHost {
     ) -> BoxFuture<'a, Result<bool, ServiceError>> {
         self.inner.responses_websocket_passthrough(caller, route)
     }
+    fn invalidate_http2_transport(&self, identity: &str) -> bool {
+        self.inner.invalidate_http2_transport(identity)
+    }
     fn invalidate_transport(&self, identity: &str) -> bool {
         self.inner.invalidate_transport(identity)
     }

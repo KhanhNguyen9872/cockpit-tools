@@ -1660,13 +1660,20 @@
       "center": "置中",
       "top": "頂部",
       "bottom": "底部",
-      "localHint": "修改立即生效並在目前裝置自動儲存，圖片不會上傳。還原預設會移除已儲存的圖片。",
+      "localHint": "修改立即生效，每個外觀的圖片與參數分別儲存在本機，圖片不會上傳。恢復預設不會刪除我的外觀。",
       "restore": "還原預設",
       "imageType": "請選擇 JPG、PNG 或 WebP 圖片。",
       "imageSize": "請選擇小於 10 MB 的圖片。",
       "imageRead": "無法讀取這張圖片，請換一張重試。",
       "storage": "背景讀取或儲存失敗，請重試；原有背景仍會保留。",
-      "saveFailed": "目前背景已顯示，但儲存失敗。請重試；上次儲存的背景仍會保留。"
+      "saveFailed": "修改已顯示，但儲存失敗。請重試；上次儲存的外觀仍會保留。",
+      "builtInSkins": "內建外觀",
+      "mySkins": "我的外觀",
+      "addSkin": "新增外觀",
+      "rename": "重新命名",
+      "skinName": "外觀名稱",
+      "manageSkin": "管理外觀：{{name}}",
+      "deleteSkinConfirm": "刪除「{{name}}」？刪除目前外觀後將恢復預設背景。"
     }
   },
   "appPath": {
@@ -2398,7 +2405,7 @@
       "check": "檢查狀態",
       "notRunning": "尚未偵測到目標執行個體。請稍後檢查，或關閉此視窗後重試啟動。",
       "checkFailed": "暫時無法讀取執行狀態，請稍後重試檢查。",
-      "maintenanceDeferred": "暫時無法檢查工作階段，已保留歷史並略過本次維護。"
+      "maintenanceDeferred": "部分對話維護尚未完成，已保留歷史記錄，稍後可在對話管理中重試。"
     },
     "launchErrors": {
       "sessionRestoreFailed": "工作階段修復失敗，備份還原尚未完成，已停止啟動。請先檢查日誌與備份，再重試。",
@@ -2968,7 +2975,6 @@
         "quotaReserveInvalid": "請輸入 1 到 100 的整數",
         "strictReserve": "嚴格保護",
         "strictReserveDesc": "設定保留額度後自動啟用安全緩衝保護；接近保留值時，每個帳號僅送出一個請求，結束後確認最新額度。其他用戶端用量不受此設定約束。",
-        "strictNativeOnly": "嚴格保護需要 Rust 原生引擎；切換 Go 前請先關閉嚴格保護。",
         "safetyMargin": "安全緩衝",
         "safetyMarginUnit": "百分點",
         "safetyMarginInvalid": "請輸入 1 到 20 的整數",
@@ -3051,17 +3057,7 @@
       "gatewayModeNewLabel": "API 服務-新",
       "gatewayModeOldLabel": "API 服務-舊",
       "gatewayModeSaveSuccess": "API 服務網關模式已更新",
-      "gatewayEngineNative": "Rust 原生",
-      "gatewayEngineSidecar": "Go 現有",
-      "gatewayEngineHint": "預設使用 Rust，首次升級會自動切換，之後保留你的選擇。切換會重新啟動 API 服務，可能中斷進行中的請求；Codex 視窗保持開啟。",
-      "gatewayEngineSwitching": "正在切換引擎…",
-      "gatewayEngineSwitchFailed": "切換引擎失敗：{{error}}",
-      "gatewayEngineReadbackFailed": "無法確認目前引擎，請先重新整理再重試：{{error}}",
-      "gatewayEngineReadbackTimeout": "重新整理狀態逾時",
       "gatewayEngineRequestsBusy": "仍有請求進行中，請在完成後重試。",
-      "gatewayEngineOperationBusy": "服務正在執行其他操作，請稍後重試。",
-      "gatewayEngineSwitchRestored": "切換失敗，已還原原引擎。",
-      "gatewayEngineRestoreFailed": "切換失敗，且無法還原原引擎。請檢查服務狀態後重試。",
       "gatewayEngineStopped": "API 服務已停止，請重新啟動後重試。",
       "gatewayGuideTitle": "可在這裡切換閘道",
       "gatewayGuideDesc": "預設使用新閘道。如果遇到相容性問題或用戶端請求異常，可在這裡切換回舊閘道。",
@@ -3765,9 +3761,9 @@
         "providerLoadFailed": "讀取 provider 候選失敗：{{error}}",
         "modeTitle": "修復方式",
         "modeQuick": "快速修復",
-        "modeQuickDesc": "僅在官方狀態資料庫與會話索引中統一供應商資訊，保留 rollout 日誌。適合一般切換帳號後使用。",
+        "modeQuickDesc": "限時修正可見性索引、補齊目前專案與歸屬；寫入專案中繼資料前需結束目標執行個體。",
         "modeDeep": "完整修復",
-        "modeDeepDesc": "統一歷史供應商資訊，修復目錄、工作區及子代理索引，保留 rollout 日誌。請先結束目標實例。",
+        "modeDeepDesc": "包含快速修復，並利用歷史快照還原專案與歸屬、修復對話索引；執行前需結束目標執行個體。",
         "scopeTitle": "會話範圍",
         "scopeAll": "全部會話",
         "scopeAllDesc": "修復目前管理清單中的 {{count}} 筆會話。",
@@ -3799,7 +3795,7 @@
         "previewFailedWithError": "預覽會話修復失敗：{{error}}",
         "confirmRepair": "確認修復",
         "title": "修復歷史工作階段",
-        "description": "在 SQLite 索引、本機會話目錄及工作區狀態中統一供應商資訊。原始 rollout 日誌逐位元組保留，僅校正檔案時間。修復前先建立本機備份。",
+        "description": "快速修復校正可見性索引並補齊目前專案與歸屬；完整修復還會利用歷史快照還原，並修復對話索引。寫入前建立本機備份，保留對話記錄原文。",
         "stopInstanceHint": "完整修復前請先完全結束所選 Codex App/ChatGPT 執行個體；仍可先預覽變更。",
         "encryptedContentWarning": "偵測到由其他 Provider 或帳號加密的歷史內容。中繼資料可以移轉，但繼續或壓縮這些工作階段仍可能失敗；需要可靠續聊時請切回原 Provider/帳號或開啟新工作階段。",
         "modeHistory": "編輯／分支修復",
@@ -3812,7 +3808,13 @@
         "historyFailed": "歷史索引修復未完成：{{error}}",
         "historyChanged": "會話資料在修復期間發生變化，本次修復未寫入。請稍後重試。",
         "historyScan": "正在檢查歷史索引（{{current}}/{{total}}）…",
-        "historyReset": "正在備份並重設異常索引…"
+        "historyReset": "正在備份並重設異常索引…",
+        "projectsChanged": "專案資料已變更，請重新預覽後重試。",
+        "projectsFailed": "本機專案還原失敗：{{error}}",
+        "projectsPreview": "預覽：{{projects}} 個專案、{{assignments}} 筆歸屬；略過 {{skipped}} 個專案及 {{ambiguous}} 筆歸屬不明對話。",
+        "projectsSuccess": "還原完成：{{projects}} 個專案、{{assignments}} 筆歸屬；略過 {{skipped}} 個專案及 {{ambiguous}} 筆歸屬不明對話。",
+        "projectsPending": "上次還原未完成。請結束目標執行個體後執行完整修復，先復原中斷的寫入。",
+        "projectsDeferred": "部分專案中繼資料尚未處理，請結束目標執行個體後重試快速修復，或使用完整修復。"
       },
       "importModal": {
         "title": "匯入會話",
@@ -4105,7 +4107,9 @@
         "chatCompletions": "Chat Completions 協定",
         "deepseekResponsesHint": "啟動 DeepSeek 時選擇閘道或官方直連，並確認 Flash / Pro。閘道可在 Codex 內切換模型；直連不走閘道。",
         "deepseekChatHint": "DeepSeek Chat Completions 走本機閘道協定轉換，適合相容舊鏈路；需要官方 Codex 工具形態時請選 Responses。",
-        "deepseekThirdPartyHint": "此位址不是官方 DeepSeek 端點，將以第三方相容位址處理；模型目錄請填上游真實模型 ID，請勿套用官方模型名稱。"
+        "deepseekThirdPartyHint": "此位址不是官方 DeepSeek 端點，將以第三方相容位址處理；模型目錄請填上游真實模型 ID，請勿套用官方模型名稱。",
+        "anthropic": "Anthropic 協定",
+        "gatewayRequired": "此協定須透過本機閘道使用，請在此選擇啟動模型。"
       },
       "selectSavedProvider": "已儲存供應商",
       "selectSavedApiKey": "已儲存 API Key",
@@ -4338,7 +4342,22 @@
       "importConfigPlaceholder": "在供應商卡片上點「複製設定」後，把內容貼到這裡",
       "importConfigAction": "匯入設定",
       "importConfigFromClipboard": "一鍵讀取剪貼簿",
-      "settingsRestartHint": "供應商設定已更新。若使用此供應商的 Codex 或 API 服務正在執行，請重新啟動以套用。"
+      "settingsRestartHint": "供應商設定已更新。若使用此供應商的 Codex 或 API 服務正在執行，請重新啟動以套用。",
+      "anthropic": {
+        "auth": "驗證方式",
+        "hint": "透過閘道呼叫 Anthropic Messages；可取得或手動填寫模型。",
+        "fetch": "取得模型",
+        "fetching": "取得中…",
+        "fetchFailed": "取得失敗，可重試或手動填寫模型。",
+        "import": "匯入設定",
+        "importFailed": "找不到有效的 Claude Code 或桌面版 Gateway 設定。"
+      },
+      "editor": {
+        "modelScope": "模型設定範圍",
+        "providerDefault": "供應商預設",
+        "sharedSettings": "模型目錄與能力僅套用至所選範圍；協定、驗證與位址為供應商共用設定。",
+        "saveScope": "儲存會更新供應商並同步關聯帳號；若目前帳號受影響，也會更新本機 Codex 設定與憑證，不會自動啟動用戶端。"
+      }
     },
     "quickSwitch": {
       "action": "快速切換供應商",
@@ -5775,6 +5794,14 @@
       }
     },
     "requestDiagnostics": {
+      "requestSizeTitle": "請求大小",
+      "requestSizeHint": "以解壓後的用戶端 JSON 統計；各欄位採精簡 JSON 位元組數，僅記錄大小。",
+      "requestBytes": "請求",
+      "historyBytes": "歷程",
+      "toolsBytes": "工具",
+      "instructionsBytes": "指令",
+      "overloadRetry": "滿載重試",
+      "overloadRecovery": "復原耗時",
       "recordPayloads": "記錄請求本文",
       "recordPayloadsHint": "預設關閉。僅在本機儲存有限長度的用戶端和上游請求快照；關閉後停止新記錄，既有本文可單獨清除。",
       "privacyHint": "驗證欄位會遮蔽，但對話本文中的敏感資訊未必能辨識。複製或分享前請檢查。",
@@ -5956,6 +5983,21 @@
       "saveWithoutLaunch": "儲存並繼續切換",
       "saveOnly": "僅儲存設定",
       "validationBusy": "上一個路徑仍在檢查，請稍後重試。"
+    },
+    "openaiUsage": {
+      "monthCost": "本月支出",
+      "scope": "組織支出；請求與 Token 僅含文字介面；依 UTC 統計。",
+      "loading": "正在查詢官方用量…",
+      "pending": "等待查詢官方用量",
+      "permissionRequired": "目前金鑰缺少組織用量讀取權限（api.usage.read）。",
+      "permissionGuide": "使用管理員金鑰：Admin keys → Restricted → Usage API Scope → Read。可查詢支出與用量，不提供剩餘餘額。",
+      "openAdminKeys": "設定查詢權限",
+      "invalidKey": "金鑰無效或已過期，請檢查目前的 API 金鑰。",
+      "networkFailed": "無法連線至官方用量服務，請稍後重新整理。",
+      "queryFailed": "官方用量查詢失敗，請稍後重試。"
+    },
+    "officialApi": {
+      "hint": "OpenAI 官方 API Key 接入，依實際位址識別。"
     }
   },
   "githubCopilot": {
@@ -8028,7 +8070,7 @@
     "model": "測試模型",
     "selectModel": "選擇模型",
     "verifyHint": "所選模型僅用於測試連線，不限制帳號可使用的其他模型。驗證會傳送一次簡短請求，消耗少量方案用量。",
-    "serviceHint": "加入目前帳號池不會啟動 API 服務。首版僅支援原生引擎。",
+    "serviceHint": "加入目前帳號池不會啟動 API 服務。",
     "verify": "僅驗證",
     "verifyAndJoin": "驗證並加入",
     "remove": "移出服務",
@@ -8088,8 +8130,6 @@
       "verify": "模型請求未完整完成，請重新驗證。",
       "usage": "方案或應用程式用量受限，請檢查 ChatGPT 用量設定。",
       "usageUnavailable": "官方暫時無法確認用量，請稍後重試；這不代表方案額度已用盡。",
-      "native": "方案授權首版僅支援原生引擎，請先在 API 服務中切換引擎。",
-      "nativeSwitch": "請先將方案帳號移出 API 服務，再切換其他引擎。",
       "browser": "無法開啟瀏覽器，請複製授權連結後手動開啟。",
       "configuration": "授權註冊資料不符，請重試授權或重新連結方案。",
       "notVerified": "請先驗證方案授權，再加入 API 服務。",
@@ -8269,7 +8309,6 @@
     "title": "能力備援",
     "hint": "目前帳號不支援請求能力時，依所選順序嘗試備用帳號，仍使用既有模型對應。",
     "consent": "切換會將本次對話傳送給備用帳號，並消耗其額度或產生相應費用。",
-    "nativeOnly": "目前引擎不執行能力備援。請切換至原生引擎後啟用；仍可關閉既有設定。",
     "backups": "備用帳號",
     "addBackup": "新增備用帳號",
     "backupEmpty": "啟用前，請從目前 API 帳號池選擇備用帳號。",

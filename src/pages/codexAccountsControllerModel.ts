@@ -396,13 +396,14 @@ export function getCockpitApiStatsRecord(
 
 export function resolveApiKeyUsageMode(
   summary?: CodexModelProviderUsageSummary,
-): "new_api" | "sub2api" | "deepseek" | "token_plan" | null {
+): "new_api" | "sub2api" | "deepseek" | "token_plan" | "openai_official" | null {
   if (!summary) return null;
   if (
     summary.mode === "new_api" ||
     summary.mode === "sub2api" ||
     summary.mode === "deepseek" ||
-    summary.mode === "token_plan"
+    summary.mode === "token_plan" ||
+    summary.mode === "openai_official"
   ) {
     return summary.mode;
   }
@@ -606,7 +607,7 @@ export interface SponsorApiProviderTemplate {
   supportsVision: boolean;
   website: string;
   apiKeyUrl: string;
-  wireApi?: "responses" | "chat_completions" | null;
+  wireApi?: "responses" | "chat_completions" | "anthropic" | null;
   integrationType?: "sub2api" | "new_api" | null;
 }
 

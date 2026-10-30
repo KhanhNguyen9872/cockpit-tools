@@ -13,6 +13,7 @@ test('builds a portable archive with the executable, resources and loader DLL', 
   fs.mkdirSync(path.join(releaseDir, 'resources', 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(releaseDir, 'cockpit_tools.exe'), 'exe');
   fs.writeFileSync(path.join(releaseDir, 'WebView2Loader.dll'), 'dll');
+  fs.writeFileSync(path.join(releaseDir, 'cockpit-cliproxy.exe'), 'retired Go engine');
   fs.writeFileSync(path.join(releaseDir, 'resources', 'sidecar.exe'), 'sidecar');
   fs.writeFileSync(path.join(releaseDir, 'resources', 'scripts', 'helper.cjs'), 'helper');
 
@@ -34,4 +35,5 @@ test('builds a portable archive with the executable, resources and loader DLL', 
   assert.match(archive, /Cockpit\.Tools_1\.2\.3_x64-portable\/cockpit_tools\.exe/);
   assert.match(archive, /Cockpit\.Tools_1\.2\.3_x64-portable\/resources\/sidecar\.exe/);
   assert.match(archive, /Cockpit\.Tools_1\.2\.3_x64-portable\/README\.txt/);
+  assert.doesNotMatch(archive, /cockpit-cliproxy/);
 });

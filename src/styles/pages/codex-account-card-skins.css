@@ -193,9 +193,16 @@
   border-radius: inherit;
   background:
     linear-gradient(90deg, transparent, var(--apikey-fun-gold), transparent) center top / 78% 1px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180' fill='none' stroke='%23c99c43' stroke-width='2'%3E%3Ccircle cx='90' cy='90' r='72' opacity='.22'/%3E%3Ccircle cx='90' cy='90' r='61' opacity='.14'/%3E%3Cpath d='M62 97a22 22 0 1 1 36 17l-12 12h-10v10H66v10H51v-15l28-28' stroke-linecap='round' stroke-linejoin='round' opacity='.25'/%3E%3Ccircle cx='87' cy='83' r='5' opacity='.25'/%3E%3Cpath d='M90 8v10M90 162v10M8 90h10M162 90h10' opacity='.24'/%3E%3C/svg%3E") right 18px bottom 64px / min(180px, 52%) auto no-repeat,
     radial-gradient(circle at calc(100% - 42px) 91px, var(--apikey-fun-gold) 0 1px, transparent 2px),
     radial-gradient(circle at calc(100% - 72px) 63px, color-mix(in srgb, var(--apikey-fun-gold) 50%, transparent) 0 1px, transparent 2px),
     radial-gradient(ellipse at 5% 100%, var(--provider-skin-mist), transparent 55%);
+}
+
+.codex-accounts-page .codex-account-card.codex-card-skin-apikey-fun .account-email:not(input) {
+  color: var(--provider-skin-accent);
+  font-weight: 800;
+  letter-spacing: 0.04em;
 }
 
 .codex-accounts-page .codex-account-card.codex-card-skin-apikey-fun::after {

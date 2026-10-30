@@ -3,6 +3,8 @@ use axum::body::Bytes;
 use serde_json::Value;
 
 use super::contract::ServiceError;
+#[path = "sse_tail.rs"]
+mod tail;
 
 #[derive(Debug)]
 pub(super) struct SseFrame {
@@ -18,8 +20,10 @@ pub(super) struct SseDecoder {
     limit: usize,
     scan_from: usize,
     data_lines: IndependentDataLines,
+    tail: tail::Tail,
     output: Option<super::output_items::OutputCollector>,
     terminal: bool,
+    raw_json_tail: bool,
     pub done: bool,
 }
 
@@ -30,8 +34,10 @@ impl SseDecoder {
             limit,
             scan_from: 0,
             data_lines: IndependentDataLines::default(),
+            tail: tail::Tail::default(),
             output: Some(super::output_items::OutputCollector::new()),
             terminal: false,
+            raw_json_tail: false,
             done: false,
         }
     }
@@ -82,6 +88,7 @@ impl SseDecoder {
                 bytes,
             });
             self.pending.clear();
+            self.tail = tail::Tail::default();
             self.scan_from = 0;
             self.data_lines = IndependentDataLines::default();
             self.terminal = true;
@@ -96,6 +103,16 @@ impl SseDecoder {
         mut bytes: &[u8],
         frames: &mut Vec<SseFrame>,
     ) -> Result<(), ServiceError> {
+        // A peer can omit both an SSE separator and the next data prefix.
+        // This is accepted only immediately after a complete event object.
+        if self.raw_json_tail && self.pending.iter().all(u8::is_ascii_whitespace)
+            && trim_ascii(bytes).starts_with(b"{") {
+            self.pending.splice(..0, b"data: ".iter().copied());
+            self.tail = tail::Tail::default();
+            self.raw_json_tail = false;
+        } else if !bytes.iter().all(u8::is_ascii_whitespace) {
+            self.raw_json_tail = false;
+        }
         if !self.pending.is_empty() && starts_field(bytes) {
             let fields = fields(&self.pending);
             // Preserve the old missing-field-newline compatibility for two
@@ -110,7 +127,8 @@ impl SseDecoder {
                 && data_object(bytes)
             {
                 let pending = std::mem::take(&mut self.pending);
-                frames.push(self.decode_frame(&pending, b"\n\n")?);
+                self.tail = tail::Tail::default();
+                self.append_frames(&pending, b"\n\n", &mut *frames)?;
                 self.scan_from = 0;
                 self.data_lines = IndependentDataLines::default();
             } else if !self.pending.ends_with(b"\n")
@@ -164,7 +182,7 @@ impl SseDecoder {
                 } else {
                     self.pending[end..end + separator].to_vec()
                 };
-                frames.push(self.decode_frame(&raw, &delimiter)?);
+                self.append_frames(&raw, &delimiter, &mut *frames)?;
                 consumed = end + separator;
                 self.data_lines = IndependentDataLines::default();
                 self.scan_from = consumed;
@@ -173,9 +191,13 @@ impl SseDecoder {
                 }
             }
             self.pending.drain(..consumed);
+            if consumed != 0 {
+                self.tail = tail::Tail::default();
+            }
             self.scan_from = self.pending.len().saturating_sub(3);
             if self.terminal || self.done {
                 self.pending.clear();
+                self.tail = tail::Tail::default();
                 self.data_lines = IndependentDataLines::default();
                 self.scan_from = 0;
                 break;
@@ -184,12 +206,16 @@ impl SseDecoder {
                 return Err(event_too_large());
             }
         }
-        let fields = fields(&self.pending);
-        if !self.pending.is_empty() && fields.event.is_some() && fields.valid_data() {
-            let pending = std::mem::take(&mut self.pending);
-            frames.push(self.decode_frame(&pending, b"\n\n")?);
-            self.scan_from = 0;
-            self.data_lines = IndependentDataLines::default();
+        if self.tail.complete(&self.pending) {
+            let fields = fields(&self.pending);
+            if fields.event.is_some() && fields.valid_data() {
+                let pending = std::mem::take(&mut self.pending);
+                self.tail = tail::Tail::default();
+                self.append_frames(&pending, b"\n\n", &mut *frames)?;
+                self.scan_from = 0;
+                self.data_lines = IndependentDataLines::default();
+                self.raw_json_tail = true;
+            }
         }
         Ok(())
     }
@@ -197,6 +223,7 @@ impl SseDecoder {
     pub(super) fn finish_frames(&mut self) -> Result<Vec<SseFrame>, ServiceError> {
         if self.terminal || self.done || !self.has_partial_event() {
             self.pending.clear();
+            self.tail = tail::Tail::default();
             self.data_lines = IndependentDataLines::default();
             self.scan_from = 0;
             return Ok(Vec::new());
@@ -205,12 +232,14 @@ impl SseDecoder {
         while let Some((end, separator)) = self.data_lines.boundary(&self.pending, true) {
             self.check_line_size(&self.pending[..end])?;
             let raw = self.pending[..end].to_vec();
-            frames.push(self.decode_frame(&raw, b"\n\n")?);
+            self.append_frames(&raw, b"\n\n", &mut frames)?;
             self.pending.drain(..end + separator);
+            self.tail = tail::Tail::default();
             self.data_lines = IndependentDataLines::default();
             self.scan_from = 0;
             if self.terminal || self.done {
                 self.pending.clear();
+                self.tail = tail::Tail::default();
                 return Ok(frames);
             }
         }
@@ -223,9 +252,10 @@ impl SseDecoder {
             ));
         }
         let pending = std::mem::take(&mut self.pending);
+        self.tail = tail::Tail::default();
         self.scan_from = 0;
         self.data_lines = IndependentDataLines::default();
-        frames.push(self.decode_frame(&pending, b"\n\n")?);
+        self.append_frames(&pending, b"\n\n", &mut frames)?;
         Ok(frames)
     }
 
@@ -239,9 +269,16 @@ impl SseDecoder {
             .map_or(0, |(end, separator)| end.saturating_add(separator));
         // Go's Scanner limits the data line; a preceding event field does not
         // consume that line's budget. Retain a finite pending buffer as well.
-        let metadata = self.pending.split_inclusive(|byte| *byte == b'\n')
-            .take_while(|line| !line.starts_with(b"data:"))
-            .map(|line| line.len()).sum::<usize>();
+        let mut remaining = self.pending.as_slice();
+        let mut metadata = 0;
+        while !remaining.starts_with(b"data:") {
+            let Some(end) = remaining.iter().position(|byte| *byte == b'\n') else {
+                metadata = 0;
+                break;
+            };
+            metadata += end + 1;
+            remaining = &remaining[end + 1..];
+        }
         let metadata = if metadata < self.pending.len() { metadata } else { 0 };
         self.limit.saturating_add(prefix).saturating_add(metadata)
     }
@@ -255,6 +292,31 @@ impl SseDecoder {
 
     pub(super) fn has_partial_event(&self) -> bool {
         self.pending.iter().any(|byte| !byte.is_ascii_whitespace())
+    }
+
+    fn append_frames(&mut self, raw: &[u8], separator: &[u8], frames: &mut Vec<SseFrame>) -> Result<(), ServiceError> {
+        match self.decode_frame(raw, separator) {
+            Ok(frame) => { frames.push(frame); Ok(()) },
+            Err(error) => {
+                let fields = fields(raw);
+                let Some(parts) = super::event_documents::split(&fields.data) else { return Err(error); };
+                for (index, part) in parts.into_iter().enumerate() {
+                    if self.terminal || self.done { break; }
+                    let mut frame = Vec::new();
+                    // Preserve comments and IDs on the first recovered event.
+                    if index == 0 {
+                        for line in raw.split(|b| *b == b'\n') {
+                            if !line.starts_with(b"data:") && !line.starts_with(b"event:") && !line.is_empty() {
+                                frame.extend_from_slice(line); frame.push(b'\n');
+                            }
+                        }
+                    }
+                    frame.extend_from_slice(b"data: "); frame.extend_from_slice(part);
+                    frames.push(self.decode_frame(&frame, b"\n\n")?);
+                }
+                Ok(())
+            }
+        }
     }
 
     fn decode_frame(&mut self, raw: &[u8], separator: &[u8]) -> Result<SseFrame, ServiceError> {
@@ -411,7 +473,7 @@ struct Fields {
 impl Fields {
     fn valid_data(&self) -> bool {
         !self.data.is_empty()
-            && (self.data == b"[DONE]" || serde_json::from_slice::<Value>(&self.data).is_ok())
+            && (self.data == b"[DONE]" || serde_json::from_slice::<Value>(&self.data).is_ok() || super::event_documents::split(&self.data).is_some())
     }
 }
 fn fields(raw: &[u8]) -> Fields {
@@ -629,6 +691,7 @@ pub(super) struct ResponseObservation {
     pub error_message: Option<String>,
     pub credential_scope: bool,
     pub request_scoped: bool,
+    pub transient_rate_limit: bool,
     pub retry_after: Option<std::time::Duration>,
     pub http_status: Option<u16>,
     pub service_tier: Option<String>,
@@ -658,6 +721,7 @@ impl ResponseObservation {
             .get("type")
             .and_then(Value::as_str)
             .unwrap_or_default();
+        self.transient_rate_limit |= super::transient_rate_limit::applies(event);
         let (message, credential_scope) = super::diagnostics::upstream_error_metadata(event);
         if message.is_some() {
             self.error_message = message;

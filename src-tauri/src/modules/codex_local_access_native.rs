@@ -53,6 +53,19 @@ async fn ensure_native_gateway_locked(
     if let Some(endpoint) = endpoint {
         wait_for_gateway_port_release(&endpoint.bind_host, endpoint.port).await?;
     }
+    // An older detached Go writer must release the port and history journal
+    // before the Rust listener takes over. Match the exact managed config.
+    let config_path = sidecar_config_path(&local_access_sidecar_dir()?);
+    let retired = tokio::task::spawn_blocking(move || {
+        process::stop_managed_sidecar_writer_for_handoff(
+            CODEX_LOCAL_ACCESS_SIDECAR_BIN_NAME,
+            &config_path,
+            std::process::id(),
+        )
+    }).await.map_err(|error| format!("Cannot retire the previous API service: {error}"))??;
+    if retired != 0 {
+        wait_for_gateway_port_release(bind_host, collection.port).await?;
+    }
     let addr = format!("{bind_host}:{}", collection.port)
         .parse()
         .map_err(|_| "NATIVE_API_INVALID_ADDRESS".to_string())?;
@@ -94,26 +107,9 @@ async fn ensure_native_gateway_locked(
     Ok(())
 }
 
-async fn set_runtime_gateway_mode(mode: CodexLocalAccessGatewayMode) {
-    if let Some(collection) = gateway_runtime().lock().await.collection.as_mut() {
-        collection.gateway_mode = mode;
-        collection.native_gateway_default_migrated = true;
-    }
-}
 
-async fn persist_native_gateway_selection(mode: CodexLocalAccessGatewayMode) -> Result<(), String> {
-    let path = local_access_file_path()?;
-    tokio::task::spawn_blocking(move || {
-        update_string_atomic(&path, |current| {
-            native_patch_mode(
-                current.ok_or_else(|| "API service configuration is missing".to_string())?,
-                mode,
-            )
-        })
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
+
+
 
 fn native_patch_mode(current: &str, mode: CodexLocalAccessGatewayMode) -> Result<String, String> {
     let mut value: Value = serde_json::from_str(current).map_err(|error| error.to_string())?;
@@ -186,74 +182,7 @@ fn native_validate_chatgpt_plan_mode(
     Ok(())
 }
 
-async fn switch_native_aware_gateway(mode: CodexLocalAccessGatewayMode) -> Result<(), String> {
-    ensure_runtime_loaded_without_start().await?;
-    let mode = if mode == CodexLocalAccessGatewayMode::Legacy {
-        CodexLocalAccessGatewayMode::Sidecar
-    } else {
-        mode
-    };
-    let _guard = timeout(Duration::from_secs(30), gateway_lifecycle_lock().lock())
-        .await
-        .map_err(|_| "NATIVE_API_SWITCH_BUSY".to_string())?;
-    let previous = {
-        let runtime = gateway_runtime().lock().await;
-        let collection = runtime
-            .collection
-            .as_ref()
-            .ok_or_else(|| "API service configuration is missing".to_string())?;
-        // Reject before pausing or stopping the existing listener. Neither a
-        // failed switch nor a stopped service may activate the sidecar grant.
-        native_validate_chatgpt_plan_mode(collection, mode)?;
-        let previous = collection.gateway_mode;
-        if previous == mode {
-            return Ok(());
-        }
-        if runtime
-            .native_handle
-            .as_ref()
-            .is_some_and(|handle| !handle.pause_if_idle())
-        {
-            return Err("NATIVE_API_BUSY".into());
-        }
-        previous
-    };
-    advance_gateway_lifecycle_generation();
-    let (endpoint, stopped) = stop_gateway_locked_checked("engine_switch").await;
-    let result = async {
-        stopped?;
-        if let Some(endpoint) = endpoint {
-            wait_for_gateway_port_release(&endpoint.bind_host, endpoint.port).await?;
-        }
-        set_runtime_gateway_mode(mode).await;
-        // Deliberately bypass the random-port recovery wrapper: the public endpoint must remain stable.
-        ensure_gateway_matches_runtime_once_locked().await?;
-        persist_native_gateway_selection(mode).await
-    }
-    .await;
-    if let Err(error) = result {
-        let (endpoint, _) = stop_gateway_locked_checked("engine_switch_rollback").await;
-        if let Some(endpoint) = endpoint {
-            let _ = wait_for_gateway_port_release(&endpoint.bind_host, endpoint.port).await;
-        }
-        set_runtime_gateway_mode(previous).await;
-        let restored = ensure_gateway_matches_runtime_once_locked().await;
-        let restored_ok = restored.is_ok();
-        let message = match restored {
-            Ok(()) => format!("NATIVE_API_SWITCH_FAILED: {error}"),
-            Err(rollback) => format!("NATIVE_API_ROLLBACK_FAILED: {error}; {rollback}"),
-        };
-        gateway_runtime().lock().await.last_error = if restored_ok {
-            None
-        } else {
-            Some(message.clone())
-        };
-        emit_local_access_state_updated();
-        return Err(message);
-    }
-    emit_local_access_state_updated();
-    Ok(())
-}
+
 
 #[derive(Default)]
 struct NativeHostBridge {
@@ -363,6 +292,7 @@ fn native_recorded_failure_cools_account(report: &native_contract::RequestReport
             "upstream_unavailable"
                 | "account_cooling"
                 | "upstream_stream_error"
+                | "upstream_websocket_lost"
                 | "incomplete_upstream_stream"
                 | "upstream_connect_timeout"
                 | "upstream_idle_timeout"
@@ -435,6 +365,11 @@ impl NativeHostBridge {
         }
         if let Ok(mut cooldowns) = self.cooldowns.lock() {
             if self.cooling_disabled.load(Ordering::Acquire) {
+                return;
+            }
+            if report.transient_rate_limit {
+                native_upsert_transient_rate_limit(&mut cooldowns, &report.account_id,
+                    &report.upstream_model, report.retry_after, Instant::now());
                 return;
             }
             if report
@@ -821,6 +756,9 @@ impl native_contract::Host for NativeHostBridge {
             .map(|mut cache| cache.invalidate(identity))
             .unwrap_or(false)
     }
+    fn invalidate_http2_transport(&self, identity: &str) -> bool {
+        self.clients.lock().map(|mut cache| cache.invalidate_http2(identity, Instant::now())).unwrap_or(false)
+    }
     fn multi_agent_policy<'a>(
         &'a self,
         caller: &'a native_contract::Caller,
@@ -980,6 +918,17 @@ impl native_contract::Host for NativeHostBridge {
         })
     }
 
+    fn route_transient_rate_limited<'a>(
+        &'a self, route: &'a native_contract::Route, model: &'a str, retry_after: Option<Duration>,
+    ) -> futures_util::future::BoxFuture<'a, ()> {
+        Box::pin(async move {
+            if !self.selected_route_current(route).await || self.cooling_disabled.load(Ordering::Acquire) { return; }
+            if let Ok(mut states) = self.cooldowns.lock() {
+                native_upsert_transient_rate_limit(&mut states, &route.account_id, model, retry_after, Instant::now());
+            }
+        })
+    }
+
     fn route_failed_attempt<'a>(
         &'a self,
         route: &'a native_contract::Route,
@@ -1051,7 +1000,7 @@ impl native_contract::Host for NativeHostBridge {
         Box::pin(async move {
             let collection = self.collection().await?;
             let key = native_caller_key(&collection, caller)?;
-            if route.wire_api == native_contract::WireApi::Chat
+            if route.wire_api != native_contract::WireApi::Responses
                 || key.is_some_and(|key| {
                     key.provider_gateway.is_some() || key.model_routing.is_some()
                 })
@@ -1174,6 +1123,33 @@ impl native_contract::Host for NativeHostBridge {
         Result<native_contract::Route, native_contract::ServiceError>,
     > {
         Box::pin(native_refresh_route(self, caller, previous, request))
+    }
+
+    fn validate_websocket_control<'a>(
+        &'a self, caller: &'a native_contract::Caller, route: &'a native_contract::Route,
+        request: &'a native_contract::RouteRequest,
+    ) -> futures_util::future::BoxFuture<'a, Result<(), native_contract::ServiceError>> {
+        Box::pin(async move {
+            let collection = self.collection().await?;
+            let key = native_caller_key(&collection, caller)?;
+            let public_model = native_model_for_key(&collection, key, &request.model)?;
+            let plan = native_model_route_plan(&collection, key, &public_model)?;
+            let mut account = self.load_route_account(route).await?.ok_or_else(|| native_error(404, "account_not_found", "Selected account no longer exists"))?;
+            if codex_account::is_grok_upstream_provider(&account) {
+                account = native_grok::current_account(account).await?;
+            }
+            if !native_model_visible(&collection, key, &plan, &account)
+                || native_wire_api(&account)? != route.wire_api
+                || (account.is_api_key_auth() && !codex_account::is_grok_upstream_provider(&account)
+                    && account.api_base_url.as_deref().filter(|url| !url.trim().is_empty()).unwrap_or("https://api.openai.com/v1").trim_end_matches('/') != route.base_url.trim_end_matches('/'))
+                || native_plan_account_model(&plan, &account).as_deref() != Some(&route.model)
+                || native_account_owner(&account, &route.base_url) != route.owner_id
+                || !self.selected_route_current(route).await
+                || !self.websockets_enabled().await? {
+                return Err(native_error(403, "websocket_control_denied", "The active account or model is no longer authorized for this WebSocket"));
+            }
+            Ok(())
+        })
     }
 
     fn models<'a>(
@@ -1518,6 +1494,10 @@ mod native_official_fallback_tests;
 mod native_live_acceptance;
 
 #[cfg(test)]
+#[path = "codex_local_access_native_live_protocol.rs"]
+mod native_live_protocol;
+
+#[cfg(test)]
 #[path = "codex_local_access_native_live_pool.rs"]
 mod native_live_pool;
 
@@ -1531,6 +1511,8 @@ mod native_host_tests {
     include!("codex_local_access_tests_native_cooldown.rs");
     include!("codex_local_access_tests_native_health.rs");
     include!("codex_local_access_tests_native_cooling_continuation.rs");
+    include!("codex_local_access_tests_native_quota_continuation.rs");
+    include!("codex_local_access_tests_native_quota_http.rs");
     include!("codex_local_access_tests_native_reserve.rs");
     include!("codex_local_access_tests_native_automatic.rs");
     include!("codex_local_access_tests_native_parity22.rs");

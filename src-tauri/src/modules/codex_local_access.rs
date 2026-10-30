@@ -53,7 +53,7 @@ include!("codex_local_access_service_members.rs");
 include!("codex_local_access_official_members.rs");
 include!("codex_local_access_http.rs");
 // The retired in-process WebSocket gateway is retained only as a test oracle.
-// Production traffic is handled by the native engine or the optional CLIProxyAPI sidecar.
+// Production traffic is handled exclusively by the native Rust engine.
 #[cfg(test)]
 include!("codex_local_access_recovery.rs");
 

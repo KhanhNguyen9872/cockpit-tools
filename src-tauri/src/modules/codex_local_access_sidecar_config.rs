@@ -321,69 +321,13 @@ fn provider_gateway_lifecycle_lock() -> &'static TokioMutex<()> {
     PROVIDER_GATEWAY_LIFECYCLE_LOCK.get_or_init(|| TokioMutex::new(()))
 }
 
-fn sidecar_binary_file_names() -> Vec<String> {
-    let target = env!("COCKPIT_RUST_TARGET");
-    if cfg!(target_os = "windows") {
-        vec![
-            format!("{CODEX_LOCAL_ACCESS_SIDECAR_BIN_NAME}.exe"),
-            format!("{CODEX_LOCAL_ACCESS_SIDECAR_BIN_NAME}-{target}.exe"),
-        ]
-    } else {
-        vec![
-            CODEX_LOCAL_ACCESS_SIDECAR_BIN_NAME.to_string(),
-            format!("{CODEX_LOCAL_ACCESS_SIDECAR_BIN_NAME}-{target}"),
-        ]
-    }
-}
 
-fn push_sidecar_binary_candidates(candidates: &mut Vec<PathBuf>, dir: &Path) {
-    for name in sidecar_binary_file_names() {
-        let path = dir.join(name);
-        if !candidates.iter().any(|candidate| candidate == &path) {
-            candidates.push(path);
-        }
-    }
-}
 
-fn sidecar_binary_candidates() -> Result<Vec<PathBuf>, String> {
-    let exe = std::env::current_exe().map_err(|e| format!("读取当前程序路径失败: {}", e))?;
-    let parent = exe
-        .parent()
-        .ok_or_else(|| format!("当前程序路径缺少父目录: {}", exe.display()))?;
-    let mut candidates = Vec::new();
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let dev_sidecar_dir = manifest_dir.join("../sidecars/cockpit-cliproxy/bin");
 
-    if cfg!(debug_assertions) {
-        push_sidecar_binary_candidates(&mut candidates, &dev_sidecar_dir);
-    }
-    push_sidecar_binary_candidates(&mut candidates, parent);
-    if let Some(contents_dir) = parent.parent() {
-        push_sidecar_binary_candidates(&mut candidates, &contents_dir.join("Resources"));
-    }
-    if !cfg!(debug_assertions) {
-        push_sidecar_binary_candidates(&mut candidates, &dev_sidecar_dir);
-    }
-    Ok(candidates)
-}
 
-fn sidecar_binary_path() -> Result<PathBuf, String> {
-    let candidates = sidecar_binary_candidates()?;
-    candidates
-        .iter()
-        .find(|path| path.exists())
-        .cloned()
-        .ok_or_else(|| {
-            format!(
-                "API 服务 sidecar 二进制不存在，已检查: {}。请重新构建应用。",
-                candidates
-                    .iter()
-                    .map(|path| path.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        })
-}
+
+
+
 
 fn sanitize_sidecar_command_env(command: &mut TokioCommand) {
     #[cfg(target_os = "macos")]
@@ -2090,13 +2034,8 @@ fn gateway_mode_label(mode: CodexLocalAccessGatewayMode) -> &'static str {
     gateway_mode_to_db_value(mode)
 }
 
-fn collection_gateway_mode(collection: &CodexLocalAccessCollection) -> CodexLocalAccessGatewayMode {
-    match collection.gateway_mode {
-        CodexLocalAccessGatewayMode::Native => CodexLocalAccessGatewayMode::Native,
-        CodexLocalAccessGatewayMode::Legacy | CodexLocalAccessGatewayMode::Sidecar => {
-            CodexLocalAccessGatewayMode::Sidecar
-        }
-    }
+fn collection_gateway_mode(_collection: &CodexLocalAccessCollection) -> CodexLocalAccessGatewayMode {
+    CodexLocalAccessGatewayMode::Native
 }
 
 fn log_gateway_mode_info(mode: CodexLocalAccessGatewayMode, message: impl AsRef<str>) {

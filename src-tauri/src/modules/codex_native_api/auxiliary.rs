@@ -645,7 +645,7 @@ async fn relay(
     model: String,
     connection: Option<bindings::CallConnection>,
     mut client: WebSocket,
-    mut upstream: tokio_tungstenite::WebSocketStream<reqwest::Upgraded>,
+    mut upstream: super::websocket_io::UpstreamSocket,
     mut tracker: RequestTracker,
 ) {
     use tokio_tungstenite::tungstenite::Message as U;
@@ -685,7 +685,7 @@ async fn relay(
         Ok(()) => tracker.complete(200, true, usage, None).await,
         Err(error) => tracker.fail(&error).await,
     }
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(1), upstream.close(None)).await;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(1), upstream.close()).await;
     let _ = tokio::time::timeout(std::time::Duration::from_secs(1), client.close()).await;
 }
 use axum::extract::FromRequestParts;
@@ -921,6 +921,7 @@ async fn send_until(
             return Err(error);
         }
     };
+    let response = super::http_compression::decode_response(response)?;
     tracker.quota_headers(response.headers());
     tracker.upstream_response_headers(response.headers());
     Ok(response)

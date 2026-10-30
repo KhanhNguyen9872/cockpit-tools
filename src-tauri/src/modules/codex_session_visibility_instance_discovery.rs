@@ -27,15 +27,15 @@ fn collect_instances() -> Result<Vec<CodexSyncInstance>, String> {
     Ok(instances)
 }
 
+fn instance_process_home(instance: &CodexSyncInstance) -> Option<&str> {
+    if instance.id == DEFAULT_INSTANCE_ID { None } else { instance.data_dir.to_str() }
+}
+
 fn is_instance_running(
     instance: &CodexSyncInstance,
     process_entries: &[(u32, Option<String>)],
 ) -> bool {
-    let codex_home = if instance.id == DEFAULT_INSTANCE_ID {
-        None
-    } else {
-        instance.data_dir.to_str()
-    };
+    let codex_home = instance_process_home(instance);
     modules::process::resolve_codex_pid_from_entries(instance.last_pid, codex_home, process_entries)
         .is_some()
 }
@@ -827,7 +827,6 @@ fn normalized_global_state_entries(
     let mut normalized = serde_json::Map::new();
     for key in [
         "electron-saved-workspace-roots",
-        "project-order",
         "active-workspace-roots",
     ] {
         let Some(value) = state.get(key) else {
@@ -844,6 +843,18 @@ fn normalized_global_state_entries(
             JsonValue::Array(paths.into_iter().map(JsonValue::String).collect())
         };
         normalized.insert(key.to_string(), next);
+    }
+    // New clients store project IDs here; old clients used workspace paths.
+    // Only path-shaped entries may be normalized, never case-fold project IDs.
+    if let Some(order) = state.get("project-order").and_then(JsonValue::as_array) {
+        let mut seen = HashSet::new();
+        let values = order.iter().map(|value| {
+            value.as_str().filter(|path| is_windows_workspace_path(path)
+                || path.to_ascii_lowercase().starts_with(r"\\?\"))
+                .and_then(to_desktop_workspace_path).map(JsonValue::String)
+                .unwrap_or_else(|| value.clone())
+        }).filter(|value| seen.insert(value.to_string())).collect();
+        normalized.insert("project-order".into(), JsonValue::Array(values));
     }
     if let Some(labels) = state
         .get("electron-workspace-root-labels")

@@ -9,6 +9,10 @@ const indexUrl = 'app://-/assets/index-fixture.js';
 const initialUrl = 'app://-/assets/app-initial-fixture.js';
 const primaryUrl = 'app://-/assets/app-primary-fixture.js';
 
+const discoverySandbox = { module: { exports: {} }, URL };
+vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'fast.js'), 'utf8'), discoverySandbox);
+const discovery = discoverySandbox.module.exports;
+
 function run({ documentElement = null, pathname = '/index.html', initialMode = 'full',
   quotaFailure = null, primaryFailure = null, fastOnlyFailure = null, missingPrimary = false } = {}) {
   const files = new Map([
@@ -36,6 +40,7 @@ function run({ documentElement = null, pathname = '/index.html', initialMode = '
       }
     },
     __cockpitNativeFast: {
+      resolveInitialModuleSync: discovery.resolveInitialModuleSync,
       localAsset(url, entry = false) {
         return entry
           ? /^app:\/\/-\/assets\/index-[A-Za-z0-9_-]+\.js$/.test(url)

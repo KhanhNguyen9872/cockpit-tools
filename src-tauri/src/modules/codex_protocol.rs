@@ -19,7 +19,7 @@ const CODEX_INPUT_ITEM_ID_LIMIT: usize = 64;
 pub(crate) const CODEX_CLIENT_COMP_HASH: &str = "3000";
 const CODEX_CLIENT_MODEL_TEMPLATES_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../sidecars/cockpit-cliproxy/third_party/CLIProxyAPI/internal/registry/models/codex_client_models.json"
+    "/../resources/codex/codex_client_models.json"
 ));
 const DEFAULT_CONTEXT_WINDOW: i64 = 272_000;
 /// 未知 / 自定义 Codex 模型的兜底上限。
@@ -724,6 +724,9 @@ fn is_grok_codex_model(model_id: &str) -> bool {
 }
 
 fn codex_client_model_template(model_id: &str) -> (Value, bool) {
+    if let Some(model) = deepseek_model_template(model_id) {
+        return (model, true);
+    }
     let payload = codex_client_model_catalog();
     let models = payload
         .get("models")
@@ -738,14 +741,16 @@ fn codex_client_model_template(model_id: &str) -> (Value, bool) {
         return (model.clone(), true);
     }
 
-    // Terra has the same supported Codex reasoning levels and Fast tier as Luna.
-    // Use its client template until the bundled official catalog includes Terra.
+    // Keep Luna's client capabilities and Fast tier, but include Terra's Ultra
+    // reasoning level until the bundled official catalog includes Terra.
     if model_id.eq_ignore_ascii_case("gpt-6.1-terra") {
         if let Some(luna) = models.iter().find(|model| model["slug"] == "gpt-6-luna") {
             let mut terra = luna.clone();
             terra["slug"] = json!("gpt-6.1-terra");
             terra["display_name"] = json!("GPT-6.1 Terra");
             terra["description"] = json!("GPT-6.1 Terra");
+            terra["supported_reasoning_levels"] =
+                codex_client_model_template("gpt-6-sol").0["supported_reasoning_levels"].clone();
             return (terra, true);
         }
     }
@@ -792,6 +797,48 @@ fn codex_client_model_template(model_id: &str) -> (Value, bool) {
         target.insert(key.clone(), value.clone());
     }
     (model, true)
+}
+
+/// Recognize DeepSeek model IDs, including namespaced relay IDs.
+pub(crate) fn is_deepseek_model(model_id: &str) -> bool {
+    let id = model_id.trim().rsplit('/').next().unwrap_or_default();
+    id.len() > "deepseek-".len()
+        && id.get(.."deepseek-".len()).is_some_and(|prefix| prefix.eq_ignore_ascii_case("deepseek-"))
+}
+
+pub(crate) fn is_known_deepseek_model(model_id: &str) -> bool {
+    matches!(model_id.trim().rsplit('/').next().unwrap_or_default().to_ascii_lowercase().as_str(),
+        "deepseek-flash" | "deepseek-v4-flash" | "deepseek-v4-pro" | "deepseek-v4-flash-vision-exp")
+}
+
+pub(crate) fn deepseek_model_template(model_id: &str) -> Option<Value> {
+    if !is_deepseek_model(model_id) {
+        return None;
+    }
+    let id = model_id.trim().rsplit('/').next()?.to_ascii_lowercase();
+    let template_id = match id.as_str() {
+        "deepseek-flash" | "deepseek-v4-flash" => "deepseek-v4-flash",
+        "deepseek-v4-pro" => "deepseek-v4-pro",
+        "deepseek-v4-flash-vision-exp" => "deepseek-v4-flash-vision-exp",
+        _ => "deepseek-v4-flash",
+    };
+    static CATALOG: OnceLock<Value> = OnceLock::new();
+    let catalog = CATALOG.get_or_init(|| serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/resources/deepseek_codex_models.json"))).expect("valid DeepSeek catalog"));
+    let template = catalog["models"].as_array()?.iter().find(|item| item["slug"] == template_id)?;
+    if is_known_deepseek_model(model_id) {
+        return Some(template.clone());
+    }
+    // Future models inherit only reasoning defaults, not a known model's
+    // context size, image support, tools, or execution capabilities.
+    let mut fallback = build_codex_client_model("cockpit-unknown-model", 0);
+    fallback["slug"] = json!(model_id.trim());
+    fallback["display_name"] = json!(model_id.trim());
+    fallback["description"] = json!(model_id.trim());
+    fallback["input_modalities"] = json!(["text"]);
+    fallback["supports_image_detail_original"] = json!(false);
+    fallback["supported_reasoning_levels"] = template["supported_reasoning_levels"].clone();
+    fallback["default_reasoning_level"] = template["default_reasoning_level"].clone();
+    Some(fallback)
 }
 
 fn display_name_for_model(model_id: &str) -> String {
@@ -1319,6 +1366,23 @@ fn remove_unsupported_responses_fields(obj: &mut Map<String, Value>) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn deepseek_relay_models_have_three_reasoning_levels() {
+        for id in ["deepseek-flash", "deepseek-v4-pro", "vendor/deepseek-v4-flash", "vendor/DeepSeek-V5-Pro", "deepseek-future"] {
+            let model = &build_codex_client_models_response(&[id.to_string()])["models"][0];
+            let levels: Vec<_> = model["supported_reasoning_levels"].as_array().unwrap().iter().map(|level| level["effort"].as_str().unwrap()).collect();
+            assert_eq!(levels, ["low", "high", "max"]);
+        }
+        assert!(deepseek_model_template("not-deepseek-v4-pro").is_none());
+        assert!(deepseek_model_template("deepseek-").is_none());
+        assert!(!is_known_deepseek_model("vendor/deepseek-v5-pro"));
+        assert!(is_known_deepseek_model("deepseek-v4-pro"));
+        let future = deepseek_model_template("vendor/deepseek-v5-pro").unwrap();
+        assert_eq!(future["input_modalities"], json!(["text"]));
+        assert_eq!(future["context_window"], DEFAULT_CONTEXT_WINDOW);
+        assert_eq!(future["multi_agent_version"], Value::Null);
+    }
+
     fn model_template_for_test(slug: &str) -> Value {
         let catalog: Value = serde_json::from_str(CODEX_CLIENT_MODEL_TEMPLATES_JSON)
             .expect("model templates JSON should be valid");
@@ -1401,7 +1465,7 @@ mod tests {
 
     #[test]
     fn routed_gpt_models_preserve_capabilities_and_dispatch_identity() {
-        for upstream in ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"] {
+        for upstream in ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-6.1-terra"] {
             let routed = format!("cpa/{upstream}");
             let catalog = build_codex_client_models_response(&[upstream.into(), routed.clone()]);
             for field in [
@@ -2335,6 +2399,43 @@ mod tests {
             .unwrap()
             .iter()
             .any(|level| level["effort"] == "ultra"));
+    }
+
+    #[test]
+    fn gpt_6_1_terra_supports_ultra_and_preserves_existing_capabilities() {
+        let catalog = build_codex_client_models_response(&["gpt-6.1-terra".into()]);
+        let model = &catalog["models"][0];
+        let luna = model_template_for_test("gpt-6-luna");
+        let efforts = model["supported_reasoning_levels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|level| level["effort"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(efforts, vec!["low", "medium", "high", "xhigh", "max", "ultra"]);
+        assert_eq!(model["slug"], "gpt-6.1-terra");
+        assert_eq!(model["display_name"], "GPT-6.1 Terra");
+        for field in [
+            "default_reasoning_level",
+            "context_window",
+            "max_context_window",
+            "auto_compact_token_limit",
+            "service_tiers",
+            "additional_speed_tiers",
+        ] {
+            assert_eq!(model[field], luna[field], "{field}");
+        }
+        for slug in ["gpt-6.1-terra", "cpa/gpt-6.1-terra"] {
+            let selected = build_codex_client_models_response_with_model_definitions_and_reasoning(&[(
+                slug.into(),
+                "GPT-6.1 Terra".into(),
+                Some(vec!["ultra".into()]),
+            )]);
+            let selected = &selected["models"][0];
+            assert_eq!(selected["supported_reasoning_levels"].as_array().unwrap().len(), 1);
+            assert_eq!(selected["supported_reasoning_levels"][0]["effort"], "ultra");
+            assert_eq!(selected["default_reasoning_level"], "ultra");
+        }
     }
 
     #[test]

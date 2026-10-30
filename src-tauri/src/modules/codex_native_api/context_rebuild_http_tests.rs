@@ -30,6 +30,7 @@ use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 
 #[derive(Clone)]
 enum Step {
+    CipherReject { http: bool, prefix: Option<Value> },
     Complete(&'static str, Option<Value>),
     CompleteItems(&'static str, Vec<Value>),
     RawEvents(Vec<Value>),
@@ -240,6 +241,7 @@ async fn upstream_http(
         .pop_front()
         .expect("Unexpected synthetic upstream attempt");
     match step {
+        Step::CipherReject { http, prefix } => encrypted_reasoning_tests::rejection(&request, http, prefix),
         Step::RawEvents(events) => sse(events),
         Step::HttpOverload => (StatusCode::SERVICE_UNAVAILABLE,Json(json!({"error":{"type":"server_error","code":"server_error","message":"Synthetic overloaded"}}))).into_response(),
         Step::HttpRateLimit => (StatusCode::TOO_MANY_REQUESTS,Json(json!({"error":{"type":"usage_limit_reached","code":"usage_limit_reached","message":"Synthetic quota exhausted"}}))).into_response(),
@@ -905,6 +907,8 @@ async fn context_rebuild_upstream_websocket_overload_rebuilds_then_reuses_b_gene
             Step::Complete("b-rebuilt", None),
             Step::Complete("b-next", None),
             Step::SseOverload,
+            Step::SseOverload,
+            Step::SseOverload,
         ],
     )
     .await;
@@ -1004,16 +1008,19 @@ async fn context_rebuild_upstream_websocket_overload_rebuilds_then_reuses_b_gene
             .or_else(|| error.get("status_code"))
             .unwrap(),
         503,
-        "The open socket must honor disabling rebuild: {error}"
+        "Disabling rebuild still permits bounded same-owner capacity recovery: {error}"
     );
     let sent = fixture.sent();
     assert_eq!(
         sent.iter()
             .map(|request| request.account.as_str())
             .collect::<Vec<_>>(),
-        vec!["a", "a", "b", "b", "b"]
+        vec!["a", "a", "b", "b", "b", "b", "b"]
     );
-    assert_eq!(identity(&sent[3]), identity(&sent[4]));
+    for retry in &sent[4..] {
+        assert_eq!(identity(&sent[3]), identity(retry));
+        assert_eq!(sent[4].body, retry.body, "same-owner capacity retries retain the full original request");
+    }
     assert_eq!(fixture.active().unwrap(), b_active);
     socket.close(None).await.unwrap();
     drop(socket);
@@ -1034,3 +1041,9 @@ mod output_evidence_tests;
 
 #[path = "account_installation_http_tests.rs"]
 mod installation_tests;
+
+#[path = "partial_history_http_tests.rs"]
+mod partial_history_tests;
+
+#[path = "encrypted_reasoning_http_tests.rs"]
+mod encrypted_reasoning_tests;

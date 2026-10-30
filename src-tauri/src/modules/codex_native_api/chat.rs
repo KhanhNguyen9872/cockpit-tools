@@ -16,6 +16,7 @@ mod tools;
 pub use output::response_to_chat;
 pub(crate) use output::{chat_usage, finish_reason, image_mime};
 pub use request::prepare_request;
+pub(super) use request::prepare_responses_ingress;
 pub use stream::ChatStreamAdapter;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -28,6 +28,8 @@ use super::{contract::*, start, Handle, Options};
 
 #[path = "http_parity_tests.rs"]
 mod http_parity_tests;
+#[path = "audit_protocol_tests.rs"]
+mod audit_protocol_tests;
 #[path = "request_size_tests.rs"]
 mod request_size_tests;
 #[path = "thinking_suffix_tests.rs"]
@@ -247,10 +249,10 @@ fn body(stream: bool) -> Value {
     json!({"model":"test-model","stream":stream,"input":[{"role":"user","content":"test"}],"unknown":{"preserve":true},"reasoning":{"effort":"high"}})
 }
 fn created() -> &'static str {
-    "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-a\"}}\n\n"
+    "event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp-a\",\"created_at\":123}}\n\n"
 }
 fn completed() -> &'static str {
-    "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-a\",\"status\":\"completed\",\"output\":[],\"unknown\":true,\"service_tier\":\"priority\",\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}}\n\n"
+    "event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{\"id\":\"resp-a\",\"created_at\":123,\"status\":\"completed\",\"output\":[],\"unknown\":true,\"service_tier\":\"priority\",\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}}\n\n"
 }
 
 async fn ws_json(
@@ -1236,3 +1238,14 @@ async fn websocket_http_bridge_keeps_selected_model_policy_and_explicit_tier() {
     service.shutdown(Duration::from_secs(2)).await.unwrap();
     upstream.abort();
 }
+
+#[path = "protocol_compat_http_tests.rs"]
+mod protocol_compat_http_tests;
+
+#[path = "full_protocol_tests.rs"]
+mod full_protocol_tests;
+#[path = "steering_compression_tests.rs"]
+mod steering_compression_tests;
+
+#[path = "compression_upstream_tests.rs"]
+mod compression_upstream_tests;

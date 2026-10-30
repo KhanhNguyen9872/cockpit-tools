@@ -2795,6 +2795,7 @@ fn sync_api_key_model_catalog_to_dir(
         if configured_catalog != CODEX_MANAGED_MODEL_CATALOG_FILE
             && configured_catalog != CODEX_LEGACY_PROVIDER_MODEL_CATALOG_FILE
             && configured_catalog != CODEX_LEGACY_LOCAL_ACCESS_MODEL_CATALOG_FILE
+            && !crate::modules::codex_native_speed_catalog::is_reference(base_dir, configured_catalog)
         {
             return Ok(false);
         }
@@ -3057,6 +3058,7 @@ fn rebuild_managed_catalog_from_existing(catalog_path: &Path) -> Result<(), Stri
     }
     let mut rebuilt =
         crate::modules::codex_protocol::build_codex_client_models_response(&model_ids);
+    let configured = catalog_path.parent().map(read_experimental_model_definitions).unwrap_or_default();
     if let Some(new_models) = rebuilt.get_mut("models").and_then(JsonValue::as_array_mut) {
         for model in new_models.iter_mut() {
             let Some(slug) = model
@@ -3074,6 +3076,36 @@ fn rebuild_managed_catalog_from_existing(catalog_path: &Path) -> Result<(), Stri
             };
             for field in ["display_name", "description"] {
                 if let Some(value) = old.get(field).filter(|value| value.is_string()) {
+                    model[field] = value.clone();
+                }
+            }
+            let name = old["display_name"].as_str().unwrap_or_default().to_ascii_lowercase();
+            let known_name = match name.as_str() {
+                "deepseek-v4.1-flash" | "deepseek-v4-flash" => "deepseek-flash",
+                "deepseek-v4-pro" => "deepseek-v4-pro",
+                "deepseek-v4-flash-vision-exp" => "deepseek-v4-flash-vision-exp",
+                _ => "",
+            };
+            let template = crate::modules::codex_protocol::deepseek_model_template(&slug)
+                .or_else(|| old["description"].as_str().and_then(crate::modules::codex_protocol::deepseek_model_template))
+                .or_else(|| crate::modules::codex_protocol::deepseek_model_template(known_name));
+            if let Some(template) = template {
+                let customized = configured.iter().any(|item| item.model_id.eq_ignore_ascii_case(&slug) && item.reasoning_efforts.as_ref().is_some_and(|efforts| !efforts.is_empty()));
+                let levels = if customized && old["supported_reasoning_levels"].is_array() { &old["supported_reasoning_levels"] } else { &template["supported_reasoning_levels"] };
+                model["supported_reasoning_levels"] = levels.clone();
+                let old_default = old["default_reasoning_level"].as_str();
+                model["default_reasoning_level"] = if levels.as_array().is_some_and(|items| items.iter().any(|item| item["effort"].as_str() == old_default)) { old["default_reasoning_level"].clone() } else { template["default_reasoning_level"].clone() };
+            }
+            // Rebuilding capabilities must retain the profile's per-model limits.
+            for field in [
+                "context_window",
+                "max_context_window",
+                "auto_compact_token_limit",
+            ] {
+                if let Some(value) = old
+                    .get(field)
+                    .filter(|value| value.as_u64().is_some_and(|n| n > 0))
+                {
                     model[field] = value.clone();
                 }
             }

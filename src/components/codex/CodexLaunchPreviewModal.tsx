@@ -355,7 +355,7 @@ export function CodexLaunchPreviewModal({
   const instanceConfigKey = codexLaunchPreviewInstanceConfigKey(selectedInstance);
   const instanceConfigChanged = loadedInstanceKey !== null && loadedInstanceKey !== instanceConfigKey;
   const configReady = loadedTarget === previewTargetKey && !loading &&
-    !configLoadError && !instanceConfigChanged && loadedConfig !== null;
+    (!configLoadError || configLoadError === "CODEX_LAUNCH_PREVIEW_CONFIG_CHANGED") && loadedConfig !== null;
   const resolveModelSource = useMemo(
     () =>
       createCodexModelSourceResolver(
@@ -570,7 +570,7 @@ export function CodexLaunchPreviewModal({
     setLoadedInstanceKey(instanceConfigKey);
   }, [accounts, instanceConfigKey, loadedInstanceKey, loadedTarget, loading, previewTargetKey, selectedInstance]);
 
-  const configErrorMessage = instanceConfigChanged || configLoadError === "CODEX_LAUNCH_PREVIEW_CONFIG_CHANGED"
+  const configErrorMessage = configLoadError === "CODEX_LAUNCH_PREVIEW_CONFIG_CHANGED"
     ? t("codex.launchPreview.configChanged")
     : configLoadError === CODEX_LAUNCH_PREVIEW_CONFIG_TIMEOUT
       ? t("codex.launchPreview.configLoadTimeout")
@@ -685,95 +685,9 @@ export function CodexLaunchPreviewModal({
     routingDirty,
   ]);
 
-  const persistDraft = useCallback(async () => {
-    if (configBusy || configWritePending.current) return false;
-    if (!loadedConfig || (catalogEnabled && modelsError && models.length > 0 && !routingEnabled)) {
-      if (catalogEnabled && modelsError) setError(modelsError);
-      return false;
-    }
-    if (!dirty) return true;
-    const contextWindow = Number.parseInt(contextWindowInput, 10);
-    const compactLimit = compactLimitInput.trim()
-      ? Number.parseInt(compactLimitInput, 10)
-      : undefined;
-    if (
-      contextOverrideEnabled &&
-      (!Number.isSafeInteger(contextWindow) || contextWindow <= 0)
-    ) {
-      setError(t("codex.experimentalModelCatalog.models.validation.contextWindow"));
-      return false;
-    }
-    if (
-      contextOverrideEnabled &&
-      compactLimit !== undefined &&
-      (!Number.isSafeInteger(compactLimit) || compactLimit <= 0)
-    ) {
-      setError(t("codex.experimentalModelCatalog.models.validation.autoCompact"));
-      return false;
-    }
-    if (
-      contextOverrideEnabled &&
-      compactLimit !== undefined &&
-      compactLimit >= contextWindow
-    ) {
-      setError(t("codex.experimentalModelCatalog.models.validation.autoCompactRange"));
-      return false;
-    }
-    // 只有本次保存/启动仍然启用路由时才校验路由底座；
-    // 目标是普通账号（API Key / API 服务）时路由会在保存时自动关闭，不能再拦住启动。
-    if (routingEnabledForSave) {
-      // 与实例表单一致：没有可直接登录的 OAuth 订阅账号时直接给出可读提示，
-      // 不要等后端用实例旧绑定校验失败后再抛出难懂的报错。
-      if (!mixedRoutingOAuthAccount) {
-        setError(
-          t(
-            "instances.form.modelRouting.oauthRequired",
-            "混合模型路由需要绑定一个直接登录的 OAuth 订阅账号。",
-          ),
-        );
-        return false;
-      }
-      if (routingRoutes.length === 0) {
-        setError(
-          t(
-            "instances.form.modelRouting.routeRequired",
-            "请至少添加一个 API 模型路由。",
-          ),
-        );
-        return false;
-      }
-      const providerAccounts = eligibleCodexModelRoutingAccounts(accounts);
-      for (const route of normalizedRoutingRoutes) {
-        const namespace = route.namespace.trim().toLowerCase();
-        if (
-          !/^[a-z0-9][a-z0-9_-]{1,31}$/.test(namespace) ||
-          ["official", "subscription", "openai", "codex", "oauth"].includes(
-            namespace,
-          )
-        ) {
-          setError(
-            t(
-              "instances.form.modelRouting.invalidNamespace",
-              "命名空间需为 2-32 位小写字母、数字、下划线或连字符，且不能使用保留名称。",
-            ),
-          );
-          return false;
-        }
-        if (
-          !providerAccounts.some(
-            (account) => account.id === route.providerAccountId,
-          )
-        ) {
-          setError(
-            t(
-              "instances.form.modelRouting.providerRequired",
-              "每个模型路由都必须选择一个 API 账号。",
-            ),
-          );
-          return false;
-        }
-      }
-    }
+  const persistDraft = useCallback(async (preferCurrentConfig = false) => {
+    if (configBusy || configWritePending.current || !loadedConfig) return false;
+    if (!dirty && !instanceConfigChanged && configLoadError !== "CODEX_LAUNCH_PREVIEW_CONFIG_CHANGED") return true;
     const session = configSession.current;
     configWritePending.current = true;
     setCheckingConfig(true);
@@ -788,10 +702,112 @@ export function CodexLaunchPreviewModal({
         mode === "apiService",
       );
       if (session !== configSession.current) return false;
+      const currentInstance = configLoadInputs.current.selectedInstance;
       if (codexLaunchPreviewQuickConfigKey(latest) !== codexLaunchPreviewQuickConfigKey(loadedConfig) ||
-          (loadedInstanceKey !== null && loadedInstanceKey !== codexLaunchPreviewInstanceConfigKey(configLoadInputs.current.selectedInstance))) {
-        setConfigLoadError("CODEX_LAUNCH_PREVIEW_CONFIG_CHANGED");
+          (loadedInstanceKey !== null && loadedInstanceKey !== codexLaunchPreviewInstanceConfigKey(currentInstance)) ||
+          configLoadError === "CODEX_LAUNCH_PREVIEW_CONFIG_CHANGED") {
+        if (!preferCurrentConfig) {
+          setConfigLoadError("CODEX_LAUNCH_PREVIEW_CONFIG_CHANGED");
+          return false;
+        }
+        // 启动/切号以当前配置为准：放弃过期草稿，不回写旧配置，也不要求手动重载。
+        rememberCodexLaunchPreviewConfig(instanceId, latest);
+        applyLoadedConfig(latest);
+        setLoadedInstanceKey(currentInstance ? codexLaunchPreviewInstanceConfigKey(currentInstance) : null);
+        const routes = normalizeCodexModelRoutingRoutes(currentInstance?.modelRouting?.routes ?? [], accounts);
+        setRoutingEnabled(Boolean(currentInstance?.modelRouting?.enabled));
+        setRoutingRoutes(routes);
+        if (currentInstance?.modelRouting?.enabled && routes.length) {
+          setModels(syncExperimentalModelsWithRouting(latest.experimental_model_catalog_models, routes, accounts, true));
+        }
+        setConfigLoadError(null);
+        return true;
+      }
+      if (catalogEnabled && modelsError && models.length > 0 && !routingEnabled) {
+        setError(modelsError);
         return false;
+      }
+      const contextWindow = Number.parseInt(contextWindowInput, 10);
+      const compactLimit = compactLimitInput.trim()
+        ? Number.parseInt(compactLimitInput, 10)
+        : undefined;
+      if (
+        contextOverrideEnabled &&
+        (!Number.isSafeInteger(contextWindow) || contextWindow <= 0)
+      ) {
+        setError(t("codex.experimentalModelCatalog.models.validation.contextWindow"));
+        return false;
+      }
+      if (
+        contextOverrideEnabled &&
+        compactLimit !== undefined &&
+        (!Number.isSafeInteger(compactLimit) || compactLimit <= 0)
+      ) {
+        setError(t("codex.experimentalModelCatalog.models.validation.autoCompact"));
+        return false;
+      }
+      if (
+        contextOverrideEnabled &&
+        compactLimit !== undefined &&
+        compactLimit >= contextWindow
+      ) {
+        setError(t("codex.experimentalModelCatalog.models.validation.autoCompactRange"));
+        return false;
+      }
+      // 只有本次保存/启动仍然启用路由时才校验路由底座；
+      // 目标是普通账号（API Key / API 服务）时路由会在保存时自动关闭，不能再拦住启动。
+      if (routingEnabledForSave) {
+        // 与实例表单一致：没有可直接登录的 OAuth 订阅账号时直接给出可读提示，
+        // 不要等后端用实例旧绑定校验失败后再抛出难懂的报错。
+        if (!mixedRoutingOAuthAccount) {
+          setError(
+            t(
+              "instances.form.modelRouting.oauthRequired",
+              "混合模型路由需要绑定一个直接登录的 OAuth 订阅账号。",
+            ),
+          );
+          return false;
+        }
+        if (routingRoutes.length === 0) {
+          setError(
+            t(
+              "instances.form.modelRouting.routeRequired",
+              "请至少添加一个 API 模型路由。",
+            ),
+          );
+          return false;
+        }
+        const providerAccounts = eligibleCodexModelRoutingAccounts(accounts);
+        for (const route of normalizedRoutingRoutes) {
+          const namespace = route.namespace.trim().toLowerCase();
+          if (
+            !/^[a-z0-9][a-z0-9_-]{1,31}$/.test(namespace) ||
+            ["official", "subscription", "openai", "codex", "oauth"].includes(
+              namespace,
+            )
+          ) {
+            setError(
+              t(
+                "instances.form.modelRouting.invalidNamespace",
+                "命名空间需为 2-32 位小写字母、数字、下划线或连字符，且不能使用保留名称。",
+              ),
+            );
+            return false;
+          }
+          if (
+            !providerAccounts.some(
+              (account) => account.id === route.providerAccountId,
+            )
+          ) {
+            setError(
+              t(
+                "instances.form.modelRouting.providerRequired",
+                "每个模型路由都必须选择一个 API 账号。",
+              ),
+            );
+            return false;
+          }
+        }
       }
       setCheckingConfig(false);
       setSaving(true);
@@ -883,11 +899,14 @@ export function CodexLaunchPreviewModal({
     contextWindowInput,
     defaultModelId,
     dirty,
+    instanceConfigChanged,
+    configLoadError,
     loadedConfig,
     loadedInstanceKey,
     models,
     modelsError,
     instanceId,
+    mode,
     nextModelRouting,
     routingDirty,
     routingEnabled,
@@ -923,7 +942,7 @@ export function CodexLaunchPreviewModal({
         return;
       }
       const session = configSession.current;
-      const saved = await persistDraft();
+      const saved = await persistDraft(true);
       if (!saved || session !== configSession.current) return;
       setExecuting(launchAfterSwitch ? "launch" : "switch");
       setNotice(null);
@@ -1889,8 +1908,7 @@ export function CodexLaunchPreviewModal({
                       <div className="codex-launch-preview-tool-meta">
                         <span>
                           {t(
-                            "codex.deepSeek.start.chatOnlyHint",
-                            "Chat Completions 只能走本地网关，并在此选择启动模型。",
+                            "codex.modelProviders.wireApi.gatewayRequired",
                           )}
                         </span>
                       </div>
@@ -2403,7 +2421,7 @@ export function CodexLaunchPreviewModal({
                     type="button"
                     className="btn btn-outline"
                     onClick={() => void handleExecute(false)}
-                    disabled={configBusy || (catalogEnabled && Boolean(modelsError))}
+                    disabled={configBusy}
                   >
                     {executing === "switch"
                       ? t("common.loading", "加载中...")
@@ -2414,7 +2432,7 @@ export function CodexLaunchPreviewModal({
                   type="button"
                   className="btn btn-primary"
                   onClick={() => void handleExecute(mode !== "instance")}
-                  disabled={configBusy || (catalogEnabled && models.length > 0 && Boolean(modelsError))}
+                  disabled={configBusy}
                 >
                   {mode !== "instance" && <Play size={15} />}
                   {executing !== null
@@ -2674,6 +2692,7 @@ export function CodexLaunchPreviewModal({
       <CodexSessionVisibilityRepairModal
         open={repairOpen}
         repairKind={repairKind}
+        initialInstanceId={instanceId}
         onClose={() => setRepairOpen(false)}
         onRepaired={(summary) => {
           setNotice(repairKind === "history"

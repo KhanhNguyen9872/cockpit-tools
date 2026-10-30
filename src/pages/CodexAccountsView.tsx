@@ -121,6 +121,7 @@ export function CodexAccountsView(props: CodexAccountsViewProps) {
      handleLaunchPreviewInstanceChange,
      setLocalAccessLaunchPreviewOpen,
     setManagedProviders,
+    managedProviders, editingApiKeyCredentialsId, closeApiKeyCredentialsModal,
     setSelectedTerminal,
     setWakeupPresetManagerSignal,
     sortedAccountsForInstances,
@@ -1019,9 +1020,12 @@ export function CodexAccountsView(props: CodexAccountsViewProps) {
 
       {activeTab === "sessions" && <CodexSessionManager />}
 
-      {activeTab === "providers" && (
-        <CodexModelProviderManager
+      {(activeTab === "providers" || editingApiKeyCredentialsId) && <CodexModelProviderManager
           accounts={accounts}
+          active={activeTab === "providers"}
+          initialProviders={managedProviders}
+          editingAccountId={editingApiKeyCredentialsId}
+          onAccountEditorClose={closeApiKeyCredentialsModal}
           onProvidersChanged={setManagedProviders}
           onManageModelPresets={() => {
             setActiveTab("wakeup");
@@ -1032,8 +1036,7 @@ export function CodexAccountsView(props: CodexAccountsViewProps) {
           resolveBoundOAuthAccount={resolveBoundOAuthAccount}
           onBindOAuth={handlePreviewBindOAuth}
           onReauthorizeOAuth={handlePreviewReauthorizeOAuth}
-        />
-      )}
+        />}
 
       {activeTab === "wakeup" && (
         <CodexWakeupContent

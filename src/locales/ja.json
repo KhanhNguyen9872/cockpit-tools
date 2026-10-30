@@ -1660,13 +1660,20 @@
       "center": "中央",
       "top": "上",
       "bottom": "下",
-      "localHint": "変更はすぐに反映され、この端末に自動保存されます。画像は送信されません。標準に戻すと保存画像を削除します。",
+      "localHint": "変更はすぐに反映されます。各スキンの画像と設定はこの端末に個別に保存され、画像はアップロードされません。初期設定に戻してもスキンは削除されません。",
       "restore": "標準に戻す",
       "imageType": "JPG・PNG・WebP画像を選んでください。",
       "imageSize": "10 MB未満の画像を選んでください。",
       "imageRead": "画像を読み込めません。別の画像をお試しください。",
       "storage": "背景の読み込みまたは保存に失敗しました。保存済みの背景は保持されます。再試行してください。",
-      "saveFailed": "背景は表示されていますが、保存できませんでした。再試行してください。前回保存した背景は保持されます。"
+      "saveFailed": "変更は表示されていますが、保存できませんでした。再試行してください。以前保存したスキンは保持されています。",
+      "builtInSkins": "標準スキン",
+      "mySkins": "マイスキン",
+      "addSkin": "スキン追加",
+      "rename": "名前を変更",
+      "skinName": "スキン名",
+      "manageSkin": "スキンを管理：{{name}}",
+      "deleteSkinConfirm": "「{{name}}」を削除しますか？使用中のスキンを削除すると、背景が初期設定に戻ります。"
     }
   },
   "appPath": {
@@ -2398,7 +2405,7 @@
       "check": "状態を確認",
       "notRunning": "対象のインスタンスはまだ検出されていません。後でもう一度確認するか、この画面を閉じてから起動を再試行してください。",
       "checkFailed": "実行状態を取得できません。後でもう一度確認してください。",
-      "maintenanceDeferred": "セッションを一時的に確認できません。履歴を保持し、今回のメンテナンスをスキップしました。"
+      "maintenanceDeferred": "一部の会話メンテナンスが未完了です。履歴は保持されています。後で会話管理から再試行できます。"
     },
     "launchErrors": {
       "sessionRestoreFailed": "セッションの修復に失敗し、バックアップの復元が完了していません。起動を停止しました。再試行する前にログとバックアップを確認してください。",
@@ -2968,7 +2975,6 @@
         "quotaReserveInvalid": "1 から 100 の整数を入力してください。",
         "strictReserve": "厳格な保護",
         "strictReserveDesc": "予約枠を設定すると、安全マージンによる保護が自動で有効になります。しきい値付近ではアカウントごとに1件ずつ送信し、完了後に最新の残量を確認します。他のクライアントの使用量は制限しません。",
-        "strictNativeOnly": "厳格な保護には Rust エンジンが必要です。Go に切り替える前に無効にしてください。",
         "safetyMargin": "安全余裕",
         "safetyMarginUnit": "ポイント",
         "safetyMarginInvalid": "1〜20の整数を入力してください。",
@@ -3051,17 +3057,7 @@
       "gatewayModeNewLabel": "APIサービス-新",
       "gatewayModeOldLabel": "APIサービス-旧",
       "gatewayModeSaveSuccess": "APIサービスのゲートウェイモードを更新しました",
-      "gatewayEngineNative": "Rust ネイティブ",
-      "gatewayEngineSidecar": "Go（従来）",
-      "gatewayEngineHint": "既定は Rust です。初回アップグレード時に Rust へ切り替わり、その後は選択が保持されます。切り替えると API サービスが再起動し、処理中のリクエストが中断する場合があります。Codex のウィンドウは開いたままです。",
-      "gatewayEngineSwitching": "エンジン切り替え中…",
-      "gatewayEngineSwitchFailed": "エンジンの切り替えに失敗しました：{{error}}",
-      "gatewayEngineReadbackFailed": "現在のエンジンを確認できません。更新してから再試行してください：{{error}}",
-      "gatewayEngineReadbackTimeout": "状態の更新がタイムアウトしました",
       "gatewayEngineRequestsBusy": "リクエストを処理中です。完了後に再試行してください。",
-      "gatewayEngineOperationBusy": "別のサービス操作を実行中です。しばらくしてから再試行してください。",
-      "gatewayEngineSwitchRestored": "切り替えに失敗しました。元のエンジンに戻しました。",
-      "gatewayEngineRestoreFailed": "切り替えに失敗し、元のエンジンにも戻せませんでした。サービスの状態を確認して再試行してください。",
       "gatewayEngineStopped": "API サービスが停止しました。再起動してから再試行してください。",
       "gatewayGuideTitle": "ここでゲートウェイを切替",
       "gatewayGuideDesc": "既定は新ゲートウェイです。互換性の問題やクライアント要求の異常がある場合は、ここで旧ゲートウェイに戻せます。",
@@ -3634,9 +3630,9 @@
         "providerLoadFailed": "provider 候補の読み込みに失敗しました: {{error}}",
         "modeTitle": "修復モード",
         "modeQuick": "高速修復",
-        "modeQuickDesc": "公式状態 DB とセッションインデックスのプロバイダー情報を正規化します。rollout ファイルは保持します。通常のアカウント切り替え向けです。",
+        "modeQuickDesc": "短い時間枠で表示索引と現在の所属を補修します。プロジェクト情報の書き込み前に対象を終了してください。",
         "modeDeep": "完全修復",
-        "modeDeepDesc": "過去のプロバイダー情報、一覧、ワークスペース、サブエージェントのインデックスを修復します。rollout ファイルは保持します。先に対象インスタンスを終了してください。",
+        "modeDeepDesc": "クイック修復に加え、スナップショットからのプロジェクト復旧と会話索引の修復を行います。適用前に対象を終了してください。",
         "scopeTitle": "セッション範囲",
         "scopeAll": "すべてのセッション",
         "scopeAllDesc": "現在の管理リストの {{count}} 件のセッションを修復します。",
@@ -3668,7 +3664,7 @@
         "previewFailedWithError": "セッション修復のプレビューに失敗しました: {{error}}",
         "confirmRepair": "修復を確定",
         "title": "履歴を修復",
-        "description": "SQLite インデックス、セッション一覧、ワークスペースのプロバイダー情報を正規化します。元の rollout ファイルはバイト単位で保持し、日時のみ補正します。先にローカルバックアップを作成します。",
+        "description": "クイック修復は表示索引と現在のプロジェクト・所属を補修します。完全修復は履歴スナップショットと会話索引も復旧します。書き込み前にローカルバックアップを作成し、会話ログ本文は保持します。",
         "stopInstanceHint": "完全修復の前に、選択した Codex App/ChatGPT インスタンスを完全に終了してください。変更のプレビューは先に実行できます。",
         "encryptedContentWarning": "別のプロバイダーまたはアカウントで暗号化された履歴が見つかりました。メタデータは移行できますが、そのセッションの継続や圧縮は失敗する可能性があります。元のプロバイダー/アカウントに戻すか、新しいセッションを開始してください。",
         "modeHistory": "編集・分岐の修復",
@@ -3681,7 +3677,13 @@
         "historyFailed": "履歴インデックスの修復が完了しませんでした：{{error}}",
         "historyChanged": "修復中にチャットデータが変更されました。今回の修復は適用していません。少し待って再試行してください。",
         "historyScan": "履歴インデックスを確認中（{{current}}/{{total}}）…",
-        "historyReset": "異常なインデックスをバックアップしてリセット中…"
+        "historyReset": "異常なインデックスをバックアップしてリセット中…",
+        "projectsChanged": "プロジェクトデータが変更されました。再プレビューしてお試しください。",
+        "projectsFailed": "ローカルプロジェクトの復元に失敗：{{error}}",
+        "projectsPreview": "プレビュー：プロジェクト {{projects}} 件、所属 {{assignments}} 件。除外：プロジェクト {{skipped}} 件、所属不明の会話 {{ambiguous}} 件。",
+        "projectsSuccess": "復元完了：プロジェクト {{projects}} 件、所属 {{assignments}} 件。除外：プロジェクト {{skipped}} 件、所属不明の会話 {{ambiguous}} 件。",
+        "projectsPending": "前回の復旧が中断されました。対象を終了して完全修復を実行し、未完了の書き込みを復旧してください。",
+        "projectsDeferred": "一部のプロジェクト情報は保留されました。対象を終了してクイック修復を再試行するか、完全修復を使用してください。"
       },
       "importModal": {
         "title": "セッションを読み込み",
@@ -4105,7 +4107,9 @@
         "chatCompletions": "Chat Completions プロトコル",
         "deepseekResponsesHint": "DeepSeek を起動してゲートウェイまたは公式ダイレクト接続を選択し、Flash か Pro を選びます。ゲートウェイは Codex 内にモデルを表示します。ダイレクト接続はゲートウェイを経由しません。",
         "deepseekChatHint": "DeepSeek Chat Completions はレガシーパスでローカルゲートウェイブリッジを使用します。公式の Codex ツール動作が必要な場合は Responses を選択してください。",
-        "deepseekThirdPartyHint": "このアドレスは DeepSeek 公式のエンドポイントではないため、サードパーティ互換として扱います。モデルカタログには上流の実際のモデル ID を入力し、公式モデル名は使わないでください。"
+        "deepseekThirdPartyHint": "このアドレスは DeepSeek 公式のエンドポイントではないため、サードパーティ互換として扱います。モデルカタログには上流の実際のモデル ID を入力し、公式モデル名は使わないでください。",
+        "anthropic": "Anthropic プロトコル",
+        "gatewayRequired": "このプロトコルにはローカルゲートウェイが必要です。起動モデルを選択してください。"
       },
       "selectSavedProvider": "保存済みプロバイダー",
       "selectSavedApiKey": "保存済み API キー",
@@ -4338,7 +4342,22 @@
       "importConfigPlaceholder": "カードの「設定をコピー」を使い、内容をここに貼り付けます",
       "importConfigAction": "設定を読み込む",
       "importConfigFromClipboard": "クリップボードを読み取る",
-      "settingsRestartHint": "プロバイダー設定を更新しました。適用するには、このプロバイダーを使用中の Codex または API サービスを再起動してください。"
+      "settingsRestartHint": "プロバイダー設定を更新しました。適用するには、このプロバイダーを使用中の Codex または API サービスを再起動してください。",
+      "anthropic": {
+        "auth": "認証方式",
+        "hint": "Anthropic Messages ゲートウェイに接続します。モデルは取得または手動入力できます。",
+        "fetch": "モデル取得",
+        "fetching": "取得中…",
+        "fetchFailed": "取得に失敗しました。再試行するかモデル ID を手動入力してください。",
+        "import": "設定を読込",
+        "importFailed": "有効な Claude Code またはデスクトップ Gateway の設定が見つかりません。"
+      },
+      "editor": {
+        "modelScope": "モデル設定の範囲",
+        "providerDefault": "プロバイダー既定",
+        "sharedSettings": "モデル一覧と機能は選択した範囲に適用されます。プロトコル、認証方式、アドレスはプロバイダー全体の共通設定です。",
+        "saveScope": "保存するとプロバイダーと関連アカウントが更新されます。現在のアカウントが対象の場合、ローカルの Codex 設定と認証情報も更新されます。クライアントは自動起動しません。"
+      }
     },
     "quickSwitch": {
       "action": "プロバイダーをクイック切り替え",
@@ -5775,6 +5794,14 @@
       }
     },
     "requestDiagnostics": {
+      "requestSizeTitle": "リクエストサイズ",
+      "requestSizeHint": "展開後のクライアント JSON のサイズ。各項目は空白を省いた JSON のバイト数で、サイズのみ記録します。",
+      "requestBytes": "リクエスト",
+      "historyBytes": "履歴",
+      "toolsBytes": "ツール",
+      "instructionsBytes": "指示",
+      "overloadRetry": "混雑時の再試行",
+      "overloadRecovery": "復旧時間",
       "recordPayloads": "リクエスト本文を記録",
       "recordPayloadsHint": "初期設定はオフです。クライアントと上流の要求を長さ制限付きでローカル保存します。オフにすると新規記録を停止し、保存済み本文は別途削除できます。",
       "privacyHint": "認証フィールドは伏せられますが、会話中の機密情報は残る場合があります。コピーや共有前に確認してください。",
@@ -5956,6 +5983,21 @@
       "saveWithoutLaunch": "保存して続行",
       "saveOnly": "設定のみ保存",
       "validationBusy": "前のパスを確認中です。しばらくしてから再試行してください。"
+    },
+    "openaiUsage": {
+      "monthCost": "今月の費用",
+      "scope": "組織全体の費用。リクエストとトークンはテキスト API のみ。UTC 集計。",
+      "loading": "公式の使用量を取得中…",
+      "pending": "公式の使用量の取得待ち",
+      "permissionRequired": "このキーには組織の使用量を読む権限がありません（api.usage.read）。",
+      "permissionGuide": "管理者キーを使用：Admin keys → Restricted → Usage API Scope → Read。費用と使用量を取得できますが、残高は取得できません。",
+      "openAdminKeys": "使用量の権限",
+      "invalidKey": "キーが無効か期限切れです。現在の API キーを確認してください。",
+      "networkFailed": "公式の使用量サービスに接続できません。後で更新してください。",
+      "queryFailed": "公式の使用量の取得に失敗しました。後で再試行してください。"
+    },
+    "officialApi": {
+      "hint": "実際の接続先アドレスで識別した、OpenAI 公式 API キーのアカウントです。"
     }
   },
   "githubCopilot": {
@@ -8028,7 +8070,7 @@
     "model": "接続確認モデル",
     "selectModel": "モデルを選択",
     "verifyHint": "選択したモデルは接続テスト専用で、利用できる他のモデルを制限しません。検証では短いリクエストを1回送り、プランの利用枠を少量消費します。",
-    "serviceHint": "現在のプールに追加しても API サービスは起動しません。このバージョンではネイティブエンジンが必要です。",
+    "serviceHint": "現在のアカウントプールに追加しても API サービスは起動しません。",
     "verify": "検証のみ",
     "verifyAndJoin": "検証して追加",
     "remove": "サービスから除外",
@@ -8088,8 +8130,6 @@
       "verify": "モデルのリクエストが完了しませんでした。再検証してください。",
       "usage": "プランまたはアプリの利用が制限されています。ChatGPT の使用量設定を確認してください。",
       "usageUnavailable": "公式サービスが一時的に使用量を確認できません。後で再試行してください。プランの上限に達したとは限りません。",
-      "native": "プランの利用にはネイティブエンジンが必要です。先に API サービスで切り替えてください。",
-      "nativeSwitch": "別のエンジンに切り替える前に、プランのアカウントを API サービスから除外してください。",
       "browser": "ブラウザーを開けません。認証リンクをコピーして手動で開いてください。",
       "configuration": "認証の登録情報が一致しません。再認証するか、プランを接続し直してください。",
       "notVerified": "API サービスに追加する前にプランを検証してください。",
@@ -8269,7 +8309,6 @@
     "title": "機能の代替経路",
     "hint": "必要な機能に対応できない場合、既存のモデル対応を使い、指定順に予備アカウントを試します。",
     "consent": "切り替えると今回の会話が予備アカウントに送信され、その利用枠を消費するか、該当する料金が発生します。",
-    "nativeOnly": "このエンジンでは代替経路は動作しません。有効化にはネイティブエンジンが必要です。保存済み設定の無効化は可能です。",
     "backups": "予備アカウント",
     "addBackup": "予備を追加",
     "backupEmpty": "有効化の前に、現在の API サービスプールから予備を選択してください。",

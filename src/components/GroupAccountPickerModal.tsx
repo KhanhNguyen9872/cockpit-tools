@@ -1,3 +1,5 @@
+import { ModalErrorMessage } from "./ModalErrorMessage";
+import { useDialogSession } from "../hooks/useDialogSession";
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { FolderPlus, Pencil, Search, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -55,16 +57,15 @@ export function GroupAccountPickerModal({
   const [error, setError] = useState('')
   const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null)
 
-  useEffect(() => {
-    if (!isOpen) return
+  useDialogSession(isOpen && targetGroup ? `${mode}:${targetGroup.id}` : null, () => {
     setQuery('')
     setGroupName(targetGroup?.name ?? '')
-    const validIds = new Set(accounts.map((a) => a.id))
-    setSelected(new Set((targetGroup?.accountIds ?? []).filter((id) => validIds.has(id))))
+    // Preserve persisted membership while account metadata is still loading.
+    setSelected(new Set(targetGroup?.accountIds ?? []))
     setFilterTypes([])
     setTagFilter([])
     setError('')
-  }, [isOpen, accounts, targetGroup])
+  })
 
   const groupsByAccountId = useMemo(() => {
     const result = new Map<string, AccountGroup[]>()
@@ -357,7 +358,7 @@ export function GroupAccountPickerModal({
             )}
           </div>
 
-          {error && <div className="group-account-error">{error}</div>}
+          <ModalErrorMessage message={error} className="group-account-error" />
         </div>
 
         <div className="modal-footer group-account-picker-footer">

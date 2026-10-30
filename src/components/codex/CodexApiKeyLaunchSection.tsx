@@ -154,7 +154,7 @@ export function CodexApiKeyLaunchSection({
   );
   const hasContextData = contextFacts.some((fact) => fact.context.length > 0);
   const usesLocalGateway = accountUsesInstanceLocalGateway(account);
-  const wireApiLabel =
+  const wireApiLabel = account.api_wire_api === "anthropic" ? "Anthropic Messages" :
     (account.api_wire_api ?? "responses").trim().toLowerCase() === "chat_completions"
       ? "Chat Completions"
       : "Responses";

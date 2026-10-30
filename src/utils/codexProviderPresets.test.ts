@@ -13,6 +13,14 @@ import {
 } from "./codexProviderPresets.ts";
 import { canConfigureCodexProviderVision, resolveCodexProviderCapabilityProfile } from "./codexProviderGateway.ts";
 
+test("Anthropic uses the instance gateway and preserves its protocol", () => {
+  const profile = resolveCodexProviderCapabilityProfile({ baseUrl: "https://example.invalid", wireApi: "anthropic" });
+  assert.equal(profile.wireApi, "anthropic");
+  assert.equal(profile.requiresGateway, true);
+  assert.equal(profile.supportsDirect, false);
+  assert.equal(profile.gatewayStrategy, "responses_to_anthropic");
+});
+
 test("third-party Responses providers expose preserved vision settings", () => {
   for (const presetId of ["custom", "packycode", "openrouter"]) {
     assert.equal(canConfigureCodexProviderVision({ presetId, wireApi: "responses" }), true);
@@ -56,6 +64,8 @@ test("DeepSeek keeps its native Responses default", () => {
   });
 
   assert.equal(profile.wireApi, "responses");
+  assert.equal(resolveCodexProviderCapabilityProfile({ baseUrl: DEEPSEEK_API_BASE_URL, wireApi: "chat_completions" }).wireApi, "responses");
+  assert.equal(resolveCodexProviderCapabilityProfile({ baseUrl: "https://relay.example/v1", presetId: "deepseek", wireApi: "chat_completions" }).wireApi, "chat_completions");
 });
 
 test("both MiniMax presets declare image input only for the vision-capable model", () => {

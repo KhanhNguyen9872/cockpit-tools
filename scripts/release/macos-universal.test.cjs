@@ -6,7 +6,7 @@ const test = require('node:test');
 const { stageInputs, mergeInputs } = require('./macos-universal.cjs');
 
 const targets = { 'aarch64-apple-darwin': 'arm64', 'x86_64-apple-darwin': 'x86_64' };
-const files = ['cockpit-tools', 'cockpit-cliproxy'];
+const files = ['cockpit-tools'];
 
 function fakeLipo(args) {
   const read = (file) => JSON.parse(fs.readFileSync(file));
@@ -36,8 +36,7 @@ function fixture(t) {
   const options = { repoRoot, version: '1.2.3', commit: 'a'.repeat(40), runId: '12345', inputsDir: path.join(repoRoot, 'inputs') };
   for (const [target, arch] of Object.entries(targets)) {
     const host = path.join(repoRoot, 'target', target, 'release', files[0]);
-    const sidecar = path.join(repoRoot, 'sidecars/cockpit-cliproxy/bin', `${files[1]}-${target}`);
-    for (const file of [host, sidecar]) {
+    for (const file of [host]) {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, JSON.stringify({ arch, value: path.basename(file) }));
     }
@@ -46,10 +45,10 @@ function fixture(t) {
   return options;
 }
 
-test('merges the exact host and sidecar slices without invoking a compiler', (t) => {
+test('merges the exact host slices without invoking a compiler', (t) => {
   const options = fixture(t);
   const outputs = mergeInputs(options, fakeLipo);
-  assert.equal(outputs.length, 2);
+  assert.equal(outputs.length, 1);
   for (const output of outputs) {
     assert.deepEqual(fakeLipo(['-archs', output]).split(' ').sort(), ['arm64', 'x86_64']);
     if (process.platform !== 'win32') assert.equal(fs.statSync(output).mode & 0o777, 0o755);
@@ -89,7 +88,7 @@ test('detects a damaged merged slice and preserves previous outputs', (t) => {
   fs.writeFileSync(previous, 'previous valid output');
   const run = (args) => {
     const result = fakeLipo(args);
-    if (args[1] === '-thin' && args[0].endsWith('cockpit-cliproxy')) fs.appendFileSync(args.at(-1), 'bad slice');
+    if (args[1] === '-thin' && args[0].endsWith('cockpit-tools')) fs.appendFileSync(args.at(-1), 'bad slice');
     return result;
   };
   assert.throws(() => mergeInputs(options, run), /Merged slice mismatch/);

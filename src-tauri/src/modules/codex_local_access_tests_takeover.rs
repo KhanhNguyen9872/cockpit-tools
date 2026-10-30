@@ -155,6 +155,7 @@ experimental_bearer_token = "agt_codex_test"
         let mut account_key = build_local_access_api_key(Some("DeepSeek pool"));
         account_key.id = "provider_gateway_deepseek".to_string();
         account_key.provider_gateway = Some(CodexLocalAccessProviderGateway {
+        auth_scheme: None,
             base_url: "https://api.deepseek.com/v1".to_string(),
             api_key: "sk-deepseek".to_string(),
             upstream_model: "deepseek-v4-pro".to_string(),
@@ -606,6 +607,7 @@ experimental_bearer_token = "agt_codex_test"
             label: "Provider Gateway: DeepSeek".to_string(),
             key: key.clone(),
             provider_gateway: Some(CodexLocalAccessProviderGateway {
+        auth_scheme: None,
                 base_url: "https://api.deepseek.com/v1".to_string(),
                 api_key: "sk-deepseek".to_string(),
                 upstream_model: "deepseek-v4-pro".to_string(),
@@ -789,6 +791,7 @@ experimental_bearer_token = "agt_codex_test"
         );
 
         let provider_gateway = CodexLocalAccessProviderGateway {
+        auth_scheme: None,
             base_url: "https://relay.example/v1".to_string(),
             api_key: "sk-test".to_string(),
             upstream_model: "upstream-model".to_string(),
@@ -1613,7 +1616,7 @@ experimental_bearer_token = "agt_codex_test"
     }
 
     #[test]
-    fn sanitize_collection_migrates_legacy_gateway_to_sidecar() {
+    fn sanitize_collection_migrates_legacy_gateway_to_native() {
         let mut collection = test_local_access_collection(Vec::new());
         collection.gateway_mode = CodexLocalAccessGatewayMode::Legacy;
 
@@ -1623,7 +1626,7 @@ experimental_bearer_token = "agt_codex_test"
         assert!(changed);
         assert_eq!(
             collection.gateway_mode,
-            CodexLocalAccessGatewayMode::Sidecar
+            CodexLocalAccessGatewayMode::Native
         );
     }
 
@@ -1683,6 +1686,7 @@ experimental_bearer_token = "agt_codex_test"
         let mut api_key = build_local_access_api_key(Some("Provider Gateway"));
         api_key.inherit_account_pool = Some(false);
         api_key.provider_gateway = Some(CodexLocalAccessProviderGateway {
+        auth_scheme: None,
             base_url: "https://api.deepseek.com/v1".to_string(),
             api_key: "sk-test".to_string(),
             upstream_model: "deepseek-v4-pro".to_string(),
@@ -1735,6 +1739,7 @@ experimental_bearer_token = "agt_codex_test"
         let mut api_key = build_local_access_api_key(Some("Provider Gateway"));
         api_key.inherit_account_pool = Some(false);
         api_key.provider_gateway = Some(CodexLocalAccessProviderGateway {
+        auth_scheme: None,
             base_url: "https://api.deepseek.com/v1".to_string(),
             api_key: "sk-test".to_string(),
             upstream_model: "deepseek-v4-pro".to_string(),

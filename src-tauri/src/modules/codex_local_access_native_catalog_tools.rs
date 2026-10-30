@@ -11,7 +11,7 @@ fn native_apply_catalog_tool_capabilities(
     }
     // A model can be scheduled on any eligible pool member, not merely the
     // first account used to supply display metadata. Plain Chat has no native
-    // tool-search history bridge; SIWC and Grok have explicit client adapters.
+    // tool-search history bridge; Anthropic, SIWC and Grok have client adapters.
     if accounts
         .iter()
         .filter(|account| native_model_visible(collection, key, plan, account))
@@ -20,6 +20,13 @@ fn native_apply_catalog_tool_capabilities(
         })
     {
         model["supports_search_tool"] = json!(false);
+    } else if collection.gateway_mode == CodexLocalAccessGatewayMode::Native
+        && accounts.iter().any(|account| {
+            native_model_visible(collection, key, plan, account)
+                && native_wire_api(account).ok() == Some(native_contract::WireApi::Anthropic)
+        })
+    {
+        model["supports_search_tool"] = json!(true);
     }
 }
 

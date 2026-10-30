@@ -7,7 +7,7 @@ const { spawnSync } = require('node:child_process');
 const { parseArgs } = require('./inject-dmg-readme.cjs');
 
 const TARGETS = { 'aarch64-apple-darwin': 'arm64', 'x86_64-apple-darwin': 'x86_64' };
-const FILES = ['cockpit-tools', 'cockpit-cliproxy'];
+const FILES = ['cockpit-tools'];
 
 function sha256(file) {
   const hash = crypto.createHash('sha256');
@@ -47,8 +47,7 @@ function stageInputs(options, run = lipo) {
   if (JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'))).version !== info.version) {
     throw new Error('Input version differs from package.json');
   }
-  const sources = [path.join(repoRoot, 'target', target, 'release', FILES[0]),
-    path.join(repoRoot, 'sidecars/cockpit-cliproxy/bin', `${FILES[1]}-${target}`)];
+  const sources = [path.join(repoRoot, 'target', target, 'release', FILES[0])];
   for (const source of sources) requireArchitectures(source, [TARGETS[target]], run);
   fs.mkdirSync(outputDir, { recursive: true });
   if (fs.readdirSync(outputDir).length) throw new Error(`Input directory is not empty: ${outputDir}`);
@@ -66,7 +65,6 @@ function mergeInputs(options, run = lipo) {
   const { repoRoot, inputsDir } = options;
   const expected = identity(options);
   const targetDir = options.targetDir || path.join(repoRoot, 'target');
-  const sidecarDir = options.sidecarDir || path.join(repoRoot, 'sidecars/cockpit-cliproxy/bin');
   const inputs = [];
   for (const [target, architecture] of Object.entries(TARGETS)) {
     const directory = path.join(inputsDir, target);
@@ -85,11 +83,10 @@ function mergeInputs(options, run = lipo) {
   }
   const releaseDir = path.join(targetDir, 'universal-apple-darwin/release');
   fs.mkdirSync(releaseDir, { recursive: true });
-  fs.mkdirSync(sidecarDir, { recursive: true });
   const work = fs.mkdtempSync(path.join(releaseDir, '.merge-'));
-  const outputs = [path.join(releaseDir, FILES[0]), path.join(sidecarDir, `${FILES[1]}-universal-apple-darwin`)];
+  const outputs = [path.join(releaseDir, FILES[0])];
   try {
-    // Check both merged binaries, including each original slice, before publishing either.
+    // Check the merged host and each original slice before publishing it.
     for (const name of FILES) {
       const output = path.join(work, name);
       run(['-create', ...inputs.map((input) => path.join(input.directory, name)), '-output', output]);

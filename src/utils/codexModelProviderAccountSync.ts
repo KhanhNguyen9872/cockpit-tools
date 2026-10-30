@@ -1,3 +1,4 @@
+import { resolveAccountUsageBaseUrl, isOpenAIOfficialUsageUrl, OPENAI_OFFICIAL_USAGE_BASE_URL } from "./openaiOfficialUsage";
 import type {
   CodexAccount,
   CodexApiProviderMode,
@@ -27,6 +28,7 @@ export interface CodexModelProviderAccountSnapshot {
   apiModelCatalog?: string[];
   apiModelContextWindows?: Record<string, number>;
   apiWireApi: CodexProviderWireApi;
+  apiAuthScheme?: "x-api-key" | "bearer";
   apiSupportsWebsockets: boolean;
   apiSupportsVision: boolean;
   apiModelVisionSupport: Record<string, boolean>;
@@ -52,6 +54,7 @@ export function mergeCodexModelProviderCredentialInput(
     website?: string | null;
     apiKeyUrl?: string | null;
     wireApi?: CodexProviderWireApi | null;
+    authScheme?: "x-api-key" | "bearer";
     supportsWebsockets?: boolean;
     integrationType?: "sub2api" | "new_api" | null;
   },
@@ -81,6 +84,7 @@ export function mergeCodexModelProviderCredentialInput(
       resolveCodexProviderCapabilityProfile({
         baseUrl: provider?.baseUrl ?? fallback.apiBaseUrl,
       }).wireApi,
+    authScheme: fallback.authScheme ?? provider?.authScheme,
     supportsWebsockets:
       fallback.supportsWebsockets ?? provider?.supportsWebsockets,
     integrationType: provider?.integrationType ?? fallback.integrationType,
@@ -90,6 +94,7 @@ export function mergeCodexModelProviderCredentialInput(
 function normalizeBaseUrl(value?: string | null): string | null {
   const trimmed = value?.trim();
   if (!trimmed) return null;
+  if (isOpenAIOfficialUsageUrl(trimmed)) return OPENAI_OFFICIAL_USAGE_BASE_URL;
   try {
     const parsed = new URL(trimmed);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
@@ -113,7 +118,7 @@ export function findCodexAccountsReferencingModelProvider(
 
       const matchesId =
         providerId.length > 0 && account.api_provider_id?.trim() === providerId;
-      const accountBaseUrl = normalizeBaseUrl(account.api_base_url);
+      const accountBaseUrl = normalizeBaseUrl(resolveAccountUsageBaseUrl(account));
       const matchesBaseUrl =
         providerBaseUrl !== null && accountBaseUrl === providerBaseUrl;
       return matchesId || matchesBaseUrl;
@@ -127,7 +132,7 @@ export function buildCodexModelProviderAccountSnapshot(
   apiKey?: string | null,
 ): CodexModelProviderAccountSnapshot {
   provider = resolveCodexModelProviderForApiKey(provider, apiKey);
-  const presetId = resolveCodexApiProviderPresetId(provider.baseUrl);
+  const presetId = isOpenAIOfficialUsageUrl(provider.baseUrl) ? "openai_official" : resolveCodexApiProviderPresetId(provider.baseUrl);
   const isOpenAI = presetId === "openai_official";
   const wireApi = provider.wireApi ?? "responses";
   const visionStates = Object.fromEntries(
@@ -158,13 +163,14 @@ export function buildCodexModelProviderAccountSnapshot(
 
   return {
     apiBaseUrl: provider.baseUrl,
-    apiProviderMode: "custom",
+    apiProviderMode: isOpenAI ? "openai_builtin" : "custom",
     apiProviderId:
       presetId === CODEX_API_PROVIDER_CUSTOM_ID ? provider.id : presetId,
     apiProviderName: provider.name,
     apiModelCatalog: provider.modelCatalog,
     apiModelContextWindows: provider.modelContextWindows,
     apiWireApi: wireApi,
+    apiAuthScheme: provider.authScheme,
     apiSupportsWebsockets:
       !isOpenAI && wireApi === "responses" && provider.supportsWebsockets === true,
     apiSupportsVision: provider.supportsVision === true,

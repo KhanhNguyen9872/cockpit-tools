@@ -19,9 +19,12 @@ use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message as ClientMessage};
 #[path = "request_fault_websocket_tests.rs"]
 mod request_fault_websocket_tests;
+#[path = "websocket_continuation_tests.rs"]
+mod continuation_tests;
 
 #[derive(Clone)]
 enum Behavior {
+    Continuation { error: Value, delayed: bool, business: Option<Value>, always: bool },
     QuotaGate { metadata: bool, business: Option<Value>, reused: bool, wait_interrupt: bool },
     WaitForInterrupt,
     Success,
@@ -31,6 +34,7 @@ enum Behavior {
     First401UntilRefresh,
     CreatedThen401,
     CreatedThenOverload,
+    FirstCapacityThenComplete { delayed: bool },
     OutputThenOverload,
     SuccessThenOverload,
     SuccessThenAlwaysOverload,
@@ -67,8 +71,12 @@ async fn endpoint(state: Arc<Upstream>, headers: HeaderMap, ws: WebSocketUpgrade
     }
     ws.on_upgrade(move |mut socket| async move {
         let Some(Ok(Message::Text(request))) = socket.recv().await else { return; };
-        let body = serde_json::from_str(request.as_str()).unwrap();
-        state.requests.lock().unwrap().push((headers.clone(), body));
+        let body: Value = serde_json::from_str(request.as_str()).unwrap();
+        state.requests.lock().unwrap().push((headers.clone(), body.clone()));
+        if matches!(state.behavior, Behavior::Continuation { .. }) {
+            continuation_tests::serve(&state, &headers, &mut socket, body).await;
+            return;
+        }
         if matches!(state.behavior,Behavior::Close1009 | Behavior::CreatedThenClose1009) {
             if matches!(state.behavior,Behavior::CreatedThenClose1009) {
                 socket.send(Message::Text(json!({"type":"response.created","response":{"id":"oversized"}}).to_string().into())).await.unwrap();
@@ -106,6 +114,11 @@ async fn endpoint(state: Arc<Upstream>, headers: HeaderMap, ws: WebSocketUpgrade
             Behavior::CreatedThen401 => {
                 socket.send(Message::Text(json!({"type":"response.created","response":{"id":"active"}}).to_string().into())).await.unwrap();
                 error
+            }
+            Behavior::FirstCapacityThenComplete { delayed } if state.attempts.load(Ordering::SeqCst) == 1 => {
+                socket.send(Message::Text(json!({"type":"response.created","response":{"id":"capacity-active","output":[]}}).to_string().into())).await.unwrap();
+                if *delayed { tokio::time::sleep(Duration::from_millis(400)).await; }
+                json!({"type":"error","error":{"code":"queue_full","message":"Synthetic capacity rejection"}})
             }
             Behavior::CreatedThenOverload | Behavior::OutputThenOverload => {
                 socket.send(Message::Text(json!({"type":"response.created","response":{"id":"active"}}).to_string().into())).await.unwrap();
@@ -609,7 +622,7 @@ async fn reused_websocket_turn_is_probed_before_output_and_retains_opaque_owner(
                 "turn {turn}: {event}"
             );
         }
-        assert_eq!(fixture.first.attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(fixture.first.attempts.load(Ordering::SeqCst), if permanent { 4 } else { 2 });
         assert_eq!(fixture.second.attempts.load(Ordering::SeqCst), 0);
         socket.close(None).await.unwrap();
         fixture.finish().await;
@@ -950,3 +963,56 @@ async fn websocket_refresh_failure_cannot_transfer_known_opaque_owner() {
 #[path = "websocket_quota_gate_tests.rs"]
 mod quota_gate_tests;
 use quota_gate_tests::quota_gate_events;
+
+#[tokio::test]
+async fn websocket_single_account_capacity_reselects_owner_and_releases_permit() {
+    for delayed in [false, true] {
+        let fixture = Fixture::start(
+            Behavior::FirstCapacityThenComplete { delayed },
+            ExecutionPolicy { credential_retries: 1, status_retries: 0, bootstrap_retries: 0, ..policy() },
+            false,
+        ).await;
+        let events = fixture.request(request(), if delayed { 2 } else { 1 }).await;
+        assert!(events.iter().any(|event| event["type"] == "response.completed"), "{events:?}");
+        assert_eq!(fixture.first.attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(fixture.second.attempts.load(Ordering::SeqCst), 0);
+        let selections = fixture.host.selections.lock().unwrap().clone();
+        assert!(selections.iter().any(|request| request.preferred_account_id.as_deref() == Some("a") && !request.force_refresh));
+        let sent = fixture.first.requests.lock().unwrap().clone();
+        assert_eq!(sent[0].1, sent[1].1);
+        assert_eq!(sent[0].0["session-id"], sent[1].0["session-id"]);
+        fixture.finish().await;
+    }
+}
+
+#[tokio::test]
+async fn websocket_capacity_error_with_tool_evidence_never_replays() {
+    for event in [
+        json!({"type":"response.failed","response":{"error":{"code":"queue_full"},"output":[{"type":"function_call","name":"write_file","call_id":"already-executed","arguments":"{}"}]}}),
+        json!({"type":"error","error":{"code":"server_overloaded"},"metadata":{"arguments":"partial execution"}}),
+        json!({"type":"response.failed","response":{"error":{"code":"flex_unavailable"},"usage":{"output_tokens":1},"output":[]}}),
+    ] {
+        let fixture = Fixture::start(Behavior::FirstError(event), policy(), false).await;
+        let _ = fixture.request(request(), 1).await;
+        assert_eq!(fixture.first.attempts.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.second.attempts.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture.host.selections.lock().unwrap().len(), 1);
+        fixture.finish().await;
+    }
+}
+
+#[tokio::test]
+async fn websocket_new_capacity_code_keeps_failover_and_stops_after_backup_tool_output() {
+    let fixture = Fixture::start_with_second(
+        Behavior::FirstError(json!({"type":"error","error":{"code":"queue_full"}})),
+        Behavior::OutputThenOverload,
+        ExecutionPolicy { status_retries: 0, ..policy() }, false,
+    ).await;
+    let events = fixture.request(request(), 3).await;
+    assert_eq!(events[1]["delta"], "hello");
+    assert_eq!(events[2]["error"]["code"], "server_is_overloaded");
+    assert_eq!(fixture.first.attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.second.attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.host.selections.lock().unwrap().len(), 2);
+    fixture.finish().await;
+}

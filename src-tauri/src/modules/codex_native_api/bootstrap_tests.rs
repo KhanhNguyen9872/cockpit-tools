@@ -248,7 +248,7 @@ async fn run_delayed(
 async fn zero_tries_all_distinct_accounts_positive_limits_include_first_for_stream_and_json() {
     for stream in [true, false] {
         for (limit, expected_calls, expected_status) in
-            [(0, 3, 200), (1, 1, 503), (2, 2, 503), (3, 3, 200)]
+            [(0, 3, 200), (1, 3, 503), (2, 4, 503), (3, 3, 200)]
         {
             let (host, status, text) = run(limit, vec![created()], 2, false, stream).await;
             assert_eq!(status, expected_status, "limit {limit}: {text}");
@@ -290,10 +290,8 @@ async fn same_account_status_budget_recovers_without_rotating_ids() {
 async fn unlimited_credential_count_stops_when_pool_is_exhausted() {
     let (host, status, _) = run(0, vec![created()], 3, false, true).await;
     assert_eq!(status, 503);
-    assert!(host
-        .calls
-        .iter()
-        .all(|calls| calls.load(Ordering::SeqCst) == 1));
+    assert_eq!(host.calls.iter().map(|calls| calls.load(Ordering::SeqCst)).collect::<Vec<_>>(),
+        vec![1, 1, 3], "try each distinct account, then spend only two same-account fallbacks");
 }
 
 #[tokio::test]
@@ -398,3 +396,6 @@ async fn published_created_retains_pre_business_recovery_after_visibility_budget
 
 #[path = "nonofficial_pre_business_http_tests.rs"]
 mod nonofficial_pre_business_http_tests;
+
+#[path = "overload_http_tests.rs"]
+mod overload_http_tests;

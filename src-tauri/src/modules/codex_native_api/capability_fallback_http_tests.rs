@@ -642,9 +642,9 @@ async fn socket_terminal(socket: &mut Socket) -> Value {
 }
 
 #[tokio::test]
-async fn capability_fallback_websocket_continuation_rebuilds_only_completed_owned_history() {
-    for mode in ["completed", "unknown", "partial"] {
-        let first_rejection = if mode == "partial" {
+async fn capability_fallback_websocket_continuation_rebuilds_only_verified_owned_history() {
+    for mode in ["completed", "unknown", "partial", "partial_unavailable"] {
+        let first_rejection = if mode.starts_with("partial") {
             Rejection::Incomplete
         } else {
             Rejection::None
@@ -669,13 +669,17 @@ async fn capability_fallback_websocket_continuation_rebuilds_only_completed_owne
         let first_result = socket_terminal(&mut socket).await;
         assert_eq!(
             first_result["type"],
-            if mode == "partial" {
+            if mode.starts_with("partial") {
                 "response.incomplete"
             } else {
                 "response.completed"
             },
             "{mode}: {first_result}"
         );
+        if mode == "partial_unavailable" {
+            rusqlite::Connection::open(dir.path().join("identity.sqlite")).unwrap()
+                .execute("DELETE FROM native_partial_history_v1", []).unwrap();
+        }
         let mut next = request();
         next["type"] = json!("response.create");
         next["stream"] = json!(true);
@@ -690,7 +694,7 @@ async fn capability_fallback_websocket_continuation_rebuilds_only_completed_owne
             .await
             .unwrap();
         let second = socket_terminal(&mut socket).await;
-        if mode == "completed" {
+        if matches!(mode, "completed" | "partial") {
             assert_eq!(second["type"], "response.completed", "{second}");
             let captures = captures.lock().unwrap();
             assert_eq!(captures.len(), 2);
@@ -699,7 +703,7 @@ async fn capability_fallback_websocket_continuation_rebuilds_only_completed_owne
             let replay = &captures[1].1;
             assert!(replay.get("previous_response_id").is_none());
             assert_eq!(replay["input"].as_array().unwrap().len(), 3);
-            assert_eq!(replay["input"][1]["content"][0]["text"], "OK");
+            assert_eq!(replay["input"][1], first_result["response"]["output"][0]);
             assert_eq!(replay["input"][2]["content"], "Now use the new capability.");
             assert_eq!(replay["tools"], next["tools"]);
             drop(captures);
@@ -709,7 +713,7 @@ async fn capability_fallback_websocket_continuation_rebuilds_only_completed_owne
             assert_eq!(active, "backup");
         } else {
             assert_eq!(second["type"], "error", "{mode}: {second}");
-            if mode == "partial" {
+            if mode.starts_with("partial") {
                 assert_eq!(second["status"], 409);
             } else {
                 assert!(matches!(second["status"].as_u64(), Some(400 | 409)));

@@ -603,6 +603,7 @@ fn merge_request_diagnostics(
                         (old, new) => new.or(old),
                     };
                     attempt.upstream_http_version = attempt.upstream_http_version.or_else(|| old.upstream_http_version.clone());
+                    attempt.transport_http1_fallback = attempt.transport_http1_fallback.or(old.transport_http1_fallback);
                 }
                 if same_attempt
                     && old.model_id == attempt.model_id

@@ -21,6 +21,114 @@ struct HostFixture {
     grok: bool,
     refreshes: AtomicUsize,
 }
+
+#[tokio::test]
+async fn grok_steering_rejection_preserves_generation_and_the_next_turn() {
+    use axum::extract::ws::Message as ServerMessage;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let router = Router::new().route("/responses",axum::routing::get({let release = release.clone(); move |upgrade: WebSocketUpgrade| {
+        let release = release.clone(); async move { upgrade.on_upgrade(move |mut socket| async move {
+            let _ = socket.recv().await;
+            socket.send(ServerMessage::Text(json!({"type":"response.created","response":{"id":"original"}}).to_string().into())).await.unwrap();
+            release.notified().await;
+            socket.send(ServerMessage::Text(json!({"type":"response.completed","response":{"id":"original","status":"completed","output":[]}}).to_string().into())).await.unwrap();
+            let Some(Ok(ServerMessage::Text(text))) = socket.recv().await else { panic!("missing next create") };
+            let body:Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(body["type"],"response.create","steering must not reach xAI");
+            socket.send(ServerMessage::Text(json!({"type":"response.completed","response":{"id":"next","status":"completed","output":[]}}).to_string().into())).await.unwrap();
+            let _ = socket.recv().await;
+        }) }
+    }}));
+    let upstream = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    let host = Arc::new(HostFixture {
+        base,
+        grok: true,
+        refreshes: AtomicUsize::new(0),
+    });
+    let root = tempfile::tempdir().unwrap();
+    let mut gateway = start(
+        "127.0.0.1:0".parse().unwrap(),
+        host.clone(),
+        root.path().join("identity.sqlite"),
+        Options::default(),
+    )
+    .await
+    .unwrap();
+    let mut request = format!("ws://{}/v1/responses", gateway.addr)
+        .into_client_request()
+        .unwrap();
+    request
+        .headers_mut()
+        .insert("authorization", HeaderValue::from_static("Bearer fixture"));
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    socket
+        .send(Message::Text(
+            json!({"type":"response.create","model":"grok-4.7","input":[]})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(next_json(&mut socket).await["type"], "response.created");
+    socket.send(Message::Text(json!({"type":"response.steer","event_id":"control","previous_response_id":"original","input":"change"}).to_string().into())).await.unwrap();
+    let rejected = next_json(&mut socket).await;
+    assert_eq!(rejected["error"]["code"], "steering_not_supported");
+    assert_eq!(rejected["event_id"], "control");
+    socket
+        .send(Message::Text(
+            json!({"type":"response.interrupt","event_id":"interrupt","response_id":"original"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    let rejected = next_json(&mut socket).await;
+    assert_eq!(rejected["error"]["code"], "interrupt_not_supported");
+    assert_eq!(rejected["event_id"], "interrupt");
+    release.notify_one();
+    assert_eq!(next_json(&mut socket).await["response"]["id"], "original");
+    socket
+        .send(Message::Text(
+            json!({"type":"response.create","model":"grok-4.7","input":[]})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(next_json(&mut socket).await["response"]["id"], "next");
+    assert_eq!(host.refreshes.load(Ordering::SeqCst), 0);
+    socket.close(None).await.unwrap();
+    gateway
+        .shutdown(std::time::Duration::from_secs(2))
+        .await
+        .unwrap();
+    upstream.abort();
+}
+
+async fn next_json(
+    socket: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+) -> Value {
+    tokio::time::timeout(std::time::Duration::from_secs(4), async {
+        loop {
+            let message = socket
+                .next()
+                .await
+                .expect("socket closed")
+                .expect("socket read failed");
+            if let Message::Text(text) = message {
+                break serde_json::from_str(&text).unwrap();
+            }
+        }
+    })
+    .await
+    .unwrap()
+}
 impl Host for HostFixture {
     fn authorize<'a>(&'a self, _: &'a str) -> BoxFuture<'a, Result<Caller, ServiceError>> {
         Box::pin(async {

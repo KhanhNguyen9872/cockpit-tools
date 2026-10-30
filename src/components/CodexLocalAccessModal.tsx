@@ -1,3 +1,4 @@
+import { useRefreshSafeDraft } from "../hooks/useRefreshSafeDraft";
 import { CodexSessionIdentityMappingControl } from "./codex/CodexSessionIdentityMappingControl";
 import { CodexMemberAccessMode } from './codex/CodexMemberAccessMode';
 import { canChooseCodexServiceAuthorization } from '../utils/codexAccountServiceNavigation';
@@ -9,7 +10,7 @@ import { codexServiceDisplayRows, codexServiceRelatedEndpointIds, getCodexServic
 import { CODEX_ACCOUNT_SERVICE_APPLIED, type CodexAccountServiceApplied } from "../utils/codexAccountServiceNavigation";
 import { CodexServiceMemberAuthorization } from "./codex/CodexServiceMemberAuthorization";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CodexGatewayModeControl, formatCodexGatewayModeError } from "./codex/CodexGatewayModeControl";
+import { formatCodexGatewayModeError } from "../utils/codexGatewayError";
 import {
   Activity,
   Bug,
@@ -247,7 +248,6 @@ export function CodexLocalAccessModal({
   isOpen,
   mode,
   state,
-  onStateChange,
   addressKind,
   addressOptions,
   onAddressKindChange,
@@ -286,8 +286,8 @@ export function CodexLocalAccessModal({
   sidecarRestarting,
 }: CodexLocalAccessModalProps) {
   const { t } = useTranslation();
-  const [gatewaySaving, setGatewaySaving] = useState(false);
-  const saving = externalSaving || gatewaySaving;
+  const saving = externalSaving;
+  const collection = state?.collection ?? null;
   const localAccessStatus = resolveCodexLocalAccessRuntimeStatus(state?.collection, state);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -302,6 +302,7 @@ export function CodexLocalAccessModal({
   const [sessionAffinityTtlError, setSessionAffinityTtlError] = useState("");
   const [imageGenerationPolicies, setImageGenerationPolicies] = useState<Record<string, CodexLocalAccessImageGenerationPolicy>>({});
   const [membersDraftDirty, setMembersDraftDirty] = useState(false);
+  const modalSessionRef = useRef<CodexLocalAccessModalProps["mode"] | null>(null);
   const [memberSavePending, setMemberSavePending] = useState(false);
   const memberSaveInFlight = useRef(false);
   const memberSaveEpoch = useRef(0);
@@ -328,8 +329,8 @@ export function CodexLocalAccessModal({
   );
   const [testChatInput, setTestChatInput] = useState("");
   const [testDialogError, setTestDialogError] = useState("");
-  const [portInput, setPortInput] = useState("");
-  const [upstreamProxyDraftUrl, setUpstreamProxyDraftUrl] = useState("");
+  const [portInput, setPortInput] = useRefreshSafeDraft(collection?.port ? String(collection.port) : "");
+  const [upstreamProxyDraftUrl, setUpstreamProxyDraftUrl] = useRefreshSafeDraft(collection?.upstreamProxyUrl ?? "");
   const [keyVisible, setKeyVisible] = useState(false);
   const [copiedField, setCopiedField] = useState<CopyableField | null>(null);
   const [selectedModelId, setSelectedModelId] = useState("");
@@ -366,7 +367,6 @@ export function CodexLocalAccessModal({
   const sessionAffinityTtlInputRef = useRef<HTMLInputElement | null>(null);
   const testChatScrollRef = useRef<HTMLDivElement | null>(null);
 
-  const collection = state?.collection ?? null;
   const apiPortUrl = state?.apiPortUrl ?? "";
   const baseUrl = state?.baseUrl ?? "";
   const displayBaseUrl =
@@ -522,40 +522,23 @@ export function CodexLocalAccessModal({
   }, [isOpen, mode]);
 
   useEffect(() => {
-    if (!isOpen) return;
-    const shouldResetMembersDraft = mode !== "members" || !membersDraftDirty;
+    if (!isOpen) {
+      modalSessionRef.current = null;
+      return;
+    }
+    // 后台状态/额度刷新只同步未编辑的数据，不能重置当前弹框会话。
+    const isNewSession = modalSessionRef.current !== mode;
+    modalSessionRef.current = mode;
+    const shouldResetMembersDraft = isNewSession ||
+      ((mode !== "members" || !membersDraftDirty) && !customRoutingOpen);
     if (shouldResetMembersDraft) {
-      setQuery("");
       setSelected(new Set(normalizedInitialSelectedIds));
-      setFilterTypes([]);
-      setTagFilter([]);
-      setGroupFilter([]);
       setRestrictFreeAccounts(initialRestrictFreeAccounts);
       setSessionIdentityMappingEnabled(initialSessionIdentityMappingEnabled);
       setSessionAffinity(initialSessionAffinity);
       setSessionAffinityTtlSeconds(String(initialSessionAffinityTtlSeconds));
       setImageGenerationPolicies(collection?.imageGenerationAccountPolicies ?? {});
       setOfficialAccountBindings(collection?.officialAccountBindings ?? {});
-    }
-    setSessionAffinityTtlError("");
-    setError("");
-    setNotice("");
-    setTestDialogOpen(false);
-    setTestDialogRunning(false);
-    setTestChatMessages([]);
-    setTestChatInput("");
-    setTestDialogError("");
-    setKeyVisible(false);
-    setCopiedField(null);
-    setPortInput(collection?.port ? String(collection.port) : "");
-    setUpstreamProxyDraftUrl(collection?.upstreamProxyUrl ?? "");
-    setCustomRoutingOpen(false);
-    setCustomRoutingQuery("");
-    setCustomRoutingFilterTypes([]);
-    setCustomRoutingTagFilter([]);
-    setCustomRoutingError("");
-    setCustomRoutingSelected(new Set());
-    if (shouldResetMembersDraft) {
       setCustomRoutingDraft(() => {
         const ruleMap = new Map(
           (collection?.customRoutingRules ?? []).map((rule) => [
@@ -580,20 +563,43 @@ export function CodexLocalAccessModal({
         return next;
       });
     }
+    if (!isNewSession) return;
+    setQuery("");
+    setFilterTypes([]);
+    setTagFilter([]);
+    setGroupFilter([]);
+    setSessionAffinityTtlError("");
+    setError("");
+    setNotice("");
+    setTestDialogOpen(false);
+    setTestDialogRunning(false);
+    setTestChatMessages([]);
+    setTestChatInput("");
+    setTestDialogError("");
+    setKeyVisible(false);
+    setCopiedField(null);
+    setPortInput(collection?.port ? String(collection.port) : "");
+    setUpstreamProxyDraftUrl(collection?.upstreamProxyUrl ?? "");
+    setCustomRoutingOpen(false);
+    setCustomRoutingQuery("");
+    setCustomRoutingFilterTypes([]);
+    setCustomRoutingTagFilter([]);
+    setCustomRoutingError("");
+    setCustomRoutingSelected(new Set());
     setCustomRoutingBulkPriority("10");
     setCustomRoutingBulkWeight("1");
     if (mode === "members") {
-      window.setTimeout(() => {
+      const timer = window.setTimeout(() => {
         searchInputRef.current?.focus();
       }, 0);
+      return () => window.clearTimeout(timer);
     }
   }, [
     collection?.accountIds,
-    collection?.apiKeys,
     collection?.customRoutingRules,
+    collection?.imageGenerationAccountPolicies,
     collection?.officialAccountBindings,
-    collection?.port,
-    collection?.upstreamProxyUrl,
+    customRoutingOpen,
     initialRestrictFreeAccounts,
     initialSessionIdentityMappingEnabled,
     initialSessionAffinity,
@@ -2460,9 +2466,6 @@ export function CodexLocalAccessModal({
                       {t("codex.localAccess.configTitle", "服务配置")}
                     </span>
                   </div>
-                  <CodexGatewayModeControl state={state} onState={onStateChange}
-                    disabled={actionBusy || sidecarRestarting} onError={setError}
-                    onNotice={setNotice} onSavingChange={setGatewaySaving} />
                   {collection ? (
                     <div className="codex-local-access-config-grid">
                       <div className="codex-local-access-config-card codex-local-access-config-card-base">

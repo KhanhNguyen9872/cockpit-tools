@@ -52,7 +52,7 @@ test('automatic fallback accepts an empty preferred pool but rejects foreign acc
 });
 
 test('settings failures expose only translated allowlisted codes', () => {
-  assert.equal(capabilityFallbackErrorKey('CAPABILITY_FALLBACK_NATIVE_REQUIRED'), 'capabilityFallback.nativeOnly');
+  assert.equal(capabilityFallbackErrorKey('CAPABILITY_FALLBACK_NATIVE_REQUIRED'), 'capabilityFallback.errorGeneric');
   assert.equal(capabilityFallbackErrorKey(new Error('CAPABILITY_FALLBACK_INVALID_MODEL')), 'capabilityFallback.errorModel');
   for (const error of ['https://user:secret@host/?token=secret', 'CAPABILITY_FALLBACK_STORAGE: private data']) {
     assert.equal(capabilityFallbackErrorKey(error), 'capabilityFallback.errorGeneric');

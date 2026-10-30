@@ -1,7 +1,18 @@
 // macOS Native Menu：Background refresh, account switching and window actions。
 // 通过 include! 保持原 imp 模块作用域和 Objective-C FFI 调用路径。
 fn normalize_provider_base_url(value: &str) -> String {
-    value.trim().trim_end_matches('/').to_ascii_lowercase()
+    let value = value.trim().trim_end_matches('/').to_ascii_lowercase();
+    if value == "https://api.openai.com" {
+        "https://api.openai.com/v1".to_string()
+    } else {
+        value
+    }
+}
+
+fn codex_provider_account_base_url(account: &crate::models::codex::CodexAccount) -> Option<&str> {
+    account.api_base_url.as_deref().map(str::trim).filter(|value| !value.is_empty())
+        .or_else(|| (account.api_provider_mode == crate::models::codex::CodexApiProviderMode::OpenaiBuiltin)
+            .then_some("https://api.openai.com/v1"))
 }
 
 fn find_codex_provider_for_account(
@@ -14,7 +25,7 @@ fn find_codex_provider_for_account(
         .map(str::trim)
         .filter(|value| !value.is_empty());
     if let Some(provider_id) = provider_id {
-        if let Some(provider) = providers.iter().find(|provider| {
+        if let Some(provider) = providers.iter().filter(|provider| !provider.get("deletedAt").and_then(Value::as_f64).is_some_and(|value| value > 0.0)).find(|provider| {
             json_path(Some(provider), &["id"])
                 .and_then(Value::as_str)
                 .map(str::trim)
@@ -23,13 +34,12 @@ fn find_codex_provider_for_account(
             return Some(provider.clone());
         }
     }
-    let account_base = account
-        .api_base_url
-        .as_deref()
+    let account_base = codex_provider_account_base_url(account)
         .map(normalize_provider_base_url)
         .filter(|value| !value.is_empty())?;
     providers
         .iter()
+        .filter(|provider| !provider.get("deletedAt").and_then(Value::as_f64).is_some_and(|value| value > 0.0))
         .find(|provider| {
             json_path(Some(provider), &["baseUrl"])
                 .and_then(Value::as_str)
@@ -56,6 +66,7 @@ async fn save_detected_codex_provider_integration_type(
     let normalized_base_url = normalize_provider_base_url(base_url);
     let mut changed = false;
     for provider in items {
+        if provider.get("deletedAt").and_then(Value::as_f64).is_some_and(|value| value > 0.0) { continue; }
         let id_matches = provider_id.is_some_and(|target_id| {
             json_path(Some(provider), &["id"])
                 .and_then(Value::as_str)
@@ -125,13 +136,7 @@ async fn refresh_codex_api_key_usage_for_menu(
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .or_else(|| {
-            account
-                .api_base_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-        })
+        .or_else(|| codex_provider_account_base_url(&account))
         .ok_or_else(|| "Codex API Base URL 为空".to_string())?
         .to_string();
     let integration_type = provider
@@ -471,5 +476,26 @@ fn open_main_window_page(page: &str) {
 fn open_main_window() {
     if let Some(app) = crate::get_app_handle() {
         let _ = modules::floating_card_window::show_main_window(app);
+    }
+}
+
+#[cfg(test)]
+mod provider_reconciliation_tests {
+    use super::*;
+
+    #[test]
+    fn official_default_resolves_and_deleted_providers_stay_hidden() {
+        use crate::models::codex::{CodexAccount, CodexApiProviderMode};
+        let account = CodexAccount::new_api_key(
+            "fixture".into(), "fixture@example.invalid".into(), "synthetic".into(),
+            CodexApiProviderMode::OpenaiBuiltin, None, Some("official".into()),
+            Some("OpenAI Official".into()), vec![],
+        );
+        let active = serde_json::json!({"id":"official", "baseUrl":"https://api.openai.com/"});
+        assert_eq!(find_codex_provider_for_account(&[active.clone()], &account), Some(active.clone()));
+        let mut removed = active;
+        removed["deletedAt"] = serde_json::json!(123);
+        assert!(find_codex_provider_for_account(&[removed], &account).is_none());
+        assert_eq!(codex_provider_account_base_url(&account), Some("https://api.openai.com/v1"));
     }
 }

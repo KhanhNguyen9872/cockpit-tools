@@ -1,7 +1,7 @@
 #[tokio::test]
 async fn websocket_json_failure_terminals_reach_client_without_committing_success() {
     for status in ["failed", "incomplete", "cancelled"] {
-        let original = json!({"id":format!("json-{status}"),"status":status,"output":[{"type":"reasoning","encrypted_content":"opaque-json","summary":[]}],"error":if status=="failed" {json!({"code":"server_error","message":"Failed upstream"})} else {Value::Null},"incomplete_details":if status=="incomplete" {json!({"reason":"max_output_tokens"})} else {Value::Null},"usage":{"input_tokens":3,"output_tokens":2},"extension":{"unchanged":true}});
+        let original = json!({"id":format!("json-{status}"),"object":"response","created_at":123,"status":status,"output":[{"type":"reasoning","encrypted_content":"opaque-json","summary":[]}],"error":if status=="failed" {json!({"code":"server_error","message":"Failed upstream"})} else {Value::Null},"incomplete_details":if status=="incomplete" {json!({"reason":"max_output_tokens"})} else {Value::Null},"usage":{"input_tokens":3,"output_tokens":2},"extension":{"unchanged":true}});
         let body = original.clone();
         let app = Router::new().route(
             "/v1/responses",

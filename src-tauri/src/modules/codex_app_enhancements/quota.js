@@ -299,7 +299,7 @@
   async function prepareLiveQuotaGate() {
     if (!liveQuotaEnabled()) return { ok: false, reason: 'disabled' };
     const read = async value => {
-      const response = await root.fetch(value, { cache: 'no-store' });
+      const response = await root.fetch(value, { cache: 'no-store', signal: AbortSignal.timeout(6000) });
       if (!response.ok) throw new Error('asset-unavailable');
       return response.text();
     };
@@ -308,15 +308,9 @@
         .map(script => script.src)
         .filter(value => /^app:\/\/-\/assets\/index-[A-Za-z0-9_-]+\.js$/.test(value));
       if (entries.length < 1 || entries.length > 4) return { ok: false, reason: 'unsupported-entry' };
-      const initialUrls = new Set();
-      for (const entry of entries) {
-        for (const match of (await read(entry))
-          .matchAll(/["'`]\.\/app-initial-[A-Za-z0-9_-]+\.js["'`]/g)) {
-          initialUrls.add(new URL(match[0].slice(1, -1), entry).href);
-        }
-      }
-      if (initialUrls.size !== 1) return { ok: false, reason: 'ambiguous-module' };
-      const initialUrl = [...initialUrls][0];
+      const discovered = await root.__cockpitNativeFast.resolveInitialModule(entries, read);
+      if (!discovered.ok) return discovered;
+      const initialUrl = discovered.url;
       const initialSource = await read(initialUrl);
       const contract = transform(initialSource, initialUrl);
       if (!contract.ok) return { ok: false, reason: contract.diagnostics?.reason || 'quota-contract-failed' };

@@ -22,6 +22,14 @@ mod encrypted;
 pub(super) fn known_signature_provider(raw: &str, gpt: fn(&str) -> bool) -> bool {
     encrypted::known_signature_provider(raw, gpt)
 }
+
+pub(super) fn claude_signature(raw: &str) -> bool {
+    encrypted::claude_signature(raw)
+}
+
+pub(super) fn normalize_tool_arguments(item: &mut Value) {
+    history::normalize_arguments(item);
+}
 #[path = "grok_history.rs"]
 mod history;
 #[path = "grok_request_compat.rs"]

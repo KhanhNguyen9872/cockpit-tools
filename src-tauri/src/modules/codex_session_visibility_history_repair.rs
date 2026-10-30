@@ -119,6 +119,7 @@ fn repair_history_projections_for_instances(
             instance_name: instance.name.clone(),
             running,
             backup_dir,
+            history_projection_count: Some(candidates),
             ..Default::default()
         });
         modules::logger::log_info(&format!(

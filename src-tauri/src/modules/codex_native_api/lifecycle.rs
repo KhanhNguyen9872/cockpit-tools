@@ -31,6 +31,7 @@ impl StopSignal {
 }
 
 pub(super) struct Activity {
+    pub request_sizes: super::request_metrics::SizeBuckets,
     pub count: AtomicUsize,
     pub tasks: AtomicUsize,
     pub accepting: AtomicBool,
@@ -40,6 +41,7 @@ pub(super) struct Activity {
 impl Default for Activity {
     fn default() -> Self {
         Self {
+            request_sizes: Default::default(),
             count: AtomicUsize::new(0),
             tasks: AtomicUsize::new(0),
             accepting: AtomicBool::new(true),
@@ -67,6 +69,11 @@ impl Drop for BlockingWorkGuard {
 }
 
 pub(super) struct RequestTracker {
+    pub overload: super::overload::Budget,
+    pub field_compat: super::request_compat::Budget,
+    request_size: Option<super::diagnostics::RequestSize>,
+    pending_overload_retry: Option<super::diagnostics::OverloadRetry>,
+    overload_response_seen: bool,
     activity: Arc<Activity>,
     host: Arc<dyn Host>,
     stop: StopSignal,
@@ -195,6 +202,11 @@ impl RequestTracker {
             transport_identity: None,
             diagnostics: None,
             capture_payloads: false,
+            overload: Default::default(),
+            field_compat: Default::default(),
+            request_size: None,
+            pending_overload_retry: None,
+            overload_response_seen: false,
             operation: "text",
             downstream: None,
             global_permit: permit,
@@ -233,6 +245,11 @@ impl RequestTracker {
         self.quota_account = None;
         self.transport_identity = None;
         self.capture_payloads = capture_payloads;
+        self.overload = Default::default();
+        self.field_compat = Default::default();
+        self.request_size = None;
+        self.pending_overload_retry = None;
+        self.overload_response_seen = false;
         let identity = super::diagnostics::capture_header_identity(headers);
         self.diagnostics = Some(DiagnosticContext {
             request_id: uuid::Uuid::now_v7().to_string(),
@@ -318,6 +335,7 @@ impl RequestTracker {
         }
         if self.report.is_none() {
             self.report = Some(RequestReport {
+                transient_rate_limit: false,
                 official_access_fingerprint: None,
                 official_authorization_revision: None,
                 official_registration_id: None,
@@ -388,6 +406,7 @@ impl RequestTracker {
             }
         }
         self.quota_started = Instant::now();
+        self.overload_response_seen = false;
         self.dispatch_count += 1;
         self.dispatch_open = true;
         self.capture_request_fault(false);
@@ -405,6 +424,8 @@ impl RequestTracker {
                 model_id: report.upstream_model.clone(),
                 ..Default::default()
             });
+            attempt.request_size = self.request_size.clone();
+            if let Some(trace) = self.pending_overload_retry.take() { attempt.overload_retry = Some(trace); }
             checkpoint.retry = Some(Box::new(PendingDispatch {
                 report: report.clone(),
                 attempt: attempt.clone(),
@@ -558,10 +579,39 @@ impl RequestTracker {
 
     pub(super) fn first_response(&mut self) {
         if let Some(context) = &mut self.diagnostics {
+            if !self.overload_response_seen {
+                if let Some(trace) = context.attempts.last_mut().and_then(|attempt| attempt.overload_retry.as_mut()) {
+                    if let Some(start) = self.overload.started {
+                        trace.recovery_ms = start.elapsed().as_millis() as u64;
+                    }
+                }
+                self.overload_response_seen = true;
+            }
             context
                 .first_response_ms
                 .get_or_insert(self.started.elapsed().as_millis() as u64);
         }
+    }
+
+    pub(super) fn diagnostic_request_id(&self) -> &str {
+        self.diagnostics.as_ref().map_or("", |context| context.request_id.as_str())
+    }
+
+    pub(super) fn request_size(&mut self, size: super::diagnostics::RequestSize) {
+        self.request_size = Some(size);
+    }
+
+    pub(super) fn upstream_request_bytes(&mut self, bytes: usize) {
+        if let Some(attempt) = self.diagnostics.as_mut().and_then(|context| context.attempts.last_mut()) {
+            attempt.upstream_request_bytes = Some(bytes as u64);
+        }
+    }
+
+    pub(super) fn overload_retry(&mut self, wait: Duration, elapsed: Duration) {
+        self.pending_overload_retry = Some(super::diagnostics::OverloadRetry {
+            retry: self.overload.retries, wait_ms: wait.as_millis() as u64,
+            recovery_ms: elapsed.as_millis() as u64,
+        });
     }
 
     pub(super) fn attempt_result(&mut self, status: u16, success: bool, error: Option<&str>) {
@@ -595,14 +645,17 @@ impl RequestTracker {
         }
         let open_attempt = self.diagnostics.as_ref().and_then(|context| context.attempts.last())
             .is_some_and(|attempt| attempt.status.is_none());
+        self.capture_transient_rate_limit(error.transient_rate_limit);
         if let Some(details) = error.response_error.as_ref() {
             self.capture_official_authorization_error(error.status, details);
         }
-        let retired = if error.transport_failure == Some(super::contract::TransportFailureKind::TlsDecrypt) {
-            self.transport_identity.as_deref().map(|identity| self.host.invalidate_transport(identity))
-        } else {
-            None
-        };
+        let retired = self.transport_identity.as_deref().and_then(|identity| {
+            match error.transport_failure {
+                Some(super::contract::TransportFailureKind::TlsDecryptHttp2) => Some(self.host.invalidate_http2_transport(identity)),
+                Some(super::contract::TransportFailureKind::TlsDecrypt) => Some(self.host.invalidate_transport(identity)),
+                None => None,
+            }
+        });
         self.capture_request_fault(error.code == super::upstream_errors::REQUEST_SCOPED);
         self.capture_response_error(Some(&error.message), error.credential_scope);
         self.attempt_result(error.status, false, Some(error.code));
@@ -630,7 +683,7 @@ impl RequestTracker {
 
     pub(super) fn capture_response_error(&mut self, message: Option<&str>, credential_scope: bool) {
         if let Some(report) = &mut self.report {
-            report.credential_scope |= credential_scope;
+            report.credential_scope |= credential_scope && !report.transient_rate_limit;
             if let Some(message) = message.filter(|message| !message.is_empty()) {
                 report.error_message = Some(super::diagnostics::sanitize_error_text(message));
             }
@@ -642,6 +695,10 @@ impl RequestTracker {
         }
     }
 
+    pub(super) fn capture_transient_rate_limit(&mut self, transient: bool) {
+        if let Some(report) = &mut self.report { report.transient_rate_limit |= transient; if transient { report.credential_scope = false; } }
+    }
+
     pub(super) fn capture_request_fault(&mut self, request_scoped: bool) {
         if let Some(context) = &mut self.diagnostics {
             context.upstream_request_scoped = request_scoped;
@@ -649,6 +706,7 @@ impl RequestTracker {
     }
 
     pub(super) fn capture_upstream_error(&mut self, status: u16, value: &serde_json::Value) {
+        self.capture_transient_rate_limit(super::transient_rate_limit::applies(value));
         self.capture_official_authorization_error(status, value);
         let (message, scope) = super::diagnostics::upstream_error_metadata_status(status, value);
         self.capture_response_error(message.as_deref(), scope);
@@ -737,6 +795,7 @@ impl RequestTracker {
     pub(super) fn routed(&mut self, caller: &Caller, route: &Route, model: &str) {
         self.route_permit = route.permit.clone();
         let attempt = DiagnosticAttempt {
+            transport_http1_fallback: route.proxy_route.as_ref().and_then(|v| v.get("transportHttp1Fallback")).and_then(serde_json::Value::as_bool),
             authorization_route: Some(if route.chatgpt_plan { "official" } else { "local_gateway" }.into()),
             authorization_fallback: (!route.chatgpt_plan).then(|| route.official_fallback_failure.as_ref()
                 .map(|failure| super::official_fallback::trace(&route.account_id, failure))).flatten(),
@@ -746,6 +805,7 @@ impl RequestTracker {
             ..Default::default()
         };
         let report = RequestReport {
+            transient_rate_limit: false,
             official_authorization_revision: route.official_authorization_revision.clone(),
             official_registration_id: route.official_registration_id.clone(),
             official_fallback_registration_id: route.official_fallback_registration_id.clone(),
@@ -950,6 +1010,9 @@ impl RequestTracker {
                 DOWNSTREAM_OUTCOME_TIMEOUT,
             )
             .await;
+            if let (Some(context), Some(report)) = (&diagnostics, &report) {
+                _guard.0.request_sizes.record(context, report.success, report.status);
+            }
             let record = async {
                 if let Some(report) = report {
                     if tokio::time::timeout(Duration::from_secs(5), host.record(report))

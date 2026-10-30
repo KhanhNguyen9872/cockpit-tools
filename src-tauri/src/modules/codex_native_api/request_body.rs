@@ -7,10 +7,19 @@ pub(super) async fn websocket_json(
     state: &super::server::AppState,
     text: axum::extract::ws::Utf8Bytes,
 ) -> Result<serde_json::Value, ServiceError> {
+    websocket_json_measured(state, text).await.map(|(body, _)| body)
+}
+
+pub(super) async fn websocket_json_measured(
+    state: &super::server::AppState,
+    text: axum::extract::ws::Utf8Bytes,
+) -> Result<(serde_json::Value, super::diagnostics::RequestSize), ServiceError> {
     let small = text.len() <= 64 * 1024;
     let parse = move || {
-        serde_json::from_str(text.as_str())
-            .map_err(|_| ServiceError::new(400, "invalid_json", "WebSocket message must be JSON"))
+        let body: serde_json::Value = serde_json::from_str(text.as_str())
+            .map_err(|_| ServiceError::new(400, "invalid_json", "WebSocket message must be JSON"))?;
+        let size = super::request_metrics::measure(&body, text.len());
+        Ok((body, size))
     };
     if small {
         parse()

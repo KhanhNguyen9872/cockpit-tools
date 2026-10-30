@@ -12,6 +12,7 @@ mod messages;
 #[path = "chat_upstream_tools.rs"]
 mod tools;
 pub(crate) use tools::ToolContext;
+pub(crate) use tools::unwrap_input;
 
 pub fn responses_to_chat(body: &Value) -> Result<Value, ServiceError> {
     responses_to_chat_inner(body, false)
@@ -70,7 +71,11 @@ fn responses_to_chat_inner(body: &Value, native: bool) -> Result<Value, ServiceE
         out.insert("max_completion_tokens".into(), v.clone());
     }
     if let Some(v) = body.pointer("/reasoning/effort") {
-        out.insert("reasoning_effort".into(), v.clone());
+        if v.as_str() == Some("none") && body["model"].as_str().is_some_and(crate::modules::codex_protocol::is_deepseek_model) {
+            out.insert("thinking".into(), json!({"type":"disabled"}));
+        } else {
+            out.insert("reasoning_effort".into(), v.clone());
+        }
     }
     if let Some(v) = body.pointer("/text/verbosity") {
         out.insert("verbosity".into(), v.clone());

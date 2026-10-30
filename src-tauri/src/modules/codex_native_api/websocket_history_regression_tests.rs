@@ -85,6 +85,7 @@ fn prepared_history() -> Prepared {
         capability_fallback_enabled: false,
         capability_fallback: None,
         transport_pinned: false,
+        continuation_recovered: false,
     }
 }
 

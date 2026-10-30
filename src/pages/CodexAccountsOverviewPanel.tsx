@@ -3,7 +3,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useModalScrollLock } from "../hooks/useModalScrollLock";
 import "./CodexAccountDialogs.css";
-import { Plus, RefreshCw, Upload, Trash2, X, Globe, KeyRound, Power, Copy, Check, Play, Pause, RotateCw, CircleAlert, Info, Rows3, LayoutGrid, List, Search, ArrowDownWideNarrow, ArrowUp, ArrowDown, GripVertical, Clock, Tag, Star, Eye, EyeOff, BookOpen, FileText, ExternalLink, FolderOpen, FolderPlus, LogOut, Terminal, ChevronDown } from "lucide-react";
+import { Plus, RefreshCw, Upload, Trash2, X, Globe, Power, Copy, Check, Play, Pause, RotateCw, CircleAlert, Info, Rows3, LayoutGrid, List, Search, ArrowDownWideNarrow, ArrowUp, ArrowDown, GripVertical, Clock, Tag, Eye, EyeOff, BookOpen, FileText, ExternalLink, FolderOpen, FolderPlus, LogOut, Terminal, ChevronDown } from "lucide-react";
 import * as codexLocalAccessService from "../services/codexLocalAccessService";
 import { TagEditModal } from "../components/TagEditModal";
 import { ExportJsonModal } from "../components/ExportJsonModal";
@@ -20,7 +20,6 @@ import { QuickSettingsPopover } from "../components/QuickSettingsPopover";
 import { MultiSelectFilterDropdown } from "../components/MultiSelectFilterDropdown";
 import { SingleSelectFilterDropdown } from "../components/SingleSelectFilterDropdown";
 import { SingleSelectDropdown } from "../components/SingleSelectDropdown";
-import { CODEX_API_PROVIDER_CUSTOM_ID, CODEX_API_PROVIDER_PRESETS, COCKPIT_API_PROVIDER_ID } from "../utils/codexProviderPresets";
 import { formatCodexQuotaPoolPlanLabel, formatCodexQuotaPoolPercent, formatCodexQuotaPoolWindowLabel } from "../utils/codexQuotaPool";
 import { getMfaOtpToken } from "../utils/mfaVault";
 import type { CodexExportFormat } from "../utils/codexExportFormats";
@@ -72,7 +71,6 @@ export function CodexAccountsOverviewPanel(props: CodexAccountsViewProps) {
     clearGroupFilter,
     clearTagFilter,
     closeAccountNoteModal,
-    closeApiKeyCredentialsModal,
     closeQuickSwitchModal,
     closeResetCreditConfirmModal,
     codexAccountSortOptions,
@@ -93,26 +91,6 @@ export function CodexAccountsOverviewPanel(props: CodexAccountsViewProps) {
     deletingGroup,
     deletingTag,
     draggedCustomSortAccountId,
-    editingApiBaseUrlCredentialsValue,
-    editingApiKeyCredentialsId,
-    editingApiKeyCredentialsValue,
-    editingApiKeyCredentialsVisible,
-    editingApiModelCatalogDraft,
-    editingApiWireApi,
-    editingApiSupportsWebsockets,
-    editingApiCredentialsError,
-    setEditingApiWireApi,
-    setEditingApiSupportsWebsockets,
-    setEditingApiCredentialsError,
-    editingApiModelCatalogError,
-    editingApiModelCatalogFetching,
-    editingApiModelCatalogInput,
-    editingApiModelCatalogSyncAvailable,
-    editingApiProviderPresetId,
-    editingApiSyncModelCatalogToCodex,
-    editingManagedProviderApiKeyId,
-    editingManagedProviderId,
-    editingNewManagedProviderNameInput,
     errorAccountIds,
     exportCanIncludeSensitiveNotes,
     exportFormat,
@@ -158,16 +136,12 @@ export function CodexAccountsOverviewPanel(props: CodexAccountsViewProps) {
     handleCustomSortDragMove,
     handleCustomSortDragStart,
     handleDismissBatchImportTask,
-    handleEditingApiBaseUrlCredentialsChange,
-    handleEditingApiKeyCredentialsChange,
     handleExport,
-    handleFetchEditingApiModelCatalog,
     handleKillLocalAccessPort,
     handleEnterGroup,
     handleLeaveGroup,
     handleLocalAccessAddressKindChange,
     handleOpenAccountNoteMailUrl,
-    handleOpenProviderLink,
     handlePauseBatchDelete,
     handlePendingOAuthEmailInputChange,
     handleQuickAddAccountsToGroup,
@@ -183,14 +157,10 @@ export function CodexAccountsOverviewPanel(props: CodexAccountsViewProps) {
     handleSaveLocalAccessAccounts,
     handleSaveTags,
     handleSelectAllFilteredAccounts,
-    handleSelectEditingApiProviderPreset,
-    handleSelectEditingManagedProvider,
-    handleSelectEditingManagedProviderApiKey,
     handleSelectQuickSwitchApiKey,
     handleSelectQuickSwitchProvider,
     handleSortByChange,
     handleSubmitAccountNote,
-    handleSubmitApiKeyCredentials,
     handleSubmitQuickSwitch,
     handleToggleExportJsonHidden,
     handleToggleLocalAccessEnabled,
@@ -237,7 +207,6 @@ export function CodexAccountsOverviewPanel(props: CodexAccountsViewProps) {
     message,
     mfaTimeRemaining,
     moveCustomSortAccount,
-    OPENAI_OFFICIAL_PRESET_ID,
     openCodexAddModal,
     openCodexApiServicePage,
     openFormattedExportSavedDirectory,
@@ -284,11 +253,8 @@ export function CodexAccountsOverviewPanel(props: CodexAccountsViewProps) {
     resolvePresentation,
     savedMfaRecords,
     saveFormattedExportJson,
-    savingApiKeyCredentials,
     searchQuery,
     selected,
-    selectedEditingApiProviderPreset,
-    selectedEditingManagedProvider,
     selectedLocalAccessAddressKind,
     selectedQuickSwitchApiKey,
     selectedQuickSwitchProvider,
@@ -298,11 +264,6 @@ export function CodexAccountsOverviewPanel(props: CodexAccountsViewProps) {
     setActiveTab,
     setBatchImportOpen,
     setDeleteConfirm,
-    setEditingApiKeyCredentialsVisible,
-    setEditingApiModelCatalogError,
-    setEditingApiModelCatalogInput,
-    setEditingApiSyncModelCatalogToCodex,
-    setEditingNewManagedProviderNameInput,
     setExportFormat,
     setGroupByTag,
     setGroupDeleteConfirm,
@@ -374,7 +335,7 @@ export function CodexAccountsOverviewPanel(props: CodexAccountsViewProps) {
     window.addEventListener(PELICAN_GROUPS_CHANGED, reload);
     return () => window.removeEventListener(PELICAN_GROUPS_CHANGED, reload);
   }, [reloadCodexGroups]);
-  useModalScrollLock(Boolean(quickSwitchAccountId || editingApiKeyCredentialsId));
+  useModalScrollLock(Boolean(quickSwitchAccountId));
   return (
         <>
           {recycleBinOpen && <CodexRecycleBinModal
@@ -1379,501 +1340,7 @@ export function CodexAccountsOverviewPanel(props: CodexAccountsViewProps) {
 
 
 
-          {editingApiKeyCredentialsId && createPortal(
-            <div className="modal-overlay codex-account-dialog-overlay">
-              <div
-                className="modal-content codex-add-modal codex-api-key-edit-modal codex-provider-modal codex-account-dialog"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="modal-header">
-                  <h2>{`${t("instances.actions.edit", "编辑")} ${t("codex.addModal.token", "API Key")}`}</h2>
-                  <button
-                    className="modal-close"
-                    onClick={closeApiKeyCredentialsModal}
-                    aria-label={t("common.close", "关闭")}
-                    disabled={savingApiKeyCredentials}
-                  >
-                    <X />
-                  </button>
-                </div>
-                <div className="modal-body">
-                  <div className="add-section">
-                    <div className="oauth-link">
-                      <label>
-                        {t(
-                          "codex.modelProviders.selectSavedProvider",
-                          "已保存供应商",
-                        )}
-                      </label>
-                      {managedProvidersLoading ? (
-                        <div className="section-desc">
-                          {t("common.loading", "加载中...")}
-                        </div>
-                      ) : managedProviders.length === 0 ? (
-                        <div className="section-desc">
-                          {t(
-                            "codex.modelProviders.noSavedProviders",
-                            "暂无已保存供应商，可直接填写后自动保存。",
-                          )}
-                        </div>
-                      ) : (
-                        <div className="api-provider-chip-list">
-                          {managedProviders.map((provider) => (
-                            <button
-                              key={provider.id}
-                              className={`api-provider-chip ${editingManagedProviderId === provider.id ? "active" : ""}`}
-                              onClick={() =>
-                                handleSelectEditingManagedProvider(provider.id)
-                              }
-                              type="button"
-                              disabled={savingApiKeyCredentials}
-                            >
-                              <span>{provider.name}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    {selectedEditingManagedProvider &&
-                      selectedEditingManagedProvider.apiKeys.length > 0 && (
-                        <div className="oauth-link">
-                          <label>
-                            {t(
-                              "codex.modelProviders.selectSavedApiKey",
-                              "已保存 API Key",
-                            )}
-                          </label>
-                          <SingleSelectDropdown
-                            className="codex-managed-api-key-select"
-                            value={editingManagedProviderApiKeyId}
-                            options={[
-                              {
-                                value: "",
-                                label: t(
-                                  "codex.modelProviders.manualApiKeyOption",
-                                  "手动输入新 Key",
-                                ),
-                              },
-                              ...selectedEditingManagedProvider.apiKeys.map(
-                                (item) => ({
-                                  value: item.id,
-                                  label: formatCodexManagedApiKeyOptionLabel(
-                                    item,
-                                    t(
-                                      "codex.modelProviders.unnamedKey",
-                                      "未命名 Key",
-                                    ),
-                                  ),
-                                }),
-                              ),
-                            ]}
-                            onChange={handleSelectEditingManagedProviderApiKey}
-                            disabled={savingApiKeyCredentials}
-                            placeholder={t(
-                              "codex.modelProviders.selectSavedApiKeyPlaceholder",
-                              "选择 API Key",
-                            )}
-                            ariaLabel={t(
-                              "codex.modelProviders.selectSavedApiKey",
-                              "已保存 API Key",
-                            )}
-                          />
-                          {selectedEditingManagedProvider.apiKeys.length >
-                            1 && (
-                            <p className="api-provider-hint">
-                              {t(
-                                "codex.modelProviders.selectSavedApiKeyHint",
-                                "该供应商有多个 API Key，可在此切换选择。",
-                              )}
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    <div className="oauth-link">
-                      <label>{t("codex.api.provider.label", "供应商")}</label>
-                      <div className="api-provider-chip-list">
-                        <button
-                          className={`api-provider-chip ${editingApiProviderPresetId === CODEX_API_PROVIDER_CUSTOM_ID ? "active" : ""}`}
-                          onClick={() =>
-                            handleSelectEditingApiProviderPreset(
-                              CODEX_API_PROVIDER_CUSTOM_ID,
-                            )
-                          }
-                          type="button"
-                          disabled={savingApiKeyCredentials}
-                        >
-                          <span>
-                            {t("codex.api.provider.custom", "自定义")}
-                          </span>
-                        </button>
-                        {CODEX_API_PROVIDER_PRESETS.map((preset) => (
-                          <button
-                            key={preset.id}
-                            className={`api-provider-chip ${editingApiProviderPresetId === preset.id ? "active" : ""}`}
-                            onClick={() =>
-                              handleSelectEditingApiProviderPreset(preset.id)
-                            }
-                            type="button"
-                            disabled={savingApiKeyCredentials}
-                          >
-                            <span>
-                              {t(
-                                `codex.api.providers.${preset.id}.name`,
-                                preset.name,
-                              )}
-                            </span>
-                            {preset.isPartner && (
-                              <Star
-                                size={12}
-                                className="api-provider-chip-badge"
-                              />
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    {selectedEditingApiProviderPreset &&
-                      selectedEditingApiProviderPreset.baseUrls.length > 1 && (
-                        <div className="oauth-link">
-                          <label>
-                            {t("codex.api.provider.endpoint", "供应商端点")}
-                          </label>
-                          <div className="api-provider-endpoint-list">
-                            {selectedEditingApiProviderPreset.baseUrls.map(
-                              (baseUrl) => (
-                                <button
-                                  key={baseUrl}
-                                  className={`api-provider-endpoint-chip ${editingApiBaseUrlCredentialsValue === baseUrl ? "active" : ""}`}
-                                  onClick={() =>
-                                    handleEditingApiBaseUrlCredentialsChange(
-                                      baseUrl,
-                                    )
-                                  }
-                                  type="button"
-                                  disabled={savingApiKeyCredentials}
-                                >
-                                  {baseUrl}
-                                </button>
-                              ),
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    {selectedEditingApiProviderPreset && (
-                      <div className="api-provider-hint-block">
-                        <p className="api-provider-hint">
-                          {t(
-                            "codex.api.provider.hint",
-                            "已自动填写兼容 Base URL，可继续手动调整。",
-                          )}
-                        </p>
-                        <div className="api-provider-links">
-                          {selectedEditingApiProviderPreset.website && (
-                            <button
-                              className="btn btn-secondary"
-                              onClick={() =>
-                                void handleOpenProviderLink(
-                                  selectedEditingApiProviderPreset.website ||
-                                    "",
-                                )
-                              }
-                              disabled={savingApiKeyCredentials}
-                            >
-                              <ExternalLink size={14} />
-                              {t("codex.api.provider.website", "官网")}
-                            </button>
-                          )}
-                          {selectedEditingApiProviderPreset.apiKeyUrl && (
-                            <button
-                              className="btn btn-secondary"
-                              onClick={() =>
-                                void handleOpenProviderLink(
-                                  selectedEditingApiProviderPreset.apiKeyUrl ||
-                                    "",
-                                )
-                              }
-                              disabled={savingApiKeyCredentials}
-                            >
-                              <KeyRound size={14} />
-                              {selectedEditingApiProviderPreset.id ===
-                              COCKPIT_API_PROVIDER_ID
-                                ? t("codex.api.provider.getApiKey", "获取秘钥")
-                                : t(
-                                    "codex.api.provider.apiKeyPage",
-                                    "API Key 页面",
-                                  )}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                    <div className="oauth-link">
-                      <label>{t("codex.addModal.token", "API Key")}</label>
-                      <div className="oauth-url-box oauth-manual-input codex-secret-input">
-                        <input
-                          type={
-                            editingApiKeyCredentialsVisible
-                              ? "text"
-                              : "password"
-                          }
-                          value={editingApiKeyCredentialsValue}
-                          onChange={(e) =>
-                            handleEditingApiKeyCredentialsChange(e.target.value)
-                          }
-                          disabled={savingApiKeyCredentials}
-                          autoComplete="off"
-                          spellCheck={false}
-                        />
-                        <button
-                          type="button"
-                          className="codex-secret-toggle-btn"
-                          onClick={() =>
-                            setEditingApiKeyCredentialsVisible(
-                              (visible) => !visible,
-                            )
-                          }
-                          disabled={savingApiKeyCredentials}
-                          title={
-                            editingApiKeyCredentialsVisible
-                              ? t("codex.api.hideApiKey", "隐藏 API Key")
-                              : t("codex.api.showApiKey", "显示 API Key")
-                          }
-                          aria-label={
-                            editingApiKeyCredentialsVisible
-                              ? t("codex.api.hideApiKey", "隐藏 API Key")
-                              : t("codex.api.showApiKey", "显示 API Key")
-                          }
-                        >
-                          {editingApiKeyCredentialsVisible ? (
-                            <EyeOff size={16} />
-                          ) : (
-                            <Eye size={16} />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                    <div className="oauth-link">
-                      <label>{t("codex.api.baseUrl", "Base URL")}</label>
-                      <div className="oauth-url-box oauth-manual-input">
-                        <input
-                          type="text"
-                          value={editingApiBaseUrlCredentialsValue}
-                          onChange={(e) =>
-                            handleEditingApiBaseUrlCredentialsChange(
-                              e.target.value,
-                            )
-                          }
-                          placeholder={t(
-                            "codex.api.baseUrlPlaceholder",
-                            "不填写则是官方默认",
-                          )}
-                          disabled={savingApiKeyCredentials}
-                        />
-                      </div>
-                    </div>
-                    <div className="oauth-link">
-                      <label>{t("codex.modelProviders.fields.wireApi", "协议")}</label>
-                      <div className="api-provider-chip-list">
-                        <button type="button" className={`api-provider-chip ${editingApiWireApi === "responses" ? "active" : ""}`}
-                          disabled={savingApiKeyCredentials} aria-pressed={editingApiWireApi === "responses"}
-                          onClick={() => { setEditingApiWireApi("responses"); setEditingApiCredentialsError(null); }}>
-                          {t("codex.modelProviders.wireApi.responses", "Responses 原生")}
-                        </button>
-                        <button type="button" className={`api-provider-chip ${editingApiWireApi === "chat_completions" ? "active" : ""}`}
-                          disabled={savingApiKeyCredentials} aria-pressed={editingApiWireApi === "chat_completions"}
-                          onClick={() => { setEditingApiWireApi("chat_completions"); setEditingApiSupportsWebsockets(false); setEditingApiCredentialsError(null); }}>
-                          {t("codex.modelProviders.wireApi.chatCompletions", "Chat Completions 协议")}
-                        </button>
-                      </div>
-                    </div>
-                    {editingApiWireApi === "responses" && (
-                      <div className="oauth-link">
-                        <label>{t("codex.modelProviders.fields.supportsWebsockets", "WebSocket 传输")}</label>
-                        <label className="provider-vision-toggle">
-                          <span className="provider-vision-toggle-copy">
-                            <span className="provider-vision-toggle-title">
-                              {t("codex.modelProviders.websockets.title", "允许 Codex 使用 Responses WebSocket")}
-                            </span>
-                            <span className="provider-vision-toggle-desc">
-                              {t("codex.modelProviders.websockets.help", "仅在供应商明确支持 Responses WebSocket 时开启；连接方式可通过 Codex 或代理服务日志确认。")}
-                            </span>
-                          </span>
-                          <span className="provider-vision-switch">
-                            <input type="checkbox" checked={editingApiSupportsWebsockets} disabled={savingApiKeyCredentials}
-                              onChange={(event) => { setEditingApiSupportsWebsockets(event.target.checked); setEditingApiCredentialsError(null); }} />
-                            <span className="provider-vision-switch-track" />
-                          </span>
-                        </label>
-                      </div>
-                    )}
-                    {editingApiProviderPresetId !== COCKPIT_API_PROVIDER_ID && (
-                      <div className="oauth-link">
-                        <label>
-                          {t(
-                            "codex.modelProviders.newProviderName",
-                            "供应商名称（自动保存时使用，可选）",
-                          )}
-                        </label>
-                        <div className="oauth-url-box oauth-manual-input">
-                          <input
-                            type="text"
-                            value={editingNewManagedProviderNameInput}
-                            onChange={(e) =>
-                              setEditingNewManagedProviderNameInput(
-                                e.target.value,
-                              )
-                            }
-                            placeholder={t(
-                              "codex.modelProviders.newProviderNamePlaceholder",
-                              "不填则按域名自动生成",
-                            )}
-                            disabled={savingApiKeyCredentials}
-                          />
-                        </div>
-                      </div>
-                    )}
-                    {editingApiProviderPresetId !==
-                      OPENAI_OFFICIAL_PRESET_ID && (
-                      <>
-                        <div className="api-model-catalog-panel">
-                          <div className="api-model-catalog-header">
-                            <label htmlFor="codex-api-model-catalog-edit">
-                              {t("codex.api.modelCatalog.label", "模型列表")}
-                            </label>
-                            <span className="api-model-catalog-count">
-                              {t("codex.api.modelCatalog.count", {
-                                defaultValue: "{{count}} 个模型",
-                                count: editingApiModelCatalogDraft.length,
-                              })}
-                            </span>
-                          </div>
-                          <textarea
-                            id="codex-api-model-catalog-edit"
-                            className="form-input api-model-catalog-input"
-                            rows={6}
-                            value={editingApiModelCatalogInput}
-                            onChange={(event) => {
-                              setEditingApiModelCatalogInput(
-                                event.target.value,
-                              );
-                              setEditingApiModelCatalogError(null);
-                            }}
-                            placeholder={t(
-                              "codex.api.modelCatalog.placeholder",
-                              "每行填写一个模型 ID，也可以使用逗号分隔。",
-                            )}
-                            disabled={savingApiKeyCredentials}
-                            aria-describedby="codex-api-model-catalog-edit-hint"
-                          />
-                          <div className="api-model-catalog-toolbar">
-                            <p
-                              id="codex-api-model-catalog-edit-hint"
-                              className="api-model-catalog-hint"
-                            >
-                              {t(
-                                "codex.api.modelCatalog.editHint",
-                                "上游结果仅填入当前草稿，可在保存前删除、补充或调整模型。",
-                              )}
-                            </p>
-                            <button
-                              type="button"
-                              className="btn btn-secondary api-model-catalog-fetch"
-                              onClick={() =>
-                                void handleFetchEditingApiModelCatalog()
-                              }
-                              disabled={
-                                editingApiModelCatalogFetching ||
-                                savingApiKeyCredentials ||
-                                !editingApiKeyCredentialsValue.trim()
-                              }
-                            >
-                              <RefreshCw
-                                size={14}
-                                className={
-                                  editingApiModelCatalogFetching
-                                    ? "loading-spinner"
-                                    : undefined
-                                }
-                              />
-                              {editingApiModelCatalogFetching
-                                ? t(
-                                    "codex.api.modelCatalog.fetching",
-                                    "获取中...",
-                                  )
-                                : t(
-                                    "codex.api.modelCatalog.fetch",
-                                    "从上游获取",
-                                  )}
-                            </button>
-                          </div>
-                          {editingApiModelCatalogError && (
-                            <div className="add-status error api-model-catalog-error">
-                              <CircleAlert size={16} />
-                              <span>{editingApiModelCatalogError}</span>
-                            </div>
-                          )}
-                        </div>
-                        {editingApiModelCatalogSyncAvailable && (
-                          <label className="codex-import-api-service-toggle api-model-catalog-sync-toggle">
-                            <span className="codex-import-api-service-toggle-copy">
-                              <strong>
-                                {t(
-                                  "codex.api.modelCatalog.syncToggle",
-                                  "同步供应商模型到 Codex",
-                                )}
-                              </strong>
-                              <small>
-                                {t(
-                                  "codex.api.modelCatalog.syncDescription",
-                                  "保存后使用当前模型列表生成 Cockpit 受管的 Codex 模型目录，不覆盖用户自定义目录。",
-                                )}
-                              </small>
-                            </span>
-                            <input
-                              type="checkbox"
-                              checked={editingApiSyncModelCatalogToCodex}
-                              disabled={savingApiKeyCredentials}
-                              onChange={(event) => {
-                                setEditingApiSyncModelCatalogToCodex(
-                                  event.target.checked,
-                                );
-                                setEditingApiModelCatalogError(null);
-                              }}
-                            />
-                            <span className="codex-import-api-service-switch" />
-                          </label>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-                    <ModalErrorMessage message={editingApiCredentialsError} position="bottom" />
-                    <div className="modal-footer api-key-edit-actions">
-                      <button
-                        className="btn btn-secondary"
-                        onClick={closeApiKeyCredentialsModal}
-                        disabled={savingApiKeyCredentials}
-                      >
-                        {t("common.cancel")}
-                      </button>
-                      <button
-                        className="btn btn-primary"
-                        onClick={() => void handleSubmitApiKeyCredentials()}
-                        disabled={
-                          savingApiKeyCredentials ||
-                          editingApiModelCatalogFetching ||
-                          !editingApiKeyCredentialsValue.trim()
-                        }
-                      >
-                        {savingApiKeyCredentials
-                          ? t("common.saving", "保存中...")
-                          : t("common.save")}
-                      </button>
-                    </div>
-              </div>
-            </div>,
-            document.body,
-          )}
+
 
           {showCustomSortModal && (
             <div className="modal-overlay">

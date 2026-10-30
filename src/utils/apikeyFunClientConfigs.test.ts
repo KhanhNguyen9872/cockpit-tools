@@ -11,7 +11,7 @@ const family = (id: string) => {
 };
 
 test('codex config derives the auto compact limit as 90% of the context window', () => {
-  const catalog = JSON.parse(readFileSync(new URL('../../sidecars/cockpit-cliproxy/third_party/CLIProxyAPI/internal/registry/models/codex_client_models.json', import.meta.url), 'utf8'));
+  const catalog = JSON.parse(readFileSync(new URL('../../resources/codex/codex_client_models.json', import.meta.url), 'utf8'));
   const codexTemplate = catalog.models.find((model: { slug: string }) => model.slug === family('codex').fallbackModel);
   assert.ok(codexTemplate, 'Codex family model template');
   for (const [id, contextWindow] of [

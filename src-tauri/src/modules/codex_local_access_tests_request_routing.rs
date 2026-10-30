@@ -1190,6 +1190,7 @@ data: {"type":"response.completed","response":{"id":"resp_123","usage":{"input_t
             id: "provider_gateway_account-1".to_string(),
             label: "Provider Gateway: DeepSeek".to_string(),
             provider_gateway: Some(CodexLocalAccessProviderGateway {
+        auth_scheme: None,
                 base_url: "https://api.deepseek.com/v1".to_string(),
                 api_key: "sk-test".to_string(),
                 upstream_model: "deepseek-v4-pro".to_string(),
@@ -3240,6 +3241,7 @@ data: {"error":{"code":"server_error","type":"upstream","message":"stream aborte
         wire_api: &str,
     ) -> CodexModelProviderGatewayChatTestRequest {
         CodexModelProviderGatewayChatTestRequest {
+        auth_scheme: None,
             run_id: "run-1".to_string(),
             provider_id: "provider-1".to_string(),
             provider_name: "Provider".to_string(),

@@ -1660,13 +1660,20 @@
       "center": "Orta",
       "top": "Üst",
       "bottom": "Alt",
-      "localHint": "Değişiklikler anında uygulanır ve bu cihazda otomatik kaydedilir. Görseller yüklenmez. Sıfırlama kayıtlı görseli siler.",
+      "localHint": "Değişiklikler hemen uygulanır. Her temanın resmi ve ayarları bu cihazda ayrı ayrı saklanır; resimler yüklenmez. Varsayılanları geri yüklemek temalarınızı silmez.",
       "restore": "Sıfırla",
       "imageType": "JPG, PNG veya WebP görseli seçin.",
       "imageSize": "10 MB altında bir görsel seçin.",
       "imageRead": "Görsel okunamadı. Başka bir dosya deneyin.",
       "storage": "Arka plan yüklenemedi veya kaydedilemedi. Tekrar deneyin; önceki arka plan korunur.",
-      "saveFailed": "Arka plan görüntüleniyor ancak kaydedilemedi. Tekrar deneyin; daha önce kaydedilen arka plan korunur."
+      "saveFailed": "Değişiklikler görünüyor ancak kaydedilemedi. Tekrar deneyin; önceden kaydedilen temalar korunur.",
+      "builtInSkins": "Yerleşik temalar",
+      "mySkins": "Temalarım",
+      "addSkin": "Tema ekle",
+      "rename": "Adını değiştir",
+      "skinName": "Tema adı",
+      "manageSkin": "Temayı yönet: {{name}}",
+      "deleteSkinConfirm": "“{{name}}” silinsin mi? Etkin tema silinirse varsayılan arka plan geri yüklenir."
     }
   },
   "appPath": {
@@ -2398,7 +2405,7 @@
       "check": "Durumu denetle",
       "notRunning": "Hedef örnek henüz algılanmadı. Daha sonra denetleyin veya yeniden başlatmayı denemeden önce bu pencereyi kapatın.",
       "checkFailed": "Çalışma durumu okunamadı. Lütfen daha sonra yeniden denetleyin.",
-      "maintenanceDeferred": "Oturum denetimleri geçici olarak kullanılamıyor. Geçmiş korundu ve bu bakım adımı atlandı."
+      "maintenanceDeferred": "Oturum bakımının bir bölümü tamamlanamadı. Geçmiş korundu; daha sonra oturum yönetiminden yeniden deneyin."
     },
     "launchErrors": {
       "sessionRestoreFailed": "Oturum onarımı başarısız oldu ve yedek geri yükleme tamamlanmadı. Başlatma durduruldu; yeniden denemeden önce günlükleri ve yedekleri inceleyin.",
@@ -2968,7 +2975,6 @@
         "quotaReserveInvalid": "1 ile 100 arasında bir tam sayı girin.",
         "strictReserve": "Sıkı koruma",
         "strictReserveDesc": "Ayrılan kota, güvenlik payıyla otomatik korunur. Eşiğe yaklaşınca hesap başına tek istek gönderilir ve tamamlandıktan sonra güncel kota doğrulanır. Diğer istemcilerin kullanımı kısıtlanmaz.",
-        "strictNativeOnly": "Sıkı koruma Rust motoru gerektirir. Go motoruna geçmeden önce kapatın.",
         "safetyMargin": "Güvenlik payı",
         "safetyMarginUnit": "yüzde puan",
         "safetyMarginInvalid": "1 ile 20 arasında bir tam sayı girin.",
@@ -3051,17 +3057,7 @@
       "gatewayModeNewLabel": "API Hizmeti-Yeni",
       "gatewayModeOldLabel": "API Hizmeti-Eski",
       "gatewayModeSaveSuccess": "API hizmeti gecit modu guncellendi",
-      "gatewayEngineNative": "Yerel Rust",
-      "gatewayEngineSidecar": "Go (mevcut)",
-      "gatewayEngineHint": "Varsayılan motor Rust olur. İlk güncellemede Rust’a geçilir; sonraki seçimler korunur. Geçiş API hizmetini yeniden başlatır ve etkin istekleri kesebilir; Codex pencereleri açık kalır.",
-      "gatewayEngineSwitching": "Motor değiştiriliyor…",
-      "gatewayEngineSwitchFailed": "Motor değiştirilemedi: {{error}}",
-      "gatewayEngineReadbackFailed": "Geçerli motor doğrulanamadı. Yeniden denemeden önce durumu yenileyin: {{error}}",
-      "gatewayEngineReadbackTimeout": "Durum yenileme zaman aşımına uğradı",
       "gatewayEngineRequestsBusy": "İstekler hâlâ sürüyor. Tamamlandıklarında tekrar deneyin.",
-      "gatewayEngineOperationBusy": "Başka bir hizmet işlemi sürüyor. Kısa süre sonra tekrar deneyin.",
-      "gatewayEngineSwitchRestored": "Geçiş başarısız oldu. Önceki motor geri yüklendi.",
-      "gatewayEngineRestoreFailed": "Geçiş başarısız oldu ve önceki motor geri yüklenemedi. Tekrar denemeden önce hizmet durumunu kontrol edin.",
       "gatewayEngineStopped": "API hizmeti durdu. Tekrar denemeden önce yeniden başlatın.",
       "gatewayGuideTitle": "Ağ geçidini burada değiştirin",
       "gatewayGuideDesc": "Varsayılan yeni ağ geçididir. Uyumluluk sorunu veya istemci isteği hatası yaşarsanız buradan eski ağ geçidine dönebilirsiniz.",
@@ -3634,9 +3630,9 @@
         "providerLoadFailed": "Provider adayları yüklenemedi: {{error}}",
         "modeTitle": "Onarım modu",
         "modeQuick": "Hızlı onarım",
-        "modeQuickDesc": "Resmî durum veritabanında ve oturum dizinlerinde sağlayıcıları düzenler. rollout dosyaları korunur. Normal hesap değişimleri için uygundur.",
+        "modeQuickDesc": "Dizinleri ve güncel bağlantıları kısa süre sınırıyla onarır. Proje bilgilerini yazmak için örneği kapatın.",
         "modeDeep": "Tam onarım",
-        "modeDeepDesc": "Geçmiş sağlayıcıları, katalogları, çalışma alanlarını ve alt aracı dizinlerini onarır. rollout dosyaları korunur. Önce hedef örneği kapatın.",
+        "modeDeepDesc": "Hızlı onarımı, kopyalardan proje kurtarmayı ve sohbet dizini onarımını içerir. Önce hedef örneği kapatın.",
         "scopeTitle": "Oturum kapsamı",
         "scopeAll": "Tüm oturumlar",
         "scopeAllDesc": "Geçerli listedeki {{count}} oturumu onarır.",
@@ -3668,7 +3664,7 @@
         "previewFailedWithError": "Oturum onarımı önizlemesi başarısız: {{error}}",
         "confirmRepair": "Onarımı onayla",
         "title": "Geçmişi onar",
-        "description": "SQLite dizinlerinde, oturum kataloğunda ve çalışma alanlarında sağlayıcı bilgilerini düzenler. rollout dosyalarının özgün baytları korunur; yalnızca zaman damgaları düzeltilir. Önce yerel yedek oluşturulur.",
+        "description": "Hızlı onarım görünürlük dizinlerini ve güncel proje bağlantılarını düzeltir. Tam onarım eski kopyaları da kullanır ve sohbet dizinlerini onarır. Yazmadan önce yerel yedek oluşturulur; günlük içerikleri korunur.",
         "stopInstanceHint": "Tam onarımdan önce seçili Codex App/ChatGPT örneğini tamamen kapatın. Değişiklikleri yine de önce önizleyebilirsiniz.",
         "encryptedContentWarning": "Başka bir sağlayıcı veya hesap tarafından şifrelenmiş geçmiş algılandı. Meta veriler taşınabilir ancak bu oturumları sürdürme veya sıkıştırma başarısız olabilir; özgün sağlayıcıya/hesaba dönün ya da yeni oturum başlatın.",
         "modeHistory": "Düzenleme/dallanma",
@@ -3681,7 +3677,13 @@
         "historyFailed": "Geçmiş dizini onarımı tamamlanamadı: {{error}}",
         "historyChanged": "Onarım sırasında sohbet verileri değişti. Bu onarım uygulanmadı. Biraz sonra yeniden deneyin.",
         "historyScan": "Geçmiş dizinleri denetleniyor ({{current}}/{{total}})…",
-        "historyReset": "Geçersiz dizinler yedekleniyor ve sıfırlanıyor…"
+        "historyReset": "Geçersiz dizinler yedekleniyor ve sıfırlanıyor…",
+        "projectsChanged": "Proje verileri değişti. Önizlemeyi yenileyip tekrar deneyin.",
+        "projectsFailed": "Yerel projeler geri yüklenemedi: {{error}}",
+        "projectsPreview": "Önizleme: {{projects}} proje, {{assignments}} bağlantı; {{skipped}} proje ve {{ambiguous}} belirsiz sohbet atlandı.",
+        "projectsSuccess": "Geri yükleme tamamlandı: {{projects}} proje, {{assignments}} bağlantı; {{skipped}} proje ve {{ambiguous}} belirsiz sohbet atlandı.",
+        "projectsPending": "Önceki kurtarma kesildi. Yarım kalan yazmaları kurtarmak için örneği kapatıp tam onarımı çalıştırın.",
+        "projectsDeferred": "Bazı proje bilgileri ertelendi. Örneği kapatıp hızlı onarımı yeniden deneyin veya tam onarımı kullanın."
       },
       "importModal": {
         "title": "Oturumları içe aktar",
@@ -4105,7 +4107,9 @@
         "chatCompletions": "Chat Completions protokolü",
         "deepseekResponsesHint": "DeepSeek'i başlatıp ağ geçidini veya resmî doğrudan bağlantıyı seçin, ardından Flash veya Pro'yu seçin. Ağ geçidi modelleri Codex'te listeler; doğrudan bağlantı ağ geçidini atlar.",
         "deepseekChatHint": "DeepSeek Chat Completions, eski yollar için yerel ağ geçidi köprüsünü kullanır. Resmî Codex araç davranışına ihtiyacınız olduğunda Responses'ı seçin.",
-        "deepseekThirdPartyHint": "Bu adres resmi DeepSeek uç noktası olmadığı için üçüncü taraf uyumlu uç nokta olarak işlenir; model listesine üst kaynağın gerçek model kimliklerini yazın, resmi model adlarını kullanmayın."
+        "deepseekThirdPartyHint": "Bu adres resmi DeepSeek uç noktası olmadığı için üçüncü taraf uyumlu uç nokta olarak işlenir; model listesine üst kaynağın gerçek model kimliklerini yazın, resmi model adlarını kullanmayın.",
+        "anthropic": "Anthropic protokolü",
+        "gatewayRequired": "Bu protokol yerel ağ geçidi gerektirir. Başlangıç modelini buradan seçin."
       },
       "selectSavedProvider": "Kayıtlı sağlayıcılar",
       "selectSavedApiKey": "Kayıtlı API anahtarları",
@@ -4338,7 +4342,22 @@
       "importConfigPlaceholder": "Karttaki \"Yapılandırmayı kopyala\"yı kullanıp içeriği buraya yapıştırın",
       "importConfigAction": "Yapılandırmayı içe aktar",
       "importConfigFromClipboard": "Panoyu oku",
-      "settingsRestartHint": "Sağlayıcı ayarları güncellendi. Uygulamak için bu sağlayıcıyı kullanan çalışan Codex örneklerini veya API hizmetini yeniden başlatın."
+      "settingsRestartHint": "Sağlayıcı ayarları güncellendi. Uygulamak için bu sağlayıcıyı kullanan çalışan Codex örneklerini veya API hizmetini yeniden başlatın.",
+      "anthropic": {
+        "auth": "Kimlik doğrulama",
+        "hint": "Anthropic Messages ağ geçidine bağlanın. Modelleri alın veya elle girin.",
+        "fetch": "Modelleri al",
+        "fetching": "Alınıyor…",
+        "fetchFailed": "Modeller alınamadı. Yeniden deneyin veya model kimliklerini elle girin.",
+        "import": "Yapılandırma al",
+        "importFailed": "Geçerli bir Claude Code veya Desktop Gateway yapılandırması bulunamadı."
+      },
+      "editor": {
+        "modelScope": "Model kapsamı",
+        "providerDefault": "Sağlayıcı varsayılanı",
+        "sharedSettings": "Model listesi ve yetenekleri seçilen kapsama uygulanır. Protokol, kimlik doğrulama ve adres sağlayıcının ortak ayarlarıdır.",
+        "saveScope": "Kaydetme işlemi sağlayıcıyı ve bağlı hesapları günceller. Geçerli hesap etkilenirse yerel Codex ayarları ve kimlik bilgileri de güncellenir. İstemci otomatik başlatılmaz."
+      }
     },
     "quickSwitch": {
       "action": "Sağlayıcıyı hızlı değiştir",
@@ -5775,6 +5794,14 @@
       }
     },
     "requestDiagnostics": {
+      "requestSizeTitle": "İstek boyutu",
+      "requestSizeHint": "Sıkıştırması açılmış istemci JSON boyutu; alanlar sıkıştırılmış biçimli JSON baytlarıyla ölçülür. Yalnızca boyutlar kaydedilir.",
+      "requestBytes": "İstek",
+      "historyBytes": "Geçmiş",
+      "toolsBytes": "Araçlar",
+      "instructionsBytes": "Talimatlar",
+      "overloadRetry": "Yoğunluk denemeleri",
+      "overloadRecovery": "Kurtarma süresi",
       "recordPayloads": "İstek gövdelerini kaydet",
       "recordPayloadsHint": "Varsayılan olarak kapalıdır. İstemci ve sunucu isteklerinin sınırlı kopyaları yerel olarak saklanır. Kapatmak yeni kaydı durdurur; kayıtlı gövdeler ayrıca silinebilir.",
       "privacyHint": "Kimlik doğrulama alanları gizlenir, ancak konuşma metnindeki sırlar kalabilir. Kopyalamadan veya paylaşmadan önce kontrol edin.",
@@ -5956,6 +5983,21 @@
       "saveWithoutLaunch": "Kaydet ve devam et",
       "saveOnly": "Yalnızca kaydet",
       "validationBusy": "Önceki yolun denetimi hâlâ sürüyor. Lütfen biraz sonra yeniden deneyin."
+    },
+    "openaiUsage": {
+      "monthCost": "Aylık harcama",
+      "scope": "Kuruluş harcaması; istek ve token sayıları yalnızca metin API’lerini kapsar. UTC kullanılır.",
+      "loading": "OpenAI kullanımı sorgulanıyor…",
+      "pending": "OpenAI kullanımı bekleniyor",
+      "permissionRequired": "Bu anahtar kuruluş kullanımını okuma yetkisine sahip değil (api.usage.read).",
+      "permissionGuide": "Yönetici anahtarı kullanın: Admin keys → Restricted → Usage API Scope → Read. Harcama ve kullanım sorgulanabilir; kalan bakiye sağlanmaz.",
+      "openAdminKeys": "Kullanım izinleri",
+      "invalidKey": "Anahtar geçersiz veya süresi dolmuş. Mevcut API anahtarını kontrol edin.",
+      "networkFailed": "OpenAI kullanım hizmetine bağlanılamıyor. Daha sonra yenileyin.",
+      "queryFailed": "OpenAI kullanımı sorgulanamadı. Daha sonra tekrar deneyin."
+    },
+    "officialApi": {
+      "hint": "Gerçek bağlantı adresine göre tanımlanan resmî OpenAI API anahtarı hesabı."
     }
   },
   "githubCopilot": {
@@ -8028,7 +8070,7 @@
     "model": "Test modeli",
     "selectModel": "Model seç",
     "verifyHint": "Seçilen model yalnızca bağlantıyı test eder ve diğer kullanılabilir modelleri sınırlamaz. Doğrulama bir kısa istek gönderir ve abonelik kotanızın küçük bir bölümünü kullanır.",
-    "serviceHint": "Geçerli havuza ekleme API hizmetini başlatmaz. Bu sürüm yerel motor gerektirir.",
+    "serviceHint": "Geçerli havuza hesap eklemek API hizmetini başlatmaz.",
     "verify": "Yalnızca test et",
     "verifyAndJoin": "Test et ve ekle",
     "remove": "Hizmetten çıkar",
@@ -8088,8 +8130,6 @@
       "verify": "Model isteği tamamlanmadı. Doğrulamayı tekrarlayın.",
       "usage": "Plan veya uygulama kullanımı sınırlı. ChatGPT kullanım ayarlarını kontrol edin.",
       "usageUnavailable": "Resmî hizmet şu anda kullanımı doğrulayamıyor. Daha sonra deneyin; bu durum plan kotasının tükendiği anlamına gelmez.",
-      "native": "Plan erişimi yerel motor gerektirir. Önce API hizmetinden motoru değiştirin.",
-      "nativeSwitch": "Başka bir motora geçmeden önce plan hesaplarını API hizmetinden çıkarın.",
       "browser": "Tarayıcı açılamıyor. Giriş bağlantısını kopyalayıp elle açın.",
       "configuration": "Yetkilendirme kaydı eşleşmiyor. Girişi yeniden deneyin veya planı yeniden bağlayın.",
       "notVerified": "API hizmetine eklemeden önce bu planı doğrulayın.",
@@ -8269,7 +8309,6 @@
     "title": "Yetenek yedeği",
     "hint": "Bir hesap gereken yeteneği desteklemiyorsa mevcut model eşlemelerini kullanarak yedekleri bu sırayla deneyin.",
     "consent": "Geçiş bu konuşmayı yedek hesaba gönderir ve hesabın kotasını kullanır veya ilgili ücretlere yol açar.",
-    "nativeOnly": "Bu motor yetenek yedeğini çalıştırmaz. Açmak için yerel motora geçin; kayıtlı ayarlar kapatılabilir.",
     "backups": "Yedek hesaplar",
     "addBackup": "Yedek ekle",
     "backupEmpty": "Açmadan önce mevcut API hizmeti havuzundan yedek hesap seçin.",

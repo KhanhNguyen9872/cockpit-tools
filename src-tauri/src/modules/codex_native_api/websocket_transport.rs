@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use std::{collections::VecDeque, sync::Arc};
 use tokio_tungstenite::tungstenite::protocol::Message as UpstreamMessage;
 
-pub(super) type NativeSocket = tokio_tungstenite::WebSocketStream<reqwest::Upgraded>;
+pub(super) type NativeSocket = super::super::websocket_io::UpstreamSocket;
 pub(super) struct Transport {
     pub sink: Option<futures_util::stream::SplitSink<NativeSocket, UpstreamMessage>>,
     pub stream: BoxStream<'static, Result<UpstreamMessage, ServiceError>>,
@@ -96,8 +96,10 @@ pub(super) async fn open_with_retries(
                 let (sink, source) = socket.split();
                 let source = stream::iter(initial.into_iter().map(Ok))
                     .chain(source)
+                    .flat_map(|result| stream::iter(match result { Ok(message) => super::super::event_documents::websocket(message).into_iter().map(Ok).collect(), Err(error) => vec![Err(error)] }))
                     .map(|item| {
                         item.map_err(|error| {
+                            if matches!(error, tokio_tungstenite::tungstenite::Error::Capacity(_)) { return super::message_too_big_error("Decompressed upstream message exceeds its size limit"); }
                             super::super::diagnostics::transport_failure(
                                 502,
                                 "upstream_stream_error",
@@ -116,7 +118,10 @@ pub(super) async fn open_with_retries(
                     opening_retries,
                 });
             }
-            Err(error) if error.status == 426 && error.code == "websocket_upstream_rejected" => {
+            Err(error) if !prepared.continuation_recovered
+                && ((error.status == 426 && error.code == "websocket_upstream_rejected")
+                    || (error.code == "websocket_pool_unavailable"
+                        && prepared.source_body.get("previous_response_id").is_none_or(Value::is_null))) => {
                 tracker.attempt_error(&error);
             }
             Err(error) => return Err(error),

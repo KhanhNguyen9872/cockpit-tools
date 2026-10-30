@@ -2,15 +2,10 @@ import { useEffect, useMemo } from 'react';
 import { X, Sparkles, PartyPopper } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useEscClose } from '../hooks/useEscClose';
-import { prependUpdaterReleaseHighlights } from '../utils/updaterReleaseNotes';
+import { useRemoteReleaseNotes } from '../hooks/useRemoteReleaseData';
+import { RemoteReleaseStatus } from './RemoteReleaseStatus';
+import type { VersionJumpInfo } from '../types/updater';
 import './UpdateNotification.css';
-
-interface VersionJumpInfo {
-  previous_version: string;
-  current_version: string;
-  release_notes: string;
-  release_notes_zh: string;
-}
 
 interface VersionJumpNotificationProps {
   info: VersionJumpInfo;
@@ -22,6 +17,7 @@ export const VersionJumpNotification: React.FC<VersionJumpNotificationProps> = (
   onClose,
 }) => {
   const { t, i18n } = useTranslation();
+  const remoteNotes = useRemoteReleaseNotes(info.current_version);
 
   useEscClose(true, onClose);
 
@@ -43,15 +39,8 @@ export const VersionJumpNotification: React.FC<VersionJumpNotificationProps> = (
 
   const releaseNotes = useMemo(() => {
     const isZh = i18n.language.startsWith('zh');
-    const notes = isZh && info.release_notes_zh
-      ? info.release_notes_zh
-      : info.release_notes;
-    return prependUpdaterReleaseHighlights(
-      info.current_version,
-      notes,
-      i18n.language,
-    );
-  }, [info, i18n.language]);
+    return (isZh ? remoteNotes.data?.release_notes_zh : remoteNotes.data?.release_notes) || '';
+  }, [remoteNotes.data, i18n.language]);
 
   const formattedNotes = useMemo(() => {
     const formatStartedAt = performance.now();
@@ -117,6 +106,12 @@ export const VersionJumpNotification: React.FC<VersionJumpNotificationProps> = (
             })}
           </p>
 
+          <RemoteReleaseStatus
+            loading={remoteNotes.loading}
+            error={remoteNotes.error}
+            empty={!releaseNotes}
+            onRetry={remoteNotes.reload}
+          />
           {formattedNotes && (
             <div className="release-notes">
               <h3 className="release-notes-title">

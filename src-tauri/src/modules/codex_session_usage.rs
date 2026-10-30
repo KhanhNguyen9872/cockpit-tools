@@ -197,6 +197,7 @@ struct ReplayCaches {
 enum ParentResolution {
     None,
     Parent,
+    Continuation,
     Deferred,
 }
 
@@ -558,6 +559,25 @@ fn thread_id_from_filename(path: &Path) -> Option<String> {
         .map(|value| value.hyphenated().to_string())
 }
 
+// Continuation/branch rollouts are named `...-<root-uuid>_<leaf-uuid>.jsonl`, so the stem
+// carries two UUIDs joined by `_`. `thread_id_from_filename` returns the trailing leaf,
+// while `session_meta.id` is the root before `_`. Returns that root id so such files can be
+// treated as forks of the root (issue #2897), or None for a plain single-uuid rollout.
+fn continuation_root_thread_id(file_path: &Path) -> Option<String> {
+    const UUID_LEN: usize = 36;
+    let stem = file_path.file_stem()?.to_str()?;
+    let leaf_start = stem.len().checked_sub(UUID_LEN)?;
+    uuid::Uuid::parse_str(stem.get(leaf_start..)?).ok()?;
+    let sep = leaf_start.checked_sub(1)?;
+    if stem.get(sep..leaf_start)? != "_" {
+        return None;
+    }
+    let root_start = sep.checked_sub(UUID_LEN)?;
+    uuid::Uuid::parse_str(stem.get(root_start..sep)?)
+        .ok()
+        .map(|value| value.hyphenated().to_string())
+}
+
 type RolloutIndex = HashMap<String, Vec<PathBuf>>;
 
 fn build_rollout_index(files: &[PathBuf]) -> RolloutIndex {
@@ -759,6 +779,19 @@ fn sync_single_file(
                         pending_reason,
                     ));
                 }
+            }
+        }
+        ParentResolution::Continuation => {
+            // Continuation/branch rollout `...-<root-uuid>_<leaf-uuid>.jsonl`: the parent is
+            // only used to skip replayed context. If the root rollout is unavailable, count
+            // every event rather than dropping the file.
+            match (parsed.parent_id.as_deref(), parsed.root_timestamp) {
+                (Some(parent_id), Some(cutoff)) => {
+                    resolve_parent_signatures(parent_id, cutoff, rollout_index)
+                        .map(|signatures| matching_replay_prefix(&parsed.token_events, &signatures))
+                        .unwrap_or(0)
+                }
+                _ => 0,
             }
         }
     };
@@ -986,10 +1019,24 @@ fn parse_codex_file(
                 );
                 if let (Some(filename_id), Some(meta_id)) = (&root_thread_id, meta_thread_id) {
                     if filename_id != &meta_id {
-                        parent = ParentResolution::Deferred;
-                        deferred_reason = Some(format!(
-                            "文件名线程 ID ({filename_id}) 与 root meta ID ({meta_id}) 不一致"
-                        ));
+                        // The trailing leaf UUID (root_thread_id) differs from the meta id. For
+                        // the continuation/branch form `...-<root-uuid>_<leaf-uuid>.jsonl` the meta
+                        // id is the root before `_`; treat it as a fork of the root so replayed
+                        // parent context is skipped and only new turns are counted, instead of
+                        // dropping the whole rollout (issue #2897).
+                        let continuation_root = continuation_root_thread_id(file_path)
+                            .filter(|root_uuid| *root_uuid == meta_id);
+                        if let Some(root_uuid) = continuation_root {
+                            if matches!(parent, ParentResolution::None) {
+                                parent = ParentResolution::Continuation;
+                                parent_id = Some(root_uuid);
+                            }
+                        } else {
+                            parent = ParentResolution::Deferred;
+                            deferred_reason = Some(format!(
+                                "文件名线程 ID ({filename_id}) 与 root meta ID ({meta_id}) 不一致"
+                            ));
+                        }
                     }
                 }
             }
@@ -1927,6 +1974,118 @@ mod tests {
         assert_eq!(report.totals.request_count, 2);
         assert_eq!(report.by_model.len(), 1);
         assert_eq!(report.by_model[0].key, "gpt-5.4");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn continuation_rollout_is_counted_as_parent_fork_not_deferred() {
+        let dir = make_temp_dir("codex-usage-continuation");
+        let db_path = dir.join("usage.sqlite");
+        let home = dir.join("home");
+        let sessions = home.join("sessions").join("2026").join("07").join("10");
+        let parent = sessions.join(format!("rollout-2026-07-10T03-00-00-{PARENT_ID}.jsonl"));
+        // Continuation/branch form: the filename carries root UUID + `_` + leaf UUID while
+        // session_meta.id is the root. This used to be deferred and dropped entirely (#2897).
+        let child =
+            sessions.join(format!("rollout-2026-07-10T03-10-00-{PARENT_ID}_{CHILD_ID}.jsonl"));
+        write_jsonl(
+            &parent,
+            &[
+                session_meta(PARENT_ID),
+                turn_context("gpt-5.4"),
+                token_count_with_last(1_000, 0, 20, 1_000, 0, 20, "codex", "2026-07-10T03:00:02Z"),
+            ],
+        );
+        write_jsonl(
+            &child,
+            &[
+                session_meta_at(PARENT_ID, None, "2026-07-10T03:10:00Z"),
+                turn_context("gpt-5.4"),
+                // replayed parent context: identical snapshot to the parent's only event
+                token_count_with_last(1_000, 0, 20, 1_000, 0, 20, "codex", "2026-07-10T03:00:02Z"),
+                // new usage after the branch point
+                token_count_with_last(1_400, 0, 35, 400, 0, 15, "codex", "2026-07-10T03:10:05Z"),
+            ],
+        );
+
+        let store = SessionUsageStore::open_path(db_path);
+        let instances = vec![UsageInstance {
+            id: DEFAULT_INSTANCE_ID.to_string(),
+            name: DEFAULT_INSTANCE_NAME.to_string(),
+            data_dir: home,
+        }];
+        let sync = store.sync(false, &instances).unwrap();
+        // The parent turn and the continuation's new turn are imported; the replayed parent
+        // context inside the continuation is skipped, so nothing is double counted.
+        assert_eq!(sync.imported, 2);
+        let report = store.query(&CodexSessionUsageQuery::default()).unwrap();
+        assert_eq!(report.totals.input_tokens, 1_400);
+        assert_eq!(report.totals.output_tokens, 35);
+        assert_eq!(report.totals.request_count, 2);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn continuation_rollout_counts_fully_when_root_missing() {
+        let dir = make_temp_dir("codex-usage-continuation-orphan");
+        let db_path = dir.join("usage.sqlite");
+        let home = dir.join("home");
+        let sessions = home.join("sessions").join("2026").join("07").join("10");
+        // Only the continuation exists; the root rollout is absent, so there is nothing to
+        // dedup against and the turn must still be counted (not dropped).
+        let child =
+            sessions.join(format!("rollout-2026-07-10T03-10-00-{PARENT_ID}_{CHILD_ID}.jsonl"));
+        write_jsonl(
+            &child,
+            &[
+                session_meta_at(PARENT_ID, None, "2026-07-10T03:10:00Z"),
+                turn_context("gpt-5.4"),
+                token_count_with_last(1_400, 0, 35, 400, 0, 15, "codex", "2026-07-10T03:10:05Z"),
+            ],
+        );
+
+        let store = SessionUsageStore::open_path(db_path);
+        let instances = vec![UsageInstance {
+            id: DEFAULT_INSTANCE_ID.to_string(),
+            name: DEFAULT_INSTANCE_NAME.to_string(),
+            data_dir: home,
+        }];
+        let sync = store.sync(false, &instances).unwrap();
+        assert_eq!(sync.imported, 1);
+        let report = store.query(&CodexSessionUsageQuery::default()).unwrap();
+        assert_eq!(report.totals.input_tokens, 400);
+        assert_eq!(report.totals.request_count, 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn genuine_filename_meta_mismatch_is_still_deferred() {
+        let dir = make_temp_dir("codex-usage-mismatch");
+        let db_path = dir.join("usage.sqlite");
+        let home = dir.join("home");
+        let sessions = home.join("sessions").join("2026").join("07").join("10");
+        // Single-UUID filename whose id disagrees with session_meta.id and is not a
+        // root_leaf continuation: still treated as corrupt and dropped.
+        let file = sessions.join(format!("rollout-2026-07-10T03-00-00-{PARENT_ID}.jsonl"));
+        write_jsonl(
+            &file,
+            &[
+                session_meta(CHILD_ID),
+                turn_context("gpt-5.4"),
+                token_count_with_last(1_400, 0, 35, 400, 0, 15, "codex", "2026-07-10T03:00:02Z"),
+            ],
+        );
+
+        let store = SessionUsageStore::open_path(db_path);
+        let instances = vec![UsageInstance {
+            id: DEFAULT_INSTANCE_ID.to_string(),
+            name: DEFAULT_INSTANCE_NAME.to_string(),
+            data_dir: home,
+        }];
+        let sync = store.sync(false, &instances).unwrap();
+        assert_eq!(sync.imported, 0);
+        let report = store.query(&CodexSessionUsageQuery::default()).unwrap();
+        assert_eq!(report.totals.request_count, 0);
         fs::remove_dir_all(&dir).ok();
     }
 

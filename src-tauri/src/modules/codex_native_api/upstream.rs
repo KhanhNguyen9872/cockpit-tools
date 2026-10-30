@@ -27,16 +27,18 @@ pub(super) async fn canonical_stream(
     plan_tools_context: Option<super::chatgpt_plan_tools::Context>,
     multi_agent_context: super::multi_agent_compat::Context,
     request_body: &Value,
+    anthropic_search_scope: Option<String>,
     idle_timeout: Duration,
 ) -> Result<CanonicalStream, ServiceError> {
     let chat = route.wire_api == WireApi::Chat && !compact;
+    let anthropic = route.wire_api == WireApi::Anthropic;
     let chat_context = if chat {
         super::chat_upstream::ToolContext::from_responses(request_body)
     } else {
         super::chat_upstream::ToolContext::default()
     };
     let convert = response.status().is_success()
-        && (chat
+        && (chat || anthropic
             || grok_context.is_some()
             || plan_tools_context.is_some()
             || multi_agent_context.is_active());
@@ -91,7 +93,9 @@ pub(super) async fn canonical_stream(
             )
         })?;
         multi_agent_context.restore(&mut value);
-        let mut canonical = if chat {
+        let mut canonical = if anthropic {
+            super::anthropic::messages_to_response(&value, &route.model, request_body)?
+        } else if chat {
             super::chat_upstream::chat_to_response_with_context(
                 &value,
                 &route.model,
@@ -119,6 +123,15 @@ pub(super) async fn canonical_stream(
         // Adapters can restore echoed tool declarations from their own wire
         // context. Keep the client-facing namespace canonical there as well.
         multi_agent_context.restore(&mut canonical);
+        if anthropic {state.anthropic_search.record(anthropic_search_scope.as_deref(),&canonical);}
+        if anthropic && (compact || super::anthropic_compact::triggered(request_body)) {
+            canonical = super::anthropic_compact::finish(canonical, &route.model)?;
+            if !compact {
+                let events=super::anthropic_compact::events(canonical,&route.model)?;
+                let data:String=events.iter().map(|event|format!("event: {}\ndata: {event}\n\n",event["type"].as_str().unwrap())).collect();
+                return Ok(CanonicalStream{is_sse:true,bytes:stream::once(async move{Ok(Bytes::from(data))}).boxed()});
+            }
+        }
         if !compact
             && super::grok_errors::applies(route)
             && super::grok_wire::compaction::triggered(request_body)
@@ -145,7 +158,9 @@ pub(super) async fn canonical_stream(
     }
     let mut state = ChatStream::new(
         upstream,
-        if chat {
+        if anthropic {
+            Transform::Anthropic(super::anthropic::ResponsesStreamAdapter::new(route.model.clone(), request_body)?.with_search_cache(state.anthropic_search.clone(),anthropic_search_scope))
+        } else if chat {
             Transform::Chat(super::chat_upstream::ResponsesStreamAdapter::with_context(
                 route.model.clone(),
                 chat_context,
@@ -157,7 +172,7 @@ pub(super) async fn canonical_stream(
         } else {
             Transform::Responses
         },
-        if route.wire_api == super::contract::WireApi::Chat && !route.chatgpt {
+        if route.wire_api != super::contract::WireApi::Responses && !route.chatgpt {
             state.options.max_provider_event_bytes
         } else {
             state.options.max_event_bytes
@@ -296,6 +311,7 @@ pub(super) async fn raw_stream(
     response: reqwest::Response,
     idle_timeout: Duration,
 ) -> Result<CanonicalStream, ServiceError> {
+    let response = super::http_compression::decode_response(response)?;
     let mut is_sse = response
         .headers()
         .get(header::CONTENT_TYPE)
@@ -426,6 +442,7 @@ impl ChatStream {
 
 enum Transform {
     Responses,
+    Anthropic(super::anthropic::ResponsesStreamAdapter),
     Chat(super::chat_upstream::ResponsesStreamAdapter),
     Grok(super::grok_wire::Context),
     Plan(super::chatgpt_plan_tools::Context),
@@ -434,6 +451,7 @@ impl Transform {
     fn push(&mut self, value: &Value) -> Result<Vec<Value>, ServiceError> {
         match self {
             Self::Responses => Ok(vec![value.clone()]),
+            Self::Anthropic(adapter) => adapter.push(value),
             Self::Chat(adapter) => adapter.push(value),
             Self::Grok(context) => super::grok_wire::restore_event(context, value.clone()),
             Self::Plan(context) => super::chatgpt_plan_tools::restore_event(context, value.clone()),
@@ -442,12 +460,14 @@ impl Transform {
     fn finish(&mut self) -> Result<Vec<Value>, ServiceError> {
         match self {
             Self::Chat(adapter) => adapter.finish(),
+            Self::Anthropic(adapter) => adapter.finish(),
             Self::Grok(_) | Self::Plan(_) | Self::Responses => Ok(Vec::new()),
         }
     }
     fn finish_done(&mut self) -> Result<Vec<Value>, ServiceError> {
         match self {
             Self::Chat(adapter) => adapter.finish_done(),
+            Self::Anthropic(adapter) => adapter.finish(),
             Self::Grok(_) | Self::Plan(_) | Self::Responses => Ok(Vec::new()),
         }
     }

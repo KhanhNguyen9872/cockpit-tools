@@ -28,7 +28,8 @@ fn go_claude_stop_reasons_cache_creation_and_content_reasoning_are_preserved() {
         assert_eq!(value["stop_sequence"], sequence);
         assert_eq!(value["content"][0]["thinking"], "plan");
         assert_eq!(value["content"][0]["signature"], "preserved-cipher");
-        assert_eq!(value["usage"]["input_tokens"], 10);
+        // Cache reads and writes are separate Claude counters.
+        assert_eq!(value["usage"]["input_tokens"], 3);
         assert_eq!(value["usage"]["cache_creation_input_tokens"], 7);
         let mut stream = CompatStreamAdapter::new(context(CompatFlavor::Claude));
         let frames = stream
@@ -41,6 +42,7 @@ fn go_claude_stop_reasons_cache_creation_and_content_reasoning_are_preserved() {
         assert_eq!(delta.data["delta"]["stop_reason"], expected);
         assert_eq!(delta.data["delta"]["stop_sequence"], sequence);
         assert_eq!(delta.data["usage"]["cache_creation_input_tokens"], 7);
+        assert_eq!(delta.data["usage"]["input_tokens"], 3);
     }
 }
 

@@ -44,6 +44,7 @@ export type CodexModelRoutingAccount = {
   api_provider_name?: string | null;
   api_model_catalog?: string[] | null;
   api_wire_api?: string | null;
+  api_auth_scheme?: "x-api-key" | "bearer" | null;
 };
 
 const PINYIN_TABLE: Record<string, string> = {
@@ -624,7 +625,11 @@ export function CodexModelRoutingEditor({
     const isCurrentRequest = () =>
       !disabledRef.current && fetchRevisionRef.current === requestRevision;
     try {
-      const result = await listModelProviderModels({ baseUrl, apiKey });
+      const result = await listModelProviderModels({
+        baseUrl, apiKey,
+        wireApi: account.api_wire_api ?? undefined,
+        authScheme: account.api_auth_scheme ?? undefined,
+      });
       if (!isCurrentRequest()) return;
       const models = Array.from(
         new Set(

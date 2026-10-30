@@ -1660,13 +1660,20 @@
       "center": "Giữa",
       "top": "Trên",
       "bottom": "Dưới",
-      "localHint": "Thay đổi có hiệu lực ngay và tự động lưu trên thiết bị này. Ảnh không được tải lên. Khôi phục sẽ xóa ảnh đã lưu.",
+      "localHint": "Thay đổi có hiệu lực ngay. Ảnh và thiết lập của mỗi giao diện được lưu riêng trên thiết bị này; ảnh không được tải lên. Khôi phục mặc định vẫn giữ các giao diện của bạn.",
       "restore": "Khôi phục",
       "imageType": "Hãy chọn ảnh JPG, PNG hoặc WebP.",
       "imageSize": "Hãy chọn ảnh nhỏ hơn 10 MB.",
       "imageRead": "Không đọc được ảnh. Hãy thử tệp khác.",
       "storage": "Không tải hoặc lưu được nền. Hãy thử lại; nền đã lưu vẫn được giữ.",
-      "saveFailed": "Nền đang hiển thị nhưng chưa lưu được. Hãy thử lại; nền đã lưu trước đó vẫn được giữ."
+      "saveFailed": "Thay đổi đang hiển thị nhưng chưa lưu được. Hãy thử lại; các giao diện đã lưu trước đó vẫn được giữ lại.",
+      "builtInSkins": "Giao diện có sẵn",
+      "mySkins": "Giao diện của tôi",
+      "addSkin": "Thêm",
+      "rename": "Đổi tên",
+      "skinName": "Tên giao diện",
+      "manageSkin": "Quản lý giao diện: {{name}}",
+      "deleteSkinConfirm": "Xóa “{{name}}”? Xóa giao diện đang dùng sẽ khôi phục nền mặc định."
     }
   },
   "appPath": {
@@ -2398,7 +2405,7 @@
       "check": "Kiểm tra",
       "notRunning": "Chưa phát hiện phiên bản đích. Hãy kiểm tra lại sau hoặc đóng hộp thoại này trước khi thử khởi chạy lại.",
       "checkFailed": "Không thể đọc trạng thái hoạt động. Vui lòng kiểm tra lại sau.",
-      "maintenanceDeferred": "Tạm thời không thể kiểm tra phiên. Lịch sử được giữ nguyên và bước bảo trì này đã được bỏ qua."
+      "maintenanceDeferred": "Một số tác vụ bảo trì chưa hoàn tất. Lịch sử được giữ nguyên; có thể thử lại trong quản lý phiên."
     },
     "launchErrors": {
       "sessionRestoreFailed": "Sửa phiên thất bại và khôi phục bản sao lưu chưa hoàn tất. Đã dừng khởi chạy; hãy kiểm tra nhật ký và bản sao lưu trước khi thử lại.",
@@ -2968,7 +2975,6 @@
         "quotaReserveInvalid": "Nhập số nguyên từ 1 đến 100.",
         "strictReserve": "Bảo vệ nghiêm ngặt",
         "strictReserveDesc": "Hạn mức dự trữ tự động được bảo vệ bằng biên an toàn. Gần ngưỡng, mỗi tài khoản chỉ gửi một yêu cầu rồi xác nhận hạn mức mới sau khi hoàn tất. Việc sử dụng của ứng dụng khác không bị giới hạn.",
-        "strictNativeOnly": "Bảo vệ nghiêm ngặt cần bộ máy Rust. Hãy tắt trước khi chuyển sang Go.",
         "safetyMargin": "Biên an toàn",
         "safetyMarginUnit": "điểm phần trăm",
         "safetyMarginInvalid": "Nhập số nguyên từ 1 đến 20.",
@@ -3051,17 +3057,7 @@
       "gatewayModeNewLabel": "Dich vu API-Moi",
       "gatewayModeOldLabel": "Dich vu API-Cu",
       "gatewayModeSaveSuccess": "Da cap nhat che do cong cua dich vu API",
-      "gatewayEngineNative": "Rust gốc",
-      "gatewayEngineSidecar": "Go (hiện tại)",
-      "gatewayEngineHint": "Rust là bộ máy mặc định. Lần nâng cấp đầu tiên sẽ chuyển sang Rust; các lựa chọn sau đó được giữ lại. Chuyển đổi sẽ khởi động lại dịch vụ API và có thể ngắt yêu cầu đang chạy; cửa sổ Codex vẫn mở.",
-      "gatewayEngineSwitching": "Đang chuyển bộ máy…",
-      "gatewayEngineSwitchFailed": "Không thể chuyển bộ máy: {{error}}",
-      "gatewayEngineReadbackFailed": "Chưa xác nhận được bộ máy hiện tại. Hãy làm mới trước khi thử lại: {{error}}",
-      "gatewayEngineReadbackTimeout": "Làm mới trạng thái đã hết thời gian",
       "gatewayEngineRequestsBusy": "Vẫn có yêu cầu đang chạy. Hãy thử lại sau khi hoàn tất.",
-      "gatewayEngineOperationBusy": "Dịch vụ đang thực hiện thao tác khác. Hãy thử lại sau ít phút.",
-      "gatewayEngineSwitchRestored": "Chuyển đổi thất bại. Đã khôi phục bộ máy trước đó.",
-      "gatewayEngineRestoreFailed": "Chuyển đổi thất bại và không thể khôi phục bộ máy trước đó. Hãy kiểm tra trạng thái dịch vụ trước khi thử lại.",
       "gatewayEngineStopped": "Dịch vụ API đã dừng. Hãy khởi động lại trước khi thử lại.",
       "gatewayGuideTitle": "Đổi cổng tại đây",
       "gatewayGuideDesc": "Mặc định dùng cổng mới. Nếu gặp vấn đề tương thích hoặc lỗi yêu cầu từ client, bạn có thể chuyển về cổng cũ tại đây.",
@@ -3634,9 +3630,9 @@
         "providerLoadFailed": "Không tải được provider: {{error}}",
         "modeTitle": "Chế độ sửa",
         "modeQuick": "Sửa nhanh",
-        "modeQuickDesc": "Chuẩn hóa nhà cung cấp trong cơ sở dữ liệu chính thức và chỉ mục phiên. Giữ nguyên tệp rollout. Phù hợp khi đổi tài khoản thông thường.",
+        "modeQuickDesc": "Sửa chỉ mục và liên kết hiện tại trong thời gian ngắn. Thoát phiên bản đích để ghi siêu dữ liệu dự án.",
         "modeDeep": "Sửa đầy đủ",
-        "modeDeepDesc": "Sửa nhà cung cấp cũ, danh mục, không gian làm việc và chỉ mục tác nhân con. Giữ nguyên tệp rollout. Hãy đóng phiên bản đích trước.",
+        "modeDeepDesc": "Gồm sửa nhanh, khôi phục dự án từ bản lưu và sửa chỉ mục hội thoại. Thoát phiên bản đích trước khi áp dụng.",
         "scopeTitle": "Phạm vi phiên",
         "scopeAll": "Tất cả phiên",
         "scopeAllDesc": "Sửa {{count}} phiên trong danh sách hiện tại.",
@@ -3668,7 +3664,7 @@
         "previewFailedWithError": "Xem trước sửa phiên thất bại: {{error}}",
         "confirmRepair": "Xác nhận sửa",
         "title": "Sửa lịch sử",
-        "description": "Chuẩn hóa nhà cung cấp trong chỉ mục SQLite, danh mục phiên và không gian làm việc. Giữ nguyên từng byte của tệp rollout; chỉ sửa thời gian tệp. Tạo bản sao lưu cục bộ trước khi sửa.",
+        "description": "Sửa nhanh khôi phục chỉ mục hiển thị và liên kết dự án hiện tại. Sửa đầy đủ còn dùng bản lưu cũ và sửa chỉ mục hội thoại. Tạo bản sao cục bộ trước khi ghi và giữ nguyên nội dung nhật ký.",
         "stopInstanceHint": "Hãy thoát hoàn toàn phiên bản Codex App/ChatGPT đã chọn trước khi sửa đầy đủ. Bạn vẫn có thể xem trước thay đổi.",
         "encryptedContentWarning": "Đã phát hiện lịch sử được mã hóa bởi nhà cung cấp hoặc tài khoản khác. Có thể di chuyển siêu dữ liệu, nhưng việc tiếp tục hoặc nén các phiên đó vẫn có thể thất bại; hãy quay lại nhà cung cấp/tài khoản gốc hoặc mở phiên mới.",
         "modeHistory": "Sửa chỉnh sửa/nhánh",
@@ -3681,7 +3677,13 @@
         "historyFailed": "Chưa hoàn tất sửa chỉ mục lịch sử: {{error}}",
         "historyChanged": "Dữ liệu trò chuyện đã thay đổi trong lúc sửa. Lần sửa này chưa được áp dụng. Hãy thử lại sau ít phút.",
         "historyScan": "Đang kiểm tra chỉ mục lịch sử ({{current}}/{{total}})…",
-        "historyReset": "Đang sao lưu và đặt lại chỉ mục bị lỗi…"
+        "historyReset": "Đang sao lưu và đặt lại chỉ mục bị lỗi…",
+        "projectsChanged": "Dữ liệu dự án đã thay đổi. Hãy xem trước lại rồi thử lại.",
+        "projectsFailed": "Không thể khôi phục dự án cục bộ: {{error}}",
+        "projectsPreview": "Xem trước: {{projects}} dự án, {{assignments}} liên kết; bỏ qua {{skipped}} dự án và {{ambiguous}} hội thoại không rõ liên kết.",
+        "projectsSuccess": "Đã khôi phục: {{projects}} dự án, {{assignments}} liên kết; bỏ qua {{skipped}} dự án và {{ambiguous}} hội thoại không rõ liên kết.",
+        "projectsPending": "Lần khôi phục trước bị gián đoạn. Thoát phiên bản đích và chạy sửa đầy đủ để khôi phục các thao tác ghi chưa hoàn tất.",
+        "projectsDeferred": "Một số siêu dữ liệu đã được hoãn. Thoát phiên bản đích rồi thử sửa nhanh lại hoặc dùng sửa đầy đủ."
       },
       "importModal": {
         "title": "Nhập phiên",
@@ -4105,7 +4107,9 @@
         "chatCompletions": "Giao thức Chat Completions",
         "deepseekResponsesHint": "Khởi động DeepSeek để chọn cổng kết nối hoặc kết nối trực tiếp chính thức, sau đó chọn Flash hoặc Pro. Cổng kết nối liệt kê mô hình trong Codex; kết nối trực tiếp bỏ qua cổng.",
         "deepseekChatHint": "DeepSeek Chat Completions dùng cầu cổng cục bộ cho các đường dẫn cũ. Chọn Responses khi bạn cần hành vi công cụ chính thức của Codex.",
-        "deepseekThirdPartyHint": "Địa chỉ này không phải điểm cuối DeepSeek chính thức nên sẽ được xử lý như điểm cuối tương thích của bên thứ ba; hãy nhập ID mô hình thật từ upstream thay vì tên mô hình chính thức."
+        "deepseekThirdPartyHint": "Địa chỉ này không phải điểm cuối DeepSeek chính thức nên sẽ được xử lý như điểm cuối tương thích của bên thứ ba; hãy nhập ID mô hình thật từ upstream thay vì tên mô hình chính thức.",
+        "anthropic": "Giao thức Anthropic",
+        "gatewayRequired": "Giao thức này cần cổng cục bộ. Chọn mô hình khởi chạy tại đây."
       },
       "selectSavedProvider": "Nhà cung cấp đã lưu",
       "selectSavedApiKey": "API Key đã lưu",
@@ -4338,7 +4342,22 @@
       "importConfigPlaceholder": "Dùng Sao chép cấu hình trên thẻ rồi dán nội dung vào đây",
       "importConfigAction": "Nhập cấu hình",
       "importConfigFromClipboard": "Đọc clipboard",
-      "settingsRestartHint": "Đã cập nhật cài đặt nhà cung cấp. Hãy khởi động lại phiên Codex hoặc dịch vụ API đang dùng nhà cung cấp này để áp dụng."
+      "settingsRestartHint": "Đã cập nhật cài đặt nhà cung cấp. Hãy khởi động lại phiên Codex hoặc dịch vụ API đang dùng nhà cung cấp này để áp dụng.",
+      "anthropic": {
+        "auth": "Xác thực",
+        "hint": "Kết nối cổng Anthropic Messages. Lấy danh sách hoặc nhập mô hình thủ công.",
+        "fetch": "Lấy mô hình",
+        "fetching": "Đang lấy…",
+        "fetchFailed": "Không lấy được mô hình. Hãy thử lại hoặc nhập mã mô hình thủ công.",
+        "import": "Nhập cấu hình",
+        "importFailed": "Không tìm thấy cấu hình Claude Code hoặc Desktop Gateway hợp lệ."
+      },
+      "editor": {
+        "modelScope": "Phạm vi mô hình",
+        "providerDefault": "Mặc định nhà cung cấp",
+        "sharedSettings": "Danh sách và khả năng của mô hình áp dụng cho phạm vi đã chọn. Giao thức, xác thực và địa chỉ là cài đặt chung của nhà cung cấp.",
+        "saveScope": "Lưu sẽ cập nhật nhà cung cấp và các tài khoản liên kết. Nếu tài khoản hiện tại bị ảnh hưởng, cấu hình và thông tin xác thực Codex cục bộ cũng được cập nhật. Ứng dụng khách không tự khởi chạy."
+      }
     },
     "quickSwitch": {
       "action": "Chuyển nhanh nhà cung cấp",
@@ -5775,6 +5794,14 @@
       }
     },
     "requestDiagnostics": {
+      "requestSizeTitle": "Kích thước yêu cầu",
+      "requestSizeHint": "Kích thước JSON máy khách sau giải nén; các trường tính bằng byte JSON thu gọn. Chỉ ghi kích thước.",
+      "requestBytes": "Yêu cầu",
+      "historyBytes": "Lịch sử",
+      "toolsBytes": "Công cụ",
+      "instructionsBytes": "Chỉ dẫn",
+      "overloadRetry": "Thử lại khi quá tải",
+      "overloadRecovery": "Thời gian khôi phục",
       "recordPayloads": "Ghi nội dung yêu cầu",
       "recordPayloadsHint": "Mặc định tắt. Lưu cục bộ bản chụp có giới hạn của yêu cầu từ máy khách và gửi lên máy chủ. Tắt sẽ ngừng ghi mới; nội dung đã lưu có thể xóa riêng.",
       "privacyHint": "Các trường xác thực được che, nhưng bí mật trong hội thoại có thể vẫn còn. Kiểm tra trước khi sao chép hoặc chia sẻ.",
@@ -5956,6 +5983,21 @@
       "saveWithoutLaunch": "Lưu và tiếp tục",
       "saveOnly": "Chỉ lưu cài đặt",
       "validationBusy": "Đường dẫn trước vẫn đang được kiểm tra. Vui lòng thử lại sau giây lát."
+    },
+    "openaiUsage": {
+      "monthCost": "Chi phí tháng",
+      "scope": "Chi phí tổ chức; yêu cầu và token chỉ gồm API văn bản. Thống kê theo UTC.",
+      "loading": "Đang tải mức dùng OpenAI…",
+      "pending": "Đang chờ mức dùng OpenAI",
+      "permissionRequired": "Khóa này không có quyền đọc mức dùng của tổ chức (api.usage.read).",
+      "permissionGuide": "Dùng khóa quản trị: Admin keys → Restricted → Usage API Scope → Read. Truy vấn chi phí và mức dùng, không cung cấp số dư còn lại.",
+      "openAdminKeys": "Quyền xem mức dùng",
+      "invalidKey": "Khóa không hợp lệ hoặc đã hết hạn. Kiểm tra khóa API hiện tại.",
+      "networkFailed": "Không thể kết nối dịch vụ mức dùng OpenAI. Hãy làm mới sau.",
+      "queryFailed": "Không truy vấn được mức dùng OpenAI. Hãy thử lại sau."
+    },
+    "officialApi": {
+      "hint": "Tài khoản dùng khóa API chính thức của OpenAI, được xác định theo địa chỉ kết nối thực tế."
     }
   },
   "githubCopilot": {
@@ -8028,7 +8070,7 @@
     "model": "Mô hình kiểm tra",
     "selectModel": "Chọn mô hình",
     "verifyHint": "Mô hình được chọn chỉ dùng để thử kết nối, không giới hạn các mô hình khác có thể sử dụng. Việc xác minh gửi một yêu cầu ngắn và tiêu tốn một ít hạn mức gói.",
-    "serviceHint": "Thêm vào nhóm hiện tại không khởi động dịch vụ API. Phiên bản này yêu cầu bộ máy gốc.",
+    "serviceHint": "Thêm tài khoản vào nhóm hiện tại không khởi động dịch vụ API.",
     "verify": "Chỉ kiểm tra",
     "verifyAndJoin": "Kiểm tra và thêm",
     "remove": "Gỡ khỏi dịch vụ",
@@ -8088,8 +8130,6 @@
       "verify": "Yêu cầu đến mô hình chưa hoàn tất. Hãy kiểm tra lại.",
       "usage": "Mức dùng của gói hoặc ứng dụng bị giới hạn. Kiểm tra mức dùng trong cài đặt ChatGPT.",
       "usageUnavailable": "Dịch vụ chính thức tạm thời không thể xác nhận mức dùng. Hãy thử lại sau; điều này không có nghĩa hạn mức gói đã hết.",
-      "native": "Quyền truy cập gói yêu cầu bộ máy gốc. Hãy chuyển bộ máy trong dịch vụ API trước.",
-      "nativeSwitch": "Gỡ tài khoản dùng gói khỏi dịch vụ API trước khi chuyển sang bộ máy khác.",
       "browser": "Không thể mở trình duyệt. Sao chép liên kết đăng nhập rồi mở thủ công.",
       "configuration": "Thông tin đăng ký cấp quyền không khớp. Hãy đăng nhập lại hoặc kết nối lại gói.",
       "notVerified": "Hãy xác minh gói trước khi thêm vào dịch vụ API.",
@@ -8269,7 +8309,6 @@
     "title": "Dự phòng tính năng",
     "hint": "Khi tài khoản không hỗ trợ tính năng cần thiết, thử tài khoản dự phòng theo thứ tự này với ánh xạ mô hình hiện có.",
     "consent": "Chuyển đổi sẽ gửi cuộc trò chuyện này đến tài khoản dự phòng và dùng hạn mức hoặc phát sinh phí tương ứng.",
-    "nativeOnly": "Bộ máy này không thực hiện dự phòng tính năng. Chuyển sang bộ máy gốc để bật; vẫn có thể tắt cấu hình đã lưu.",
     "backups": "Tài khoản dự phòng",
     "addBackup": "Thêm dự phòng",
     "backupEmpty": "Chọn tài khoản dự phòng từ nhóm dịch vụ API hiện tại trước khi bật.",

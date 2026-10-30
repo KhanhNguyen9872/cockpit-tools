@@ -143,6 +143,16 @@ test("DeepSeek Chat Completions accounts can query usage", () => {
   );
 });
 
+test("APIKEY.FUN Anthropic accounts can query and display usage", () => {
+  const relay = account({ auth_mode: "apikey", api_base_url: "https://api.apikey.fan", api_wire_api: "anthropic", openai_api_key: "test" });
+  assert.equal(isCodexApiKeyUsageQueryEligible(relay), true);
+  assert.equal(shouldShowCodexApiKeyUsagePanel(relay), true);
+  assert.equal(shouldShowCodexApiKeyUsagePanel(relay, true), false);
+  const other = { ...relay, api_base_url: "https://other.example" };
+  assert.equal(isCodexApiKeyUsageQueryEligible(other), false);
+  assert.equal(shouldShowCodexApiKeyUsagePanel(other), false);
+});
+
 test("DeepSeek Responses accounts can query usage", () => {
   assert.equal(
     isCodexApiKeyUsageQueryEligible(account({

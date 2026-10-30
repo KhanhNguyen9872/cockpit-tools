@@ -13,7 +13,10 @@ pub(super) fn input(value: Option<&Value>) -> Result<Option<String>, ServiceErro
     let payload = if let Some((prefix, rest)) = raw.split_once('#') {
         match prefix.to_ascii_lowercase().as_str() {
             "gpt" | "openai" | "codex" => rest,
-            "claude" | "anthropic" | "gemini" | "google" | "cais" | "claude-cais"
+            // Service-issued Claude envelopes retain their provider identity.
+            // The shared ownership gate still runs before route selection.
+            "claude" | "claude-redacted" => raw,
+            "anthropic" | "gemini" | "google" | "cais" | "claude-cais"
             | "claude_cais" | "ccmax" | "claude-code-max" | "claude_code_max" => {
                 return Err(unsupported("thinking.signature provider"));
             }

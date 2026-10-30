@@ -274,17 +274,20 @@ mod request_diagnostics_tests {
         detail.payloads.clear();
         detail.attempts[0].transport_error = Some("tls_decrypt".into());
         detail.attempts[0].transport_pool_retired = Some(true);
+        detail.attempts[0].transport_http1_fallback = Some(true);
         detail.attempts[0].upstream_http_version = Some("HTTP/2.0".into());
         insert_request_diagnostic(&conn, detail.clone()).unwrap();
         detail.captured_at_ms += 1;
         detail.attempts[0].transport_error = None;
         detail.attempts[0].transport_pool_retired = None;
+        detail.attempts[0].transport_http1_fallback = None;
         detail.attempts[0].upstream_http_version = None;
         insert_request_diagnostic(&conn, detail.clone()).unwrap();
         let stored = read_request_diagnostic(&conn, "tls-recovery").unwrap().unwrap();
         assert!(stored.payloads.is_empty());
         assert_eq!(stored.attempts[0].transport_error.as_deref(), Some("tls_decrypt"));
         assert_eq!(stored.attempts[0].transport_pool_retired, Some(true));
+        assert_eq!(stored.attempts[0].transport_http1_fallback, Some(true));
         assert_eq!(stored.attempts[0].upstream_http_version.as_deref(), Some("HTTP/2.0"));
         detail.captured_at_ms += 1;
         detail.attempts[0].account_id = "different-account".into();
@@ -292,6 +295,7 @@ mod request_diagnostics_tests {
         let stored = read_request_diagnostic(&conn, "tls-recovery").unwrap().unwrap();
         assert!(stored.attempts[0].transport_error.is_none());
         assert!(stored.attempts[0].transport_pool_retired.is_none());
+        assert!(stored.attempts[0].transport_http1_fallback.is_none());
         assert!(stored.attempts[0].upstream_http_version.is_none());
     }
 

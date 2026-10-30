@@ -1880,13 +1880,20 @@
       "center": "Center",
       "top": "Top",
       "bottom": "Bottom",
-      "localHint": "Changes apply immediately and save automatically on this device. Images are not uploaded. Restore default removes the saved image.",
+      "localHint": "Changes apply immediately. Each skin’s image and settings are saved separately on this device; images are never uploaded. Restoring defaults keeps your skins.",
       "restore": "Restore default",
       "imageType": "Choose a JPG, PNG or WebP image.",
       "imageSize": "Choose an image smaller than 10 MB.",
       "imageRead": "Could not read this image. Try another file.",
       "storage": "Could not load or save the background. Retry; your saved background is preserved.",
-      "saveFailed": "The background is displayed but could not be saved. Retry; the previously saved background is preserved."
+      "saveFailed": "Changes are visible but could not be saved. Retry; your previously saved skins are preserved.",
+      "builtInSkins": "Built-in skins",
+      "mySkins": "My skins",
+      "addSkin": "Add skin",
+      "rename": "Rename",
+      "skinName": "Skin name",
+      "manageSkin": "Manage skin: {{name}}",
+      "deleteSkinConfirm": "Delete “{{name}}”? Deleting the active skin restores the default background."
     }
   },
   "appPath": {
@@ -2618,7 +2625,7 @@
       "check": "Check status",
       "notRunning": "The target instance has not been detected. Check again later, or close this dialog before retrying the launch.",
       "checkFailed": "The running status could not be read. Please check again later.",
-      "maintenanceDeferred": "Session checks are temporarily unavailable. History was preserved and this maintenance step was skipped."
+      "maintenanceDeferred": "Some session maintenance could not finish. History was preserved; retry later from Session Management."
     },
     "launchErrors": {
       "sessionRestoreFailed": "Session repair failed and backup restoration is incomplete. Launch stopped; inspect the logs and backups before retrying.",
@@ -3419,7 +3426,6 @@
         "quotaReserveInvalid": "Enter an integer from 1 to 100.",
         "strictReserve": "Strict protection",
         "strictReserveDesc": "Quota reserves are protected automatically with a safety margin. Near the reserve, each account allows one request and confirms fresh quota after completion. Other clients’ usage is outside this protection.",
-        "strictNativeOnly": "Strict protection requires the Rust engine. Turn it off before switching to Go.",
         "safetyMargin": "Safety margin",
         "safetyMarginUnit": "percentage points",
         "safetyMarginInvalid": "Enter an integer from 1 to 20.",
@@ -3461,17 +3467,7 @@
       "gatewayModeNewLabel": "API Service-New",
       "gatewayModeOldLabel": "API Service-Old",
       "gatewayModeSaveSuccess": "API service gateway mode updated",
-      "gatewayEngineNative": "Rust native",
-      "gatewayEngineSidecar": "Go (current)",
-      "gatewayEngineHint": "Rust is the default. The first upgrade switches to Rust; later choices are retained. Switching restarts API Service and may interrupt active requests; Codex windows stay open.",
-      "gatewayEngineSwitching": "Switching engine…",
-      "gatewayEngineSwitchFailed": "Could not switch engine: {{error}}",
-      "gatewayEngineReadbackFailed": "Could not confirm the current engine. Refresh before retrying: {{error}}",
-      "gatewayEngineReadbackTimeout": "Status refresh timed out",
       "gatewayEngineRequestsBusy": "Requests are still running. Try again when they finish.",
-      "gatewayEngineOperationBusy": "Another service operation is in progress. Try again shortly.",
-      "gatewayEngineSwitchRestored": "Switching failed. The previous engine was restored.",
-      "gatewayEngineRestoreFailed": "Switching failed and the previous engine could not be restored. Check the service status before retrying.",
       "gatewayEngineStopped": "The API service has stopped. Restart it before retrying.",
       "gatewayGuideTitle": "Switch gateways here",
       "gatewayGuideDesc": "The new gateway is the default. If you run into compatibility issues or client request errors, switch back to the old gateway here.",
@@ -3774,7 +3770,9 @@
         "chatCompletions": "Chat Completions",
         "deepseekResponsesHint": "Start DeepSeek to choose gateway or official-direct, then pick Flash or Pro. Gateway lists models in Codex; direct skips the gateway.",
         "deepseekChatHint": "DeepSeek Chat Completions uses the local gateway bridge for legacy paths. Choose Responses when you need official Codex tool behavior.",
-        "deepseekThirdPartyHint": "This address is not an official DeepSeek endpoint, so it is handled as a third-party compatible endpoint; put the real upstream model IDs in the model catalog instead of the official model names."
+        "deepseekThirdPartyHint": "This address is not an official DeepSeek endpoint, so it is handled as a third-party compatible endpoint; put the real upstream model IDs in the model catalog instead of the official model names.",
+        "anthropic": "Anthropic Messages",
+        "gatewayRequired": "This protocol requires the local gateway. Select a launch model here."
       },
       "selectSavedProvider": "Saved Providers",
       "selectSavedApiKey": "Saved API Keys",
@@ -4007,7 +4005,22 @@
       "importConfigPlaceholder": "Use Copy config on a provider card, then paste the content here",
       "importConfigAction": "Import config",
       "importConfigFromClipboard": "Read clipboard",
-      "settingsRestartHint": "Provider settings updated. Restart any running Codex instance or API Service using this provider to apply them."
+      "settingsRestartHint": "Provider settings updated. Restart any running Codex instance or API Service using this provider to apply them.",
+      "anthropic": {
+        "auth": "Authentication",
+        "hint": "Connect an Anthropic Messages gateway. Fetch models or enter them manually.",
+        "fetch": "Fetch models",
+        "fetching": "Fetching…",
+        "fetchFailed": "Could not fetch models. Retry or enter model IDs manually.",
+        "import": "Import config",
+        "importFailed": "No valid Claude Code or Desktop Gateway configuration found."
+      },
+      "editor": {
+        "modelScope": "Model settings scope",
+        "providerDefault": "Provider defaults",
+        "sharedSettings": "Model catalogs and capabilities apply to the selected scope. Protocol, authentication and address are shared provider settings.",
+        "saveScope": "Saving updates the provider and linked accounts. If the current account is affected, local Codex configuration and credentials are updated too. The client is not started automatically."
+      }
     },
     "quickSwitch": {
       "action": "Quick Switch Provider",
@@ -4518,7 +4531,7 @@
       },
       "repairModal": {
         "title": "Repair History",
-        "description": "Normalize historical sessions to the target instance's current provider by repairing SQLite indexes, the local session catalog, and workspace state only. Rollout log files stay byte-for-byte intact; only their timestamps are corrected. A local backup is created first.",
+        "description": "Quick repair fixes visibility indexes and current project assignments. Full repair also restores from historical snapshots and repairs chat indexes. Local backups are created before writes; chat log contents are preserved.",
         "stopInstanceHint": "Quit the selected Codex App/ChatGPT instance before a full repair. You can still preview the changes first.",
         "encryptedContentWarning": "Some history was encrypted by another provider or account. Metadata can be migrated, but continuing or compacting those sessions may still fail. Switch back to the original provider/account or start a new session for reliable use.",
         "running": "Repairing...",
@@ -4544,9 +4557,9 @@
         "providerLoadFailed": "Failed to load provider candidates: {{error}}",
         "modeTitle": "Repair mode",
         "modeQuick": "Quick repair",
-        "modeQuickDesc": "Normalizes providers in the official state DB and session indexes only. Rollout log files stay untouched. Best after routine account switches.",
+        "modeQuickDesc": "Fix visibility indexes and current project assignments within a short budget. Exit the instance to write project metadata.",
         "modeDeep": "Full repair",
-        "modeDeepDesc": "Normalizes all historical providers and repairs catalogs, workspaces, and sub-agent indexes. Rollout log files stay untouched. Quit the target instance first.",
+        "modeDeepDesc": "Includes quick repair, project recovery from snapshots and chat index repair. Exit the target instance before applying.",
         "scopeTitle": "Session scope",
         "scopeAll": "All sessions",
         "scopeAllDesc": "Repair {{count}} session(s) in the current management list.",
@@ -4587,7 +4600,13 @@
         "historyFailed": "History index repair did not complete: {{error}}",
         "historyChanged": "Chat data changed during repair. This repair was not applied; try again shortly.",
         "historyScan": "Checking history indexes ({{current}}/{{total}})…",
-        "historyReset": "Backing up and resetting invalid indexes…"
+        "historyReset": "Backing up and resetting invalid indexes…",
+        "projectsChanged": "Project data changed. Preview again and retry.",
+        "projectsFailed": "Local project recovery failed: {{error}}",
+        "projectsPreview": "Preview: {{projects}} projects, {{assignments}} assignments; skipped {{skipped}} projects and {{ambiguous}} ambiguous chats.",
+        "projectsSuccess": "Recovery complete: {{projects}} projects, {{assignments}} assignments; skipped {{skipped}} projects and {{ambiguous}} ambiguous chats.",
+        "projectsPending": "A previous recovery was interrupted. Exit the target instance and run Full repair to recover unfinished writes.",
+        "projectsDeferred": "Some project metadata was deferred. Exit the target instance and retry Quick repair, or use Full repair."
       },
       "transferModal": {
         "exportTitle": "Export Sessions",
@@ -5995,6 +6014,14 @@
       }
     },
     "requestDiagnostics": {
+      "requestSizeTitle": "Request size",
+      "requestSizeHint": "Decoded client JSON size; fields use compact JSON bytes. Only sizes are recorded.",
+      "requestBytes": "Request",
+      "historyBytes": "History",
+      "toolsBytes": "Tools",
+      "instructionsBytes": "Instructions",
+      "overloadRetry": "Capacity retries",
+      "overloadRecovery": "Recovery time",
       "recordPayloads": "Record request bodies",
       "recordPayloadsHint": "Off by default. Store bounded client and upstream snapshots locally. Turning this off stops new capture; saved bodies can be cleared separately.",
       "privacyHint": "Authentication fields are redacted, but secrets inside conversation text may remain. Review before copying or sharing.",
@@ -6176,6 +6203,21 @@
       "saveWithoutLaunch": "Save and continue",
       "saveOnly": "Save only",
       "validationBusy": "The previous path check is still running. Please retry shortly."
+    },
+    "openaiUsage": {
+      "monthCost": "Month spend",
+      "scope": "Organization spend; requests and tokens cover text endpoints only. UTC reporting.",
+      "loading": "Loading OpenAI usage…",
+      "pending": "Waiting for OpenAI usage",
+      "permissionRequired": "This key lacks organization usage access (api.usage.read).",
+      "permissionGuide": "Use an admin key: Admin keys → Restricted → Usage API Scope → Read. This provides spend and usage, not remaining credit.",
+      "openAdminKeys": "Usage permissions",
+      "invalidKey": "The key is invalid or expired. Check the current API key.",
+      "networkFailed": "Cannot connect to OpenAI usage. Refresh later.",
+      "queryFailed": "OpenAI usage query failed. Try again later."
+    },
+    "officialApi": {
+      "hint": "OpenAI API key account, identified by its actual endpoint."
     }
   },
   "codebuddy": {
@@ -8028,7 +8070,7 @@
     "model": "Probe model",
     "selectModel": "Select model",
     "verifyHint": "The selected model only tests the connection and does not restrict other available models. Verification sends one short request and uses a small amount of your plan allowance.",
-    "serviceHint": "Joining the current pool does not start API Service. This version requires the native engine.",
+    "serviceHint": "Adding an account to the current pool does not start API Service.",
     "verify": "Test only",
     "verifyAndJoin": "Test & join",
     "remove": "Remove from service",
@@ -8088,8 +8130,6 @@
       "verify": "The model request did not complete. Retry verification.",
       "usage": "Your plan or app usage is limited. Check usage in ChatGPT settings.",
       "usageUnavailable": "The official service cannot confirm usage right now. Retry later; this does not mean your plan allowance is exhausted.",
-      "native": "Plan access currently requires the native engine. Switch engines in API Service first.",
-      "nativeSwitch": "Remove plan accounts from API Service before switching to another engine.",
       "browser": "Cannot open your browser. Copy the sign-in link and open it manually.",
       "configuration": "The authorization registration does not match. Retry sign-in or reconnect the plan.",
       "notVerified": "Verify this plan before adding it to API Service.",
@@ -8269,7 +8309,6 @@
     "title": "Capability fallback",
     "hint": "When an account cannot handle a required capability, try backups in this order using existing model mappings.",
     "consent": "Switching sends this conversation to the backup account and uses its allowance or incurs applicable charges.",
-    "nativeOnly": "This engine does not run capability fallback. Switch to the native engine to enable it; saved settings can still be disabled.",
     "backups": "Backup accounts",
     "addBackup": "Add backup",
     "backupEmpty": "Choose backups from the current API Service pool before enabling.",

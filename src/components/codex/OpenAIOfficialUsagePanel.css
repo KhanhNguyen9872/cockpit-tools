@@ -1,0 +1,32 @@
+.openai-official-usage-note,
+.openai-official-usage-feedback p {
+  width: 100%;
+  margin: 6px 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.openai-official-usage-feedback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+}
+
+.openai-official-usage-feedback .btn {
+  align-self: center;
+  justify-content: center;
+  margin-top: 4px;
+  max-width: 100%;
+  font-size: 11px;
+  white-space: normal;
+  text-align: center;
+}
+.openai-official-usage.detailed .codex-daily-usage-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}

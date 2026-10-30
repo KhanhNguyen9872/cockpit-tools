@@ -5,6 +5,15 @@ use std::collections::{HashMap, HashSet};
 mod thinking;
 
 pub fn prepare_request(body: Value, flavor: ChatFlavor) -> Result<ChatRequest, ServiceError> {
+    prepare(body, flavor, true)
+}
+
+pub(in super::super) fn prepare_responses_ingress(body: Value) -> Result<ChatRequest, ServiceError> {
+    // A Responses caller has no Chat output adapter to restore aliased names.
+    prepare(body, ChatFlavor::ChatCompletions, false)
+}
+
+fn prepare(body: Value, flavor: ChatFlavor, alias_tools: bool) -> Result<ChatRequest, ServiceError> {
     let object = body
         .as_object()
         .ok_or_else(|| invalid("body", "expected a JSON object"))?;
@@ -263,7 +272,11 @@ pub fn prepare_request(body: Value, flavor: ChatFlavor) -> Result<ChatRequest, S
     }
     let mut responses = Value::Object(response);
     thinking::apply(&body, &mut responses, "chat");
-    let tool_names = super::tools::map(&mut responses);
+    let tool_names = if alias_tools {
+        super::tools::map(&mut responses)
+    } else {
+        Default::default()
+    };
     Ok(ChatRequest {
         responses,
         stream,

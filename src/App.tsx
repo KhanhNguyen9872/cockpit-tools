@@ -61,10 +61,13 @@ import { useTopRightAdStore } from './stores/useTopRightAdStore';
 import { useSponsorStore } from './stores/useSponsorStore';
 import { useRemoteConfigStore } from './stores/useRemoteConfigStore';
 import type { UpdateCheckResult, UpdateInfo } from './components/UpdateNotification';
+import type {
+  VersionJumpInfo, UpdateRuntimeInfo, UpdateCheckSource,
+  LinuxUpdateProgressPayload, UpdateAction,
+} from './types/updater';
 import type { RemoteUpdatePromptMode } from './types/remoteConfig';
 import type { Update as UpdaterUpdate } from '@tauri-apps/plugin-updater';
 import {
-  parseUpdaterReleaseNotes,
   resolveUpdaterDownloadUrl,
 } from './utils/updaterReleaseNotes';
 import { FloatingCardWindow } from './pages/FloatingCardWindow';
@@ -511,37 +514,6 @@ type QuotaAlertPlatform =
   | 'trae'
   | 'workbuddy'
   | 'zed';
-type UpdateCheckSource = 'auto' | 'manual';
-type UpdateActionState = 'hidden' | 'available' | 'downloading' | 'installing' | 'ready';
-
-type UpdateRuntimeInfo = {
-  platform: string;
-  linux_install_kind: string;
-  linux_managed_install_supported: boolean;
-  updater_target?: string | null;
-};
-
-type LinuxUpdateProgressPhase =
-  | 'download_started'
-  | 'downloading'
-  | 'downloaded'
-  | 'auth_required'
-  | 'installing'
-  | 'completed';
-
-type LinuxUpdateProgressPayload = {
-  version: string;
-  phase: LinuxUpdateProgressPhase;
-  progress?: number | null;
-};
-
-type UpdateAction = {
-  state: UpdateActionState;
-  version: string | null;
-  progress: number;
-  requiresInstall: boolean;
-};
-
 function buildExternalImportDedupeKey(payload: {
   providerId: string;
   page: string;
@@ -875,12 +847,7 @@ function MainApp() {
   const [appLaunchCandidates, setAppLaunchCandidates] = useState<AppLaunchCandidate[]>([]);
   const [appPathActionError, setAppPathActionError] = useState('');
   const [appPathScanError, setAppPathScanError] = useState('');
-  const [versionJumpInfo, setVersionJumpInfo] = useState<{
-    previous_version: string;
-    current_version: string;
-    release_notes: string;
-    release_notes_zh: string;
-  } | null>(null);
+  const [versionJumpInfo, setVersionJumpInfo] = useState<VersionJumpInfo | null>(null);
   const [showVersionJumpNotification, setShowVersionJumpNotification] = useState(false);
   const [updateRuntimeInfo, setUpdateRuntimeInfo] = useState<UpdateRuntimeInfo | null>(null);
   const [updateRuntimeInfoLoaded, setUpdateRuntimeInfoLoaded] = useState(false);
@@ -1416,14 +1383,11 @@ function MainApp() {
   }, [writeUpdateLog]);
 
   const prepareUpdateNotificationInfo = useCallback(async (update: UpdaterUpdate): Promise<UpdateInfo> => {
-    const { releaseNotes, releaseNotesZh } = parseUpdaterReleaseNotes(update.body);
     const currentVersion = update.currentVersion || (await getVersion());
     return {
       current_version: currentVersion,
       latest_version: update.version,
       download_url: resolveUpdaterDownloadUrl(update.version, update.rawJson),
-      release_notes: releaseNotes,
-      release_notes_zh: releaseNotesZh,
     };
   }, []);
 
@@ -1856,22 +1820,6 @@ function MainApp() {
             activeUpdateDownloadRef.current = candidate;
 
             const candidateVersion = candidate.version;
-            const { releaseNotes, releaseNotesZh } = parseUpdaterReleaseNotes(candidate.body);
-            await invoke('save_pending_update_notes', {
-              version: candidateVersion,
-              releaseNotes,
-              releaseNotesZh,
-            }).catch((error) => {
-              console.error('[App] Failed to cache shared update notes:', error);
-              writeUpdateLog(
-                'warn',
-                `缓存统一更新说明失败: version=${candidateVersion}, error=${sanitizeUpdaterErrorMessage(error)}`,
-              );
-            });
-            if (updateCancelRequestedRef.current || updateDownloadTaskIdRef.current !== taskId) {
-              throw createUpdaterCanceledError();
-            }
-
             const trackProgress = createUpdaterDownloadProgress();
             await candidate.download((event) => {
               if (!acceptingProgress || updateCancelRequestedRef.current
@@ -2658,12 +2606,7 @@ function MainApp() {
       try {
         console.log('[StartupPerf][VersionJump] detection started');
         const versionJumpInvokeStartedAt = performance.now();
-        const jumpInfo = await invoke<{
-          previous_version: string;
-          current_version: string;
-          release_notes: string;
-          release_notes_zh: string;
-        } | null>('check_version_jump');
+        const jumpInfo = await invoke<VersionJumpInfo | null>('check_version_jump');
         console.log(
           `[StartupPerf][VersionJump] check_version_jump completed in ${(performance.now() - versionJumpInvokeStartedAt).toFixed(2)}ms; hasJump=${Boolean(jumpInfo)}`,
         );
@@ -3618,6 +3561,7 @@ function MainApp() {
           <UpdateNotification
             key={updateNotificationKey}
             updateInfo={updateNotificationInfo}
+            visible={showUpdateNotification}
             checking={updateNotificationChecking}
             onRestartUpdate={handleApplyPendingUpdate}
             actionState={updateAction.state}

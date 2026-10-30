@@ -12,6 +12,7 @@ const parseTsx = (name: string) =>
   ts.createSourceFile(name, readSource(name), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const addSource = parseTsx('./CodexAddAccountDialog.tsx');
 const overviewSource = parseTsx('./CodexAccountsOverviewPanel.tsx');
+const editorSource = parseTsx('../components/codex/CodexModelProviderEditor.tsx');
 const styles = postcss.parse(readSource('./CodexAccountDialogs.css'));
 
 function nodes<T extends ts.Node>(root: ts.Node, predicate: (node: ts.Node) => node is T): T[] {
@@ -102,25 +103,23 @@ function actionButton(footer: ts.JsxElement, handler: string): ts.JsxElement {
 }
 
 function dialogFor(source: ts.SourceFile, visibility: string) {
-  const branches = nodes(source, ts.isBinaryExpression).filter((node) =>
-    node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken &&
-    ts.isIdentifier(unwrap(node.left)) && node.left.getText(source) === visibility &&
-    // Hook enablement conditions use the same flag but do not render a portal.
-    ts.isCallExpression(unwrap(node.right)) &&
-    (unwrap(node.right) as ts.CallExpression).expression.getText(source) === 'createPortal',
-  );
+  const branches = nodes(source, ts.isBinaryExpression).filter(node =>
+    node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken && node.left.getText(source) === visibility,
+  ).map(node => unwrap(node.right)).concat(nodes(source, ts.isConditionalExpression)
+    .filter(node => node.condition.getText(source) === visibility).map(node => unwrap(node.whenTrue)))
+    .filter(node => ts.isCallExpression(node) && node.expression.getText(source) === 'createPortal');
   assert.equal(branches.length, 1, `Expected one ${visibility} visibility branch`);
-  const portal = unwrap(branches[0].right);
+  const portal = branches[0];
   assert.ok(ts.isCallExpression(portal), `${visibility} must render through a portal`);
   assert.equal(portal.expression.getText(source), 'createPortal');
   assert.equal(portal.arguments[1]?.getText(source), 'document.body');
-  const overlay = oneElement(renderedElements(portal.arguments[0]), 'codex-account-dialog-overlay');
+  const overlay = oneElement(renderedElements(portal.arguments[0]), visibility === 'showModal' ? 'modal-overlay' : 'codex-account-dialog-overlay');
   assert.ok(classes(overlay).includes('modal-overlay'));
   assert.ok(!overlay.openingElement.attributes.properties.some((attribute) =>
     ts.isJsxAttribute(attribute) && attribute.name.getText(source) === 'onClick',
   ), 'The backdrop must not acquire a close-on-click handler');
-  const dialog = oneElement(overlay.children.flatMap(renderedElements), 'codex-account-dialog');
-  assert.ok(classes(dialog).includes('modal-content'));
+  const dialog = oneElement(overlay.children.flatMap(renderedElements), visibility === 'showModal' ? 'codex-provider-modal' : 'codex-account-dialog');
+  assert.ok(classes(dialog).includes(visibility === 'showModal' ? 'modal' : 'modal-content'));
   const children = dialog.children.flatMap(renderedElements);
   return {
     dialog,
@@ -142,9 +141,8 @@ const dialogs = [
     blocked: [{ quickSwitchSubmitting: true }, { managedProvidersLoading: true }, { selectedQuickSwitchProvider: null }, { selectedQuickSwitchApiKey: null }],
   },
   {
-    name: 'edit API Key', source: overviewSource, visibility: 'editingApiKeyCredentialsId', submit: 'handleSubmitApiKeyCredentials',
-    ready: { savingApiKeyCredentials: false, editingApiModelCatalogFetching: false, editingApiKeyCredentialsValue: 'test-key' },
-    blocked: [{ savingApiKeyCredentials: true }, { editingApiModelCatalogFetching: true }, { editingApiKeyCredentialsValue: '  ' }],
+    name: 'shared provider editor', source: editorSource, visibility: 'showModal', submit: 'handleSaveProvider',
+    ready: { saving: false }, blocked: [{ saving: true }],
   },
 ];
 
@@ -158,7 +156,7 @@ for (const { name, source, visibility, submit, ready, blocked } of dialogs) {
     assert.equal(submitReferences(body).length, 0, `${submit} must not remain inside the scrolling body`);
     assert.ok(source.statements.some((statement) =>
       ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier) &&
-      statement.moduleSpecifier.text === './CodexAccountDialogs.css',
+      statement.moduleSpecifier.text === (visibility === 'showModal' ? './CodexModelProviderEditor.css' : './CodexAccountDialogs.css'),
     ), 'The shared dialog stylesheet must be loaded by this entry');
   });
 
@@ -201,11 +199,12 @@ test('structure: the relocated add footer only appears on the API Key tab', () =
 test('structure: background scroll locks follow add and both edit visibility states', () => {
   for (const [source, expected] of [
     [addSource, 'Boolean(showAddModal)'],
-    [overviewSource, 'Boolean(quickSwitchAccountId||editingApiKeyCredentialsId)'],
+    [overviewSource, 'Boolean(quickSwitchAccountId)'],
+    [editorSource, 'showModal'],
   ] as const) {
     assert.ok(source.statements.some((statement) =>
       ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier) &&
-      statement.moduleSpecifier.text === '../hooks/useModalScrollLock',
+      statement.moduleSpecifier.text.endsWith('/hooks/useModalScrollLock'),
     ), 'Each entry must import the shared reference-counted scroll lock');
     const hooks = nodes(source, ts.isCallExpression).filter((node) =>
       ts.isIdentifier(node.expression) && node.expression.text === 'useModalScrollLock',

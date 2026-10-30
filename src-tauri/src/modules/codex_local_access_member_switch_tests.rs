@@ -310,7 +310,8 @@ fn member_switch_revision_blocks_stale_disk_and_runtime_publications_and_default
     let original = collection();
     assert_eq!(original.chatgpt_plan_service_revision, 0);
     assert!(original.chatgpt_plan_codex_image_policies.is_empty());
-    let official = switch(&original, true);
+    let mut official = switch(&original, true);
+    migrate_legacy_gateway_mode(&mut official);
     save_collection_to_path(&path, &official).unwrap();
     let bytes = fs::read(&path).unwrap();
     assert_eq!(

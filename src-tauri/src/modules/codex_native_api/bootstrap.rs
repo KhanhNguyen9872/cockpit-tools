@@ -18,9 +18,70 @@ pub(super) const MAX_HOLD: std::time::Duration = std::time::Duration::from_milli
 /// Only known metadata with no model output or tool execution can be replayed.
 pub(super) fn handshake(event: &Value) -> bool {
     matches!(event.get("type").and_then(Value::as_str), Some(
-        "response.created" | "response.in_progress" | "codex.rate_limits"
+        "response.created" | "response.queued" | "response.in_progress" | "keepalive" | "codex.rate_limits"
         | "codex.response.metadata" | "response.metadata"
-    )) && pre_execution(event)
+    )) && pre_execution(event) || empty_output_event(event)
+}
+
+fn empty_output_event(event: &Value) -> bool {
+    fn empty_part(part: &Value) -> bool {
+        let field = match part["type"].as_str() {
+            Some("output_text" | "summary_text") => "text",
+            Some("refusal") => "refusal",
+            _ => return false,
+        };
+        if !part.get(field).is_none_or(|text| text == "") { return false; }
+        let mut proof = part.clone();
+        proof.as_object_mut().unwrap().remove(field);
+        pre_execution(&proof)
+    }
+    let skeleton = match event["type"].as_str() {
+        Some("response.content_part.added" | "response.content_part.done" |
+            "response.reasoning_summary_part.added" | "response.reasoning_summary_part.done") =>
+            event.get("part").filter(|part| empty_part(part)).map(|_| "part"),
+        Some("response.output_item.added") => {
+            let item = &event["item"];
+            let empty = match item["type"].as_str() {
+                Some("message") => item.get("content").and_then(Value::as_array).is_some_and(|parts| parts.iter().all(empty_part)),
+                Some("reasoning") => item.get("encrypted_content").is_none_or(|value| value.is_null() || value == "")
+                    && item.get("summary").and_then(Value::as_array).is_some_and(|parts| parts.iter().all(empty_part)),
+                Some("function_call") => item.get("arguments").is_some_and(|value| value == ""),
+                Some("custom_tool_call") => item.get("input").is_some_and(|value| value == ""),
+                _ => false,
+            };
+            let mut proof = item.clone();
+            if empty {
+                let fields: &[&str] = match item["type"].as_str() {
+                    Some("message") => &["content"],
+                    Some("reasoning") => &["summary", "encrypted_content"],
+                    Some("function_call") => &["arguments"],
+                    Some("custom_tool_call") => &["input"],
+                    _ => &[],
+                };
+                for field in fields { proof.as_object_mut().unwrap().remove(*field); }
+            }
+            (empty && pre_execution(&proof)).then_some("item")
+        },
+        _ => None,
+    };
+    if let Some(field) = skeleton {
+        let mut metadata = event.clone();
+        metadata.as_object_mut().unwrap().remove(field);
+        return pre_execution(&metadata);
+    }
+    let field = match event["type"].as_str() {
+        Some("response.output_text.delta" | "response.reasoning_summary_text.delta" |
+            "response.reasoning_text.delta" | "response.function_call_arguments.delta" |
+            "response.custom_tool_call_input.delta" | "response.refusal.delta") => "delta",
+        Some("response.output_text.done" | "response.reasoning_summary_text.done" |
+            "response.reasoning_text.done") => "text",
+        Some("response.refusal.done") => "refusal",
+        _ => return false,
+    };
+    if event.get(field) != Some(&Value::String(String::new())) { return false; }
+    let mut metadata = event.clone();
+    metadata.as_object_mut().unwrap().remove(field);
+    pre_execution(&metadata)
 }
 
 /// The visibility timer does not certify execution. Keep a separate bounded
@@ -28,6 +89,7 @@ pub(super) fn handshake(event: &Value) -> bool {
 pub(super) struct Fence { active: bool, events: usize, bytes: usize }
 impl Fence {
     pub(super) fn new(enabled: bool) -> Self { Self { active:enabled,events:0,bytes:0 } }
+    pub(super) fn active(&self) -> bool { self.active }
     pub(super) fn observe(&mut self, event: Option<&Value>, bytes: usize, grok: bool) -> Option<(u16,Value)> {
         if !self.active { return None; }
         self.bytes=self.bytes.saturating_add(bytes);
@@ -41,6 +103,7 @@ impl Fence {
         self.active=false;
         if !pre_execution(event) {return None;}
         grok.then(||super::grok_errors::rejection(event)).flatten().or_else(||rejection(event))
+            .or_else(||super::encrypted_reasoning::rejection(event))
     }
 }
 
@@ -151,6 +214,8 @@ pub(super) fn rejection(event: &Value) -> Option<(u16, Value)> {
         status
     } else if super::upstream_errors::model_unavailable(400, event, "") {
         404
+    } else if super::transient_rate_limit::applies(event) {
+        429
     } else if [&*code, &*kind].iter().any(|v| {
         matches!(
             *v,
@@ -174,8 +239,8 @@ pub(super) fn rejection(event: &Value) -> Option<(u16, Value)> {
             || code.contains("model_is_at_capacity")
             || (message.contains("model") && message.contains("at capacity"));
         if !(capacity
-            || kind == "service_unavailable_error"
-            || code == "server_is_overloaded"
+            || super::overload::capacity_code(&kind)
+            || super::overload::capacity_code(&code)
             || kind == "rate_limit_error"
             || code == "rate_limit_exceeded"
             || ((kind == "server_error" || code == "server_error")
@@ -183,11 +248,8 @@ pub(super) fn rejection(event: &Value) -> Option<(u16, Value)> {
         {
             return None;
         }
-        if capacity {
-            429
-        } else {
-            503
-        }
+        // Capacity is transient availability, not evidence of exhausted quota.
+        503
     };
     let mut body = json!({"error": error});
     // Preserve Retry-After/reset hints, including wrapped event headers.
@@ -346,7 +408,7 @@ pub(super) fn pre_execution(event: &Value) -> bool {
                 .get("output_tokens")
                 .is_none_or(|value| value.is_null() || value.as_u64() == Some(0))
     }
-    metadata_only(event, false)
+    metadata_only(event, event.get("object").and_then(Value::as_str) == Some("response"))
         && event
             .get("response")
             .is_none_or(|value| metadata_only(value, true))
@@ -355,6 +417,13 @@ pub(super) fn pre_execution(event: &Value) -> bool {
                 .pointer(path)
                 .is_none_or(|value| metadata_only(value, false))
         })
+}
+
+/// Non-2xx JSON may still carry a partial Responses result. A status code is
+/// not permission to replay output/tool execution returned in that body.
+pub(super) fn http_execution_observed(body: &Value) -> bool {
+    [Some(body), body.get("body")].into_iter().flatten()
+        .any(|value| value.is_object() && !pre_execution(value))
 }
 
 #[cfg(test)]
@@ -644,7 +713,7 @@ async fn probe_inner(
                 }
                 // Positive/invalid output usage or a nonempty output is already
                 // execution evidence even if the frame claims to be metadata.
-                if !pre_execution(&event) {
+                if !pre_execution(&event) && !empty_output_event(&event) {
                     break 'read;
                 }
                 // Only buffered pre-output events reach this point. Reuse the
@@ -659,6 +728,7 @@ async fn probe_inner(
                     .then(|| super::grok_errors::rejection(&event))
                     .flatten()
                     .or_else(|| rejection(&event))
+                    .or_else(|| super::encrypted_reasoning::rejection(&event))
                 {
                     reject = Some(failure);
                     break 'read;

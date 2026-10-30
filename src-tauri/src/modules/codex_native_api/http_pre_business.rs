@@ -15,6 +15,15 @@ pub(super) async fn recover(
     streaming: bool,
 ) -> Result<Option<HttpResponseStream>, ServiceError> {
     let original = frame.identity_event.as_ref().or(frame.value.as_ref());
+    if let Some(event) = original {
+        let overloaded = ["/error/code", "/response/error/code", "/code"].iter()
+            .any(|path| event.pointer(path).and_then(Value::as_str) == Some("server_is_overloaded"));
+        if overloaded || super::super::bootstrap::rejection(event).is_some_and(|(status, _)| status == 503) {
+            tracing::info!(target: "codex_api", "[NativeAPI][recovery] request_id={} status=503 fence_active={} pre_execution={} switch_allowed={} rebuild_available={}",
+                tracker.diagnostic_request_id(), fence.active(), super::super::bootstrap::pre_execution(event),
+                super::super::retry::can_switch_account(prepared), prepared.rebuild_plan.is_some());
+        }
+    }
     let Some((status, _)) = fence.observe(
         original,
         frame.bytes.len(),
@@ -40,6 +49,7 @@ pub(super) async fn recover(
         return Ok(None);
     }
     let attempts = tracker.upstream_attempt_count();
+    let deadline = tracker.overload.deadline(deadline);
     let remaining = super::super::retry::remaining_credential_policy(prepared, tracker, policy);
     let mut opened = match open_response_stream(
         state, prepared, false, streaming, tracker, &remaining, deadline,

@@ -19,6 +19,8 @@ pub struct ProviderSource {
     pub api_key_name: String,
     pub base_url: String,
     pub wire_api: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_scheme: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -28,6 +30,7 @@ struct Provider {
     name: String,
     base_url: String,
     wire_api: Option<String>,
+    auth_scheme: Option<String>,
     #[serde(default)]
     model_catalog: Vec<String>,
     api_keys: Vec<ApiKey>,
@@ -87,6 +90,7 @@ fn resolve(
             api_key_name: key.name.clone(),
             base_url: provider.base_url.trim().trim_end_matches('/').into(),
             wire_api,
+            auth_scheme: provider.auth_scheme.clone(),
         },
         key.api_key.clone(),
         provider.model_catalog.clone(),
@@ -153,6 +157,7 @@ pub(super) async fn request(
         return Err("pelican.error.providerChanged".into());
     }
     Ok(CodexModelProviderGatewayChatTestRequest {
+        auth_scheme: current.auth_scheme.clone(),
         run_id: run_id.into(),
         provider_id: source.target.provider_id.clone(),
         provider_name: source.provider_name.clone(),

@@ -63,6 +63,18 @@ pub(super) fn normalize_websocket(
     normalize_inner(headers, body, chatgpt, false, true)
 }
 
+/// OpenAI steering accepts only its protocol fields, including API-key routes.
+/// Keep client correlation IDs locally; unrelated vendor extensions stay opaque.
+pub(super) fn normalize_steering(body: &mut Value, chatgpt: bool, endpoint: &str) {
+    let public_openai = reqwest::Url::parse(endpoint).is_ok_and(|url| matches!(url.scheme(), "https" | "wss")
+        && url.host_str().is_some_and(|host| host == "api.openai.com" || host.ends_with(".api.openai.com")));
+    if (chatgpt || public_openai) && body["type"] == "response.steer" {
+        if let Some(object) = body.as_object_mut() {
+            object.remove("event_id");
+        }
+    }
+}
+
 fn normalize_inner(
     headers: &mut HeaderMap,
     body: &mut Value,
@@ -91,7 +103,9 @@ fn normalize_inner(
         }
         object.insert("stream".into(), json!(true));
         object.insert("store".into(), json!(false));
-        object.insert("parallel_tool_calls".into(), json!(true));
+        if object.get("parallel_tool_calls") != Some(&Value::Bool(false)) {
+            object.insert("parallel_tool_calls".into(), json!(true));
+        }
         let sources = object
             .get("include")
             .and_then(Value::as_array)

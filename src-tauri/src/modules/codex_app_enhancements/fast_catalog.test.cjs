@@ -7,7 +7,7 @@ const { fixture } = require('./fast_fixture_current.cjs');
 
 const script = fs.readFileSync(path.join(__dirname, 'fast.js'), 'utf8');
 const catalog = JSON.parse(fs.readFileSync(path.join(__dirname,
-  '../../../../sidecars/cockpit-cliproxy/third_party/CLIProxyAPI/internal/registry/models/codex_client_models.json'), 'utf8'));
+  '../../../../resources/codex/codex_client_models.json'), 'utf8'));
 const fallbacks = Object.fromEntries(catalog.models.flatMap(model => {
   const tier = model.service_tiers?.find(tier => tier.id === 'ultrafast');
   return tier ? [[model.slug, tier]] : [];

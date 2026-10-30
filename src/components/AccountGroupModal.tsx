@@ -1,3 +1,5 @@
+import { ModalErrorMessage } from "./ModalErrorMessage";
+import { useDialogSession } from "../hooks/useDialogSession";
 /**
  * 账号分组管理弹窗
  * - 创建 / 重命名 / 删除分组
@@ -604,13 +606,11 @@ export function UniversalGroupAccountPickerModal({
   const [error, setError] = useState('');
   const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
-    if (!isOpen || !targetGroup) return;
+  useDialogSession(isOpen && targetGroup ? targetGroup.id : null, () => {
     setQuery('');
-    const validIds = new Set(accounts.map((a) => a.id));
-    setSelected(new Set((targetGroup.accountIds || []).filter((id) => validIds.has(id))));
+    setSelected(new Set(targetGroup?.accountIds ?? []));
     setError('');
-  }, [isOpen, targetGroup, accounts]);
+  });
 
   const groupsByAccountId = useMemo(() => {
     const result = new Map<string, AccountGroup[]>();
@@ -842,7 +842,7 @@ export function UniversalGroupAccountPickerModal({
             )}
           </div>
 
-          {error && <div className="group-account-error">{error}</div>}
+          <ModalErrorMessage message={error} className="group-account-error" />
         </div>
 
         <div className="modal-footer group-account-picker-footer">

@@ -28,6 +28,7 @@ pub struct CompatStreamAdapter {
     reasoning_signatures: BTreeMap<String, String>,
     reasoning_keys: BTreeMap<usize, String>,
     signature_bytes: usize,
+    commentary: super::commentary::Commentary,
 }
 impl CompatStreamAdapter {
     pub fn new(context: CompatContext) -> Self {
@@ -57,6 +58,7 @@ impl CompatStreamAdapter {
             reasoning_signatures: BTreeMap::new(),
             reasoning_keys: BTreeMap::new(),
             signature_bytes: 0,
+            commentary: Default::default(),
         }
     }
     pub fn is_finished(&self) -> bool {
@@ -366,6 +368,8 @@ impl CompatStreamAdapter {
         if self.finished {
             return Ok(Vec::new());
         }
+        let commentary = (self.context.flavor == CompatFlavor::Claude).then(|| self.commentary.event(event)).flatten();
+        let event = commentary.as_ref().unwrap_or(event);
         let kind = event["type"].as_str().unwrap_or("");
         if kind.contains("reasoning")
             || event.pointer("/item/type").and_then(Value::as_str) == Some("reasoning")

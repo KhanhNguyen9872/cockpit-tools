@@ -74,6 +74,16 @@ pub(super) fn rejection(event: &Value) -> Option<(u16, Value)> {
 }
 
 pub(super) fn normalize_event(event: &mut Value) {
+    // xAI also returns the ordinary JSON error envelope on a live socket,
+    // without the Responses event discriminator (e.g. an invalid model).
+    if event.get("type").is_none()
+        && event
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .is_some_and(|message| !message.is_empty())
+    {
+        event["type"] = json!("error");
+    }
     if let Some((status, body)) = rejection(event) {
         event["status"] = json!(status);
         if let Some(wait) = body.get("retry_after") {
@@ -85,6 +95,24 @@ pub(super) fn normalize_event(event: &mut Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn grok_untyped_error_becomes_an_event_without_rewriting_its_cause() {
+        let error = json!({"type":"api_error","message":"The requested model does not exist"});
+        let mut event = json!({"error":error,"request_id":"fixture"});
+        normalize_event(&mut event);
+        assert_eq!(event["type"], "error");
+        assert_eq!(event["error"], error);
+        assert_eq!(event["request_id"], "fixture");
+        for event in [
+            json!({"error":null}),
+            json!({"error":{"message":""}}),
+            json!({"type":"response.completed","response":{"error":{"message":"historical"}}}),
+        ] {
+            let mut normalized = event.clone();
+            normalize_event(&mut normalized);
+            assert_eq!(normalized, event);
+        }
+    }
     #[test]
     fn grok_official_api_match_does_not_capture_custom_providers() {
         assert!(official_api("https://api.x.ai/v1"));

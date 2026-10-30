@@ -410,6 +410,14 @@ export interface CodexServiceTierAdaptation {
 }
 
 export interface CodexLocalAccessRequestAttempt {
+  upstreamRequestBytes?: number | null;
+  requestSize?: {
+    totalBytes: number;
+    inputBytes: number;
+    toolsBytes: number;
+    instructionsBytes: number;
+  } | null;
+  overloadRetry?: { retry: number; waitMs: number; recoveryMs: number } | null;
   serviceTierAdaptation?: CodexServiceTierAdaptation | null;
   authorizationRoute?: 'official' | 'local_gateway' | null;
   authorizationFallback?: CodexAuthorizationFallbackTrace | null;
@@ -417,6 +425,7 @@ export interface CodexLocalAccessRequestAttempt {
   sequence: number;
   transportError?: string | null;
   transportPoolRetired?: boolean | null;
+  transportHttp1Fallback?: boolean | null;
   upstreamHttpVersion?: string | null;
   accountId: string;
   accountEmail?: string | null;

@@ -197,7 +197,9 @@ async fn native_test_cooling_continuation_roundtrip(sse_overload: bool, short_co
                     calls.len()
                 };
                 if count == 2 {
-                    let error = json!({"type":"error","error":{"code":"server_is_overloaded","type":"service_unavailable_error","message":"Synthetic overload"}});
+                    let mut error = json!({"type":"error","error":{"code":"server_is_overloaded","type":"service_unavailable_error","message":"Synthetic overload"}});
+                    // An explicit long cooldown must not enter the brief capacity fallback.
+                    if !short_cooldown { error["retry_after"] = json!(60); }
                     if sse_overload {
                         return axum::response::Response::builder()
                             .header("content-type", "text/event-stream")

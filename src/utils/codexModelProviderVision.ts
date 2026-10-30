@@ -1,4 +1,4 @@
-import modelCatalog from "../../sidecars/cockpit-cliproxy/third_party/CLIProxyAPI/internal/registry/models/models.json";
+import modelCatalog from "../../resources/codex/models.json";
 import {
   DEEPSEEK_API_PROVIDER_ID,
   resolveCodexApiProviderPresetId,

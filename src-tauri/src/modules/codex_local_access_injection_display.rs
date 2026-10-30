@@ -86,8 +86,12 @@ fn injection_display_read_account(data_dir: &Path, id: &str) -> Option<CodexAcco
     let tombstone = data_dir
         .join("codex_account_tombstones")
         .join(format!("{id}.json"));
-    match fs::symlink_metadata(tombstone) {
+    match fs::symlink_metadata(&tombstone) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Ok(metadata) if metadata.is_file() && metadata.len() <= 4096 => {
+            let state: Value = serde_json::from_str(&fs::read_to_string(tombstone).ok()?).ok()?;
+            if state.get("deleted").and_then(Value::as_bool)? { return None; }
+        }
         _ => return None,
     }
     let path = data_dir.join("codex_accounts").join(format!("{id}.json"));

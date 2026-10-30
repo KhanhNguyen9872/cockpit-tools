@@ -18,7 +18,7 @@ pub(crate) fn parse_model(model: &str) -> (String, Option<String>) {
         let lower = raw.to_ascii_lowercase();
         if matches!(
             lower.as_str(),
-            "none" | "auto" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+            "none" | "auto" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
         ) {
             return Some(lower);
         }
@@ -41,7 +41,7 @@ pub(crate) fn parse_model(model: &str) -> (String, Option<String>) {
 }
 
 fn nearest(level: &str, supported: &[String]) -> Option<String> {
-    let order = ["minimal", "low", "medium", "high", "xhigh", "max"];
+    let order = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
     let target = order.iter().position(|value| *value == level)?;
     supported
         .iter()

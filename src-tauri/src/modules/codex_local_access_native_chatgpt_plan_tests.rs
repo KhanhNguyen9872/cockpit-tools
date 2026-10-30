@@ -376,7 +376,7 @@ fn chatgpt_plan_refresh_network_failures_do_not_require_reauthorization() {
 }
 
 #[test]
-fn chatgpt_plan_engine_mode_guards_preserve_disk_config_on_failure() {
+fn chatgpt_plan_legacy_config_migrates_to_native_before_saving_grants() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("collection.json");
     let mut collection = collection();
@@ -393,18 +393,18 @@ fn chatgpt_plan_engine_mode_guards_preserve_disk_config_on_failure() {
         );
     }
     assert!(native_patch_mode(&original, CodexLocalAccessGatewayMode::Native).is_ok());
-    // Joining with a stale Native snapshot after Sidecar was persisted cannot
-    // write an unsupported grant into that engine's collection.
+    // Saving a grant migrates the old engine before publishing the collection.
     let mut existing = collection.clone();
     existing.account_ids.clear();
     existing.gateway_mode = CodexLocalAccessGatewayMode::Sidecar;
     let existing = serde_json::to_string(&existing).unwrap();
     std::fs::write(&path, &existing).unwrap();
-    assert_eq!(
-        save_collection_to_path(&path, &collection).unwrap_err(),
-        "CHATGPT_PLAN_NATIVE_REQUIRED"
-    );
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), existing);
+    save_collection_to_path(&path, &collection).unwrap();
+    let migrated = load_collection_for_runtime_from_path(&path).unwrap().unwrap();
+    assert_eq!(migrated.gateway_mode, CodexLocalAccessGatewayMode::Native);
+    assert_eq!(migrated.account_ids, collection.account_ids);
+    assert_eq!(migrated.api_key, collection.api_key);
+    assert_eq!(migrated.port, collection.port);
 }
 
 #[test]

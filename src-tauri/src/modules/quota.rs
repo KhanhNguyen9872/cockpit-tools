@@ -237,7 +237,7 @@ fn build_load_code_assist_user_agent() -> String {
     )
 }
 
-fn build_cloud_code_user_agent() -> String {
+pub(crate) fn build_cloud_code_user_agent() -> String {
     let ide_version = official_antigravity_version_for_cloud_code();
     let os = load_code_assist_user_agent_os();
     let arch = load_code_assist_user_agent_arch();
@@ -332,7 +332,7 @@ fn build_cloud_code_metadata(duet_project: Option<&str>) -> Value {
     Value::Object(metadata)
 }
 
-fn resolve_cloud_code_base_url(ctx: &QuotaCloudCodeContext) -> String {
+pub(crate) fn resolve_cloud_code_base_url(ctx: &QuotaCloudCodeContext) -> String {
     select_cloud_code_base_url(
         ctx,
         env_var_trimmed("ANTIGRAVITY_CLOUD_CODE_URL_OVERRIDE").as_deref(),

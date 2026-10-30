@@ -82,7 +82,7 @@ fn automatic_api_service_provider_route_eligible(
     if !account.is_api_key_auth() {
         return false;
     }
-    if provider_gateway_wire_api_for_account(account) == "chat_completions" {
+    if matches!(provider_gateway_wire_api_for_account(account).as_str(), "chat_completions" | "anthropic") {
         return true;
     }
     if account
@@ -353,6 +353,17 @@ const DEEPSEEK_DEFAULT_REASONING_EFFORT: &str = "max";
 /// 账号模型的官方模板（目前覆盖 DeepSeek 官方目录）。
 fn account_model_template(account: &CodexAccount, model: &str) -> Option<Value> {
     let model = model.trim();
+    if !is_official_deepseek_account(account) {
+        if let Some(template) = codex_protocol::deepseek_model_template(model) {
+            return Some(template);
+        }
+    }
+    if !model.is_empty() && account.api_wire_api.as_deref() == Some("anthropic") {
+        let mut catalog = codex_protocol::build_codex_client_models_response(&[model.to_string()]);
+        let mut template = catalog["models"].as_array_mut()?.pop()?;
+        crate::modules::codex_native_api::anthropic::customize_model_template(model, &mut template);
+        return Some(template);
+    }
     if model.is_empty() || !is_official_deepseek_account(account) {
         return None;
     }

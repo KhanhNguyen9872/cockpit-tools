@@ -80,9 +80,9 @@ function harness(overrides: Props = {}) {
       };
       if (name === '../../hooks/useEscClose') return { useEscClose() {} };
       if (name === '../../services/modelProviderUsageService') return {
-        listModelProviderModels: () => {
+        listModelProviderModels: (input: any) => {
           calls.fetched += 1;
-          return overrides.fetch?.() ?? Promise.resolve({ models: [{ id: 'new-model' }] });
+          return overrides.fetch?.(input) ?? Promise.resolve({ models: [{ id: 'new-model' }] });
         },
       };
       if (name === '../../services/codexService') return {
@@ -280,3 +280,18 @@ test('omitting disabled retains model editing and catalog refresh behavior', asy
   assert.equal(app.calls.saved, 1);
   assert.equal(app.calls.refreshed, 1);
 });
+
+for (const authScheme of ['bearer', 'x-api-key'] as const) {
+  test(`routing model discovery uses the account Anthropic ${authScheme} configuration`, async () => {
+    let request: any;
+    const app = harness({ fetch(input: any) { request = input; return Promise.resolve({ models: [{ id: 'claude-model' }] }); } });
+    const tree = app.component('CodexModelRoutingEditor', {
+      accounts: [{ ...account, api_wire_api: 'anthropic', api_auth_scheme: authScheme }],
+    }).render();
+    button(tree, 'instances.form.modelRouting.fetchModels').props.onClick();
+    await flush();
+    assert.equal(request.wireApi, 'anthropic');
+    assert.equal(request.authScheme, authScheme);
+    assert.equal(app.calls.saved, 1);
+  });
+}
